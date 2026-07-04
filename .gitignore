@@ -19,8 +19,13 @@ xcuserdata/
 *.xcscmblueprint
 
 # IDEs / editors.
+.kiro/
 .vscode/
 .idea/
+
+# Local AI agent instructions.
+AGENTS.md
+CLAUDE.md
 
 # Logs.
 *.log
