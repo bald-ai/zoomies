@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "zoomies_swift",
+    name: "zoomies",
     platforms: [
         .macOS(.v14)
     ],

@@ -20,7 +20,7 @@ Fork it, pork it, change it, rebuild it. Have fun.
 ## Quick Start
 
 ```bash
-cd zoomies_swift
+cd zoomies
 swift build
 swift run Zoomies
 ```

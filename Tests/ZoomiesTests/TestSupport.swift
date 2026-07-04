@@ -4,7 +4,7 @@ import AppKit
 enum TestSupport {
     static func makeTemporaryDirectory(function: StaticString = #function) throws -> URL {
         let base = FileManager.default.temporaryDirectory
-        let name = "zoomies_swift_tests_\(function)_\(UUID().uuidString)"
+        let name = "zoomies_tests_\(function)_\(UUID().uuidString)"
         let directory = base.appendingPathComponent(name, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
