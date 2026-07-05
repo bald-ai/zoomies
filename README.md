@@ -13,6 +13,7 @@ Fork it, pork it, change it, rebuild it. Have fun.
 
 - Captures the exact UI state you want a coding agent to understand.
 - Adds quick notes/prompts to screenshots so the context travels with the image.
+- Saves Zoomies edit data inside PNGs, so future reopens can edit/delete Zoomies-added arrows, text, pen strokes, shapes, pasted selections, and cut regions.
 - Creates quick scratchpad notes for errors, issues, and ideas you spot in one project while your head is still in another.
 - Lets you rename, annotate, save, copy, or delete without breaking coding flow.
 - Reopens a selected Finder image and sends it back through the Zoomies flow.
@@ -56,6 +57,19 @@ The defaults intentionally avoid the standard macOS `Cmd+Shift` screenshot short
 | Edit | `Enter` | Save |
 | Edit | `Cmd+Enter` | Copy + save |
 | Edit | `Esc` | Cancel |
+
+## Editor Select Tool
+
+Press `S` in the editor to use Select.
+
+Select now has two jobs:
+
+- Click a Zoomies-added object, like text, arrow, pen stroke, rectangle, ellipse, pasted image, or cut/erase region, to select it.
+- Drag the selected object to move it, or press `Delete` to remove it.
+- Drag on empty screenshot space to select a rectangular image region.
+- With a region selected, use `Cmd+C` to copy it, `Cmd+X` to cut it, and `Cmd+V` to paste it back into the canvas.
+
+Editable objects are remembered only for PNGs saved by this version of Zoomies or later. Older already-flattened screenshots still open as normal images because their arrows/text are already baked into the pixels.
 
 ## Permissions
 
