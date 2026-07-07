@@ -105,10 +105,15 @@ if [[ -f "${SCREENSHOT_SOUND}" ]]; then
   cp "${SCREENSHOT_SOUND}" "${APP_RESOURCES}/"
 fi
 
-ICON_SRC="${REPO_ROOT}/dist/Zoomies.icns"
-if [[ -f "${ICON_SRC}" ]]; then
-  cp "${ICON_SRC}" "${APP_RESOURCES}/AppIcon.icns"
+ICON_SRC="${REPO_ROOT}/Sources/Resources/Zoomies.icns"
+if [[ ! -f "${ICON_SRC}" ]]; then
+  ICON_SRC="${REPO_ROOT}/dist/Zoomies.icns"
 fi
+if [[ ! -f "${ICON_SRC}" ]]; then
+  echo "Error: app icon not found at Sources/Resources/Zoomies.icns or dist/Zoomies.icns" >&2
+  exit 1
+fi
+cp "${ICON_SRC}" "${APP_RESOURCES}/AppIcon.icns"
 
 cat > "${APP_CONTENTS}/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
