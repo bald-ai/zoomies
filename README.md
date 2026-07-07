@@ -37,6 +37,10 @@ This repo is source-only. If you want a clickable `.app`, ask any coding agent t
 
 The defaults intentionally avoid the standard macOS `Cmd+Shift` screenshot shortcuts.
 
+You can change the main global shortcuts in Zoomies Settings. If you want to
+change keybinds that are not exposed in the UI, ask your coding agent to update
+the relevant shortcut code and build a new `.app` for you.
+
 ## Workflow Keybinds
 
 | Screen | Key | Action |

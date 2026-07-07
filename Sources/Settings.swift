@@ -18,6 +18,9 @@ struct Settings: Codable {
     /// Global shortcut configuration.
     var shortcuts: Shortcuts
 
+    /// Whether shortcuts were explicitly changed by the user in Settings.
+    var shortcutsCustomized: Bool
+
     /// Global screenshot counter for filename generation.
     var screenshotCounter: Int
 }
@@ -30,6 +33,7 @@ extension Settings {
         notePrefix: "",
         filenameTemplate: .defaultTemplate,
         shortcuts: .default,
+        shortcutsCustomized: false,
         screenshotCounter: 1
     )
 
@@ -48,13 +52,46 @@ extension Settings {
         // Ensure screenshot counter is always >= 1.
         copy.screenshotCounter = max(1, screenshotCounter)
 
-        // Move older shipped defaults to the current product-intended defaults.
-        copy.shortcuts.replaceRetiredDefaultShortcutsIfNeeded()
+        // Move older shipped defaults to current defaults, unless the user has
+        // explicitly changed shortcuts in Settings.
+        if !copy.shortcutsCustomized {
+            copy.shortcuts.replaceRetiredDefaultShortcutsIfNeeded()
+        }
 
         // Enforce filename template invariants.
         copy.filenameTemplate.ensureTimeOrCounterEnabled()
 
         return copy
+    }
+}
+
+extension Settings {
+    private enum CodingKeys: String, CodingKey {
+        case maxWidth
+        case notePrefixEnabled
+        case notePrefix
+        case filenameTemplate
+        case shortcuts
+        case shortcutsCustomized
+        case screenshotCounter
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.maxWidth = try container.decodeIfPresent(Int.self, forKey: .maxWidth)
+            ?? Settings.default.maxWidth
+        self.notePrefixEnabled = try container.decodeIfPresent(Bool.self, forKey: .notePrefixEnabled)
+            ?? Settings.default.notePrefixEnabled
+        self.notePrefix = try container.decodeIfPresent(String.self, forKey: .notePrefix)
+            ?? Settings.default.notePrefix
+        self.filenameTemplate = try container.decodeIfPresent(FilenameTemplate.self, forKey: .filenameTemplate)
+            ?? Settings.default.filenameTemplate
+        self.shortcuts = try container.decodeIfPresent(Shortcuts.self, forKey: .shortcuts)
+            ?? Settings.default.shortcuts
+        self.shortcutsCustomized = try container.decodeIfPresent(Bool.self, forKey: .shortcutsCustomized)
+            ?? false
+        self.screenshotCounter = try container.decodeIfPresent(Int.self, forKey: .screenshotCounter)
+            ?? Settings.default.screenshotCounter
     }
 }
 
@@ -123,6 +160,18 @@ extension Shortcuts {
             keyCode: UInt32(kVK_ANSI_2),
             modifierFlags: UInt32(controlKey | shiftKey)
         )
+        let retiredCommandShiftArea = Shortcut(
+            keyCode: UInt32(kVK_ANSI_4),
+            modifierFlags: UInt32(cmdKey | shiftKey)
+        )
+        let retiredCommandShiftFull = Shortcut(
+            keyCode: UInt32(kVK_ANSI_3),
+            modifierFlags: UInt32(cmdKey | shiftKey)
+        )
+        let retiredCommandShiftReopenFinderSelection = Shortcut(
+            keyCode: UInt32(kVK_ANSI_2),
+            modifierFlags: UInt32(cmdKey | shiftKey)
+        )
         let retiredOpenScratchpad = Shortcut(
             keyCode: UInt32(kVK_ANSI_5),
             modifierFlags: UInt32(cmdKey | shiftKey)
@@ -132,13 +181,14 @@ extension Shortcuts {
             modifierFlags: UInt32(controlKey | shiftKey)
         )
 
-        if screenshotArea == retiredArea {
+        if screenshotArea == retiredArea || screenshotArea == retiredCommandShiftArea {
             screenshotArea = Shortcuts.default.screenshotArea
         }
-        if screenshotFull == retiredFull {
+        if screenshotFull == retiredFull || screenshotFull == retiredCommandShiftFull {
             screenshotFull = Shortcuts.default.screenshotFull
         }
-        if reopenFinderSelection == retiredReopenFinderSelection {
+        if reopenFinderSelection == retiredReopenFinderSelection
+            || reopenFinderSelection == retiredCommandShiftReopenFinderSelection {
             reopenFinderSelection = Shortcuts.default.reopenFinderSelection
         }
         if openScratchpad == retiredOpenScratchpad {

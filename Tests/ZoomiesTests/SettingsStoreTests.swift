@@ -33,6 +33,11 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.settings.maxWidth, 0)
         XCTAssertEqual(store.settings.screenshotCounter, 1)
         XCTAssertEqual(store.settings.notePrefix.count, 50)
+
+        let persisted = try JSONDecoder().decode(Settings.self, from: Data(contentsOf: fileURL))
+        XCTAssertEqual(persisted.maxWidth, 0)
+        XCTAssertEqual(persisted.screenshotCounter, 1)
+        XCTAssertEqual(persisted.notePrefix.count, 50)
     }
 
     func testLoadCorruptFileFallsBackToDefaultsWithoutOverwrite() throws {

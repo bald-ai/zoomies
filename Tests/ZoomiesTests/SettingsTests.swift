@@ -160,6 +160,39 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.normalized().shortcuts, Shortcuts.default)
     }
 
+    func testNormalizedMigratesRetiredCommandShiftDefaultsWhenNotCustomized() {
+        var settings = Settings.default
+        settings.shortcuts = Shortcuts(
+            screenshotArea: Shortcut(keyCode: UInt32(kVK_ANSI_4),
+                                      modifierFlags: UInt32(cmdKey | shiftKey)),
+            screenshotFull: Shortcut(keyCode: UInt32(kVK_ANSI_3),
+                                      modifierFlags: UInt32(cmdKey | shiftKey)),
+            reopenFinderSelection: Shortcut(keyCode: UInt32(kVK_ANSI_2),
+                                             modifierFlags: UInt32(cmdKey | shiftKey)),
+            openScratchpad: Shortcuts.default.openScratchpad
+        )
+
+        XCTAssertEqual(settings.normalized().shortcuts, Shortcuts.default)
+    }
+
+    func testNormalizedPreservesRetiredLookingShortcutsWhenCustomized() {
+        var settings = Settings.default
+        let customized = Shortcuts(
+            screenshotArea: Shortcut(keyCode: UInt32(kVK_ANSI_4),
+                                      modifierFlags: UInt32(cmdKey | shiftKey)),
+            screenshotFull: Shortcut(keyCode: UInt32(kVK_ANSI_3),
+                                      modifierFlags: UInt32(cmdKey | shiftKey)),
+            reopenFinderSelection: Shortcut(keyCode: UInt32(kVK_ANSI_2),
+                                             modifierFlags: UInt32(cmdKey | shiftKey)),
+            openScratchpad: Shortcut(keyCode: UInt32(kVK_ANSI_5),
+                                     modifierFlags: UInt32(cmdKey | shiftKey))
+        )
+        settings.shortcuts = customized
+        settings.shortcutsCustomized = true
+
+        XCTAssertEqual(settings.normalized().shortcuts, customized)
+    }
+
     func testNormalizedMigratesTemporaryControlShiftNScratchpadShortcut() {
         var settings = Settings.default
         settings.shortcuts.openScratchpad = Shortcut(
@@ -185,5 +218,27 @@ final class SettingsTests: XCTestCase {
 
         XCTAssertEqual(decoded.openScratchpad, shortcuts.openScratchpad)
         XCTAssertEqual(decoded, shortcuts)
+    }
+
+    func testDecodeLegacySettingsDefaultsShortcutsCustomizedToFalse() throws {
+        let legacy = """
+        {
+          "maxWidth": 0,
+          "notePrefixEnabled": false,
+          "notePrefix": "",
+          "filenameTemplate": { "blocks": [] },
+          "shortcuts": {
+            "screenshotArea": { "keyCode": 21, "modifierFlags": 768 },
+            "screenshotFull": { "keyCode": 20, "modifierFlags": 768 },
+            "reopenFinderSelection": { "keyCode": 19, "modifierFlags": 768 },
+            "openScratchpad": { "keyCode": 23, "modifierFlags": 2560 }
+          },
+          "screenshotCounter": 1
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(Settings.self, from: legacy)
+
+        XCTAssertFalse(decoded.shortcutsCustomized)
     }
 }

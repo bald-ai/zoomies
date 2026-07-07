@@ -39,10 +39,16 @@ final class SettingsStore {
             let decoder = JSONDecoder()
             let decoded = try decoder.decode(Settings.self, from: data)
             settings = decoded.normalized()
+            do {
+                try persist(settings)
+            } catch {
+                AppLog.event("settings normalization persist failed: \(error.localizedDescription)")
+            }
         } catch {
             // Fall back to defaults but do not overwrite the possibly-bad file.
             // This mirrors many macOS apps' behavior.
             settings = .default
+            AppLog.event("settings load failed: \(error.localizedDescription)")
         }
     }
 
@@ -51,6 +57,7 @@ final class SettingsStore {
         do {
             try persist(settings)
         } catch {
+            AppLog.event("settings save failed: \(error.localizedDescription)")
         }
     }
 

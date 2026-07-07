@@ -379,6 +379,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
         settingsStore.update { settings in
             settings.shortcuts = shortcuts
+            settings.shortcutsCustomized = true
         }
 
         // Re-apply in case normalization changed anything, then update hotkeys.
