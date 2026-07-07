@@ -6,13 +6,35 @@ final class SettingsStoreTests: XCTestCase {
         let root = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(root) }
 
-        let fileURL = root.appendingPathComponent(".screenshot_app_settings.json")
+        let fileURL = root.appendingPathComponent("settings.json")
         let store = SettingsStore(fileManager: .default, fileURL: fileURL)
 
         store.load()
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
         XCTAssertEqual(store.settings.maxWidth, Settings.default.maxWidth)
+    }
+
+    func testLoadMigratesLegacySettingsBeforeCreatingDefaults() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("Application Support/Zoomies/settings.json")
+        let legacyFileURL = root.appendingPathComponent(".screenshot_app_settings.json")
+        var legacySettings = Settings.default
+        legacySettings.screenshotCounter = 42
+        legacySettings.notePrefixEnabled = true
+        legacySettings.notePrefix = "TODO"
+        let data = try JSONEncoder().encode(legacySettings)
+        try data.write(to: legacyFileURL, options: .atomic)
+
+        let store = SettingsStore(fileManager: .default, fileURL: fileURL, legacyFileURL: legacyFileURL)
+        store.load()
+
+        XCTAssertEqual(store.settings.screenshotCounter, 42)
+        XCTAssertEqual(store.settings.notePrefix, "TODO")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacyFileURL.path))
     }
 
     func testLoadValidFileNormalizesDecodedSettings() throws {

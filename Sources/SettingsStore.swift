@@ -2,22 +2,31 @@ import Foundation
 
 /// Simple in-memory settings store backed by a JSON file on disk.
 ///
-/// The file is located at `~/.screenshot_app_settings.json` to remain
-/// compatible with the existing app's configuration.
+/// New settings live at `~/Library/Application Support/Zoomies/settings.json`.
+/// On first launch after upgrading, the old `~/.screenshot_app_settings.json`
+/// file is read and copied to the new location.
 final class SettingsStore {
     private(set) var settings: Settings
 
     private let fileURL: URL
+    private let legacyFileURL: URL?
     private let fileManager: FileManager
 
-    init(fileManager: FileManager = .default, fileURL: URL? = nil) {
+    init(fileManager: FileManager = .default, fileURL: URL? = nil, legacyFileURL: URL? = nil) {
         self.fileManager = fileManager
 
         if let fileURL {
             self.fileURL = fileURL
+            self.legacyFileURL = legacyFileURL
         } else {
             let home = fileManager.homeDirectoryForCurrentUser
-            self.fileURL = home.appendingPathComponent(".screenshot_app_settings.json", isDirectory: false)
+            self.fileURL = home
+                .appendingPathComponent("Library", isDirectory: true)
+                .appendingPathComponent("Application Support", isDirectory: true)
+                .appendingPathComponent("Zoomies", isDirectory: true)
+                .appendingPathComponent("settings.json", isDirectory: false)
+            self.legacyFileURL = legacyFileURL
+                ?? home.appendingPathComponent(".screenshot_app_settings.json", isDirectory: false)
         }
 
         self.settings = .default
@@ -28,21 +37,32 @@ final class SettingsStore {
     /// On any decoding error, the file is ignored and defaults are used.
     func load() {
         do {
-            guard fileManager.fileExists(atPath: fileURL.path) else {
-                // First launch – write out defaults so future loads succeed.
-                settings = .default
-                try persist(settings)
+            if fileManager.fileExists(atPath: fileURL.path) {
+                settings = try loadSettings(from: fileURL).normalized()
+                do {
+                    try persist(settings)
+                } catch {
+                    AppLog.event("settings normalization persist failed: \(error.localizedDescription)")
+                }
                 return
             }
 
-            let data = try Data(contentsOf: fileURL)
-            let decoder = JSONDecoder()
-            let decoded = try decoder.decode(Settings.self, from: data)
-            settings = decoded.normalized()
+            if let legacyFileURL, fileManager.fileExists(atPath: legacyFileURL.path) {
+                settings = try loadSettings(from: legacyFileURL).normalized()
+                do {
+                    try persist(settings)
+                } catch {
+                    AppLog.event("settings migration persist failed: \(error.localizedDescription)")
+                }
+                return
+            }
+
+            // First launch – write out defaults so future loads succeed.
             do {
+                settings = .default
                 try persist(settings)
             } catch {
-                AppLog.event("settings normalization persist failed: \(error.localizedDescription)")
+                AppLog.event("settings defaults persist failed: \(error.localizedDescription)")
             }
         } catch {
             // Fall back to defaults but do not overwrite the possibly-bad file.
@@ -69,6 +89,12 @@ final class SettingsStore {
     }
 
     // MARK: - Private
+
+    private func loadSettings(from url: URL) throws -> Settings {
+        let data = try Data(contentsOf: url)
+        let decoder = JSONDecoder()
+        return try decoder.decode(Settings.self, from: data)
+    }
 
     private func persist(_ settings: Settings) throws {
         let encoder = JSONEncoder()

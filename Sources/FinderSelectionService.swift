@@ -13,12 +13,8 @@ enum FinderSelectionService {
 
     /// Returns Finder selection state (none / multiple / single file URL).
     static func selection(scriptRunner: (String) throws -> String = runAppleScriptReturningString) throws -> Selection {
-        // Finder's `selection` is documented as "the selection in the frontmost Finder window".
-        // Key detail: Desktop icon selection can still be returned by `get selection`, but
-        // `count of selection` may misleadingly be 0. So we must NOT gate on `count`.
-        //
-        // We attempt to read `item 1 of (get selection)` directly. If it fails, we retry
-        // once after bringing Finder frontmost.
+        // Finder can report no selection when it is not frontmost, especially for
+        // Desktop icons. Try once passively, then bring Finder forward and retry.
         let scriptNoBringToFront = """
         tell application "Finder"
             try

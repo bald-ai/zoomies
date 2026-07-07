@@ -1,7 +1,7 @@
 import Foundation
 import Carbon
 
-/// Top-level settings model persisted to ~/.screenshot_app_settings.json
+/// Top-level settings model persisted by `SettingsStore`.
 struct Settings: Codable {
     /// Maximum width in pixels (0 = original size).
     var maxWidth: Int

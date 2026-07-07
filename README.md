@@ -26,7 +26,14 @@ swift build
 swift run Zoomies
 ```
 
-This repo is source-only. If you want a clickable `.app`, ask any coding agent to package the SwiftPM project into a macOS app bundle for you.
+To build a clickable `.app`:
+
+```bash
+./scripts/build_app.sh
+open dist/Zoomies.app
+```
+
+A coding agent can run that build script for you too.
 
 ## Default Shortcuts
 

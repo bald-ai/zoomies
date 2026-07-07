@@ -15,8 +15,12 @@ let package = Package(
         .executableTarget(
             name: "Zoomies",
             path: "Sources",
+            exclude: [
+                "Resources/.keep",
+                "Resources/Zoomies.icns"
+            ],
             resources: [
-                .process("Resources")
+                .process("Resources/screenshot-sound.mp3")
             ]
         ),
         .testTarget(

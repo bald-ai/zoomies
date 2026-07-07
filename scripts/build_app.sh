@@ -29,6 +29,27 @@ Options:
 EOF
 }
 
+validate_output_app() {
+  if [[ "${OUTPUT_APP}" != *.app ]]; then
+    echo "Error: output path must end in .app: ${OUTPUT_APP}" >&2
+    exit 1
+  fi
+
+  local app_name
+  app_name="$(basename "${OUTPUT_APP}")"
+  if [[ "${app_name}" == ".app" || "${app_name}" == "..app" ]]; then
+    echo "Error: output path must name an app bundle." >&2
+    exit 1
+  fi
+
+  local output_parent
+  output_parent="$(dirname "${OUTPUT_APP}")"
+  if [[ "${output_parent}" == "/" ]]; then
+    echo "Error: refusing to create an app bundle directly under /." >&2
+    exit 1
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version)
@@ -67,6 +88,7 @@ if [[ -z "${VERSION}" || -z "${BUILD_NUMBER}" || -z "${BUNDLE_ID}" || -z "${OUTP
   echo "Error: version, build-number, bundle-id, and output must be non-empty." >&2
   exit 1
 fi
+validate_output_app
 
 echo "Building ${PRODUCT_NAME} in release mode..."
 (
@@ -99,18 +121,11 @@ mkdir -p "${APP_MACOS}" "${APP_RESOURCES}"
 cp "${EXECUTABLE_PATH}" "${APP_MACOS}/${PRODUCT_NAME}"
 strip -S -x "${APP_MACOS}/${PRODUCT_NAME}"
 cp -R "${RESOURCE_BUNDLE}" "${APP_RESOURCES}/"
-
-SCREENSHOT_SOUND="${RESOURCE_BUNDLE}/screenshot-sound.mp3"
-if [[ -f "${SCREENSHOT_SOUND}" ]]; then
-  cp "${SCREENSHOT_SOUND}" "${APP_RESOURCES}/"
-fi
+rm -f "${APP_RESOURCES}/$(basename "${RESOURCE_BUNDLE}")/Zoomies.icns"
 
 ICON_SRC="${REPO_ROOT}/Sources/Resources/Zoomies.icns"
 if [[ ! -f "${ICON_SRC}" ]]; then
-  ICON_SRC="${REPO_ROOT}/dist/Zoomies.icns"
-fi
-if [[ ! -f "${ICON_SRC}" ]]; then
-  echo "Error: app icon not found at Sources/Resources/Zoomies.icns or dist/Zoomies.icns" >&2
+  echo "Error: app icon not found at Sources/Resources/Zoomies.icns" >&2
   exit 1
 fi
 cp "${ICON_SRC}" "${APP_RESOURCES}/AppIcon.icns"
@@ -126,7 +141,7 @@ cat > "${APP_CONTENTS}/Info.plist" <<EOF
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
-  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSUIElement</key><true/>
   <key>NSAppleEventsUsageDescription</key>

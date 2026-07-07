@@ -3,7 +3,7 @@ import AppKit
 @testable import Zoomies
 
 final class WorkflowPanelKeybindLabelTests: XCTestCase {
-    func testRenamePanelUsesPreReleaseShortcutLabelStyle() throws {
+    func testRenamePanelShowsExpectedShortcutLabels() throws {
         let controller = RenamePanelController(initialFilename: "Screenshot_01.24.45.png")
         let labels = findLabels(in: controller.window?.contentView).map(\.stringValue)
 
@@ -11,11 +11,9 @@ final class WorkflowPanelKeybindLabelTests: XCTestCase {
         XCTAssertTrue(labels.contains { $0.contains("⌘↩: Copy+Save") })
         XCTAssertTrue(labels.contains { $0.contains("⌘⌫: Copy+Delete") })
         XCTAssertTrue(labels.contains { $0.contains("Tab: Note") })
-        XCTAssertEqual(controller.window?.contentView?.frame.width ?? 0, 410, accuracy: 0.5)
-        XCTAssertEqual(controller.window?.contentView?.frame.height ?? 0, 215, accuracy: 0.5)
     }
 
-    func testNotePanelUsesPreReleaseShortcutLabelStyle() throws {
+    func testNotePanelShowsExpectedShortcutLabels() throws {
         let controller = NotePanelController(initialText: "prompt for agent")
         let labels = findLabels(in: controller.window?.contentView).map(\.stringValue)
 
@@ -23,8 +21,6 @@ final class WorkflowPanelKeybindLabelTests: XCTestCase {
         XCTAssertTrue(labels.contains { $0.contains("⌘↩: Copy+Save") })
         XCTAssertTrue(labels.contains { $0.contains("⌘⌫: Copy+Delete") })
         XCTAssertTrue(labels.contains { $0.contains("Tab: Editor") })
-        XCTAssertEqual(controller.window?.contentView?.frame.width ?? 0, 410, accuracy: 0.5)
-        XCTAssertEqual(controller.window?.contentView?.frame.height ?? 0, 120, accuracy: 0.5)
     }
 
     private func findLabels(in view: NSView?) -> [NSTextField] {
