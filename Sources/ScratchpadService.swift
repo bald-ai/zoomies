@@ -21,27 +21,19 @@ final class ScratchpadService {
     }
 
     func open() {
-        AppLog.event("ScratchpadService.open requested")
         DispatchQueue.main.async { [weak self] in
-            AppLog.event("ScratchpadService.open deferred")
             self?.openOnMain()
         }
     }
 
     private func openOnMain() {
-        AppLog.event("ScratchpadService.openOnMain renameOpen=\(renamePanelController != nil) noteOpen=\(notePanelController != nil)")
-
         if let notePanelController {
-            AppLog.windowState("scratchpad note existing before show", window: notePanelController.window)
             notePanelController.show()
-            AppLog.windowState("scratchpad note existing after show", window: notePanelController.window)
             return
         }
 
         if let renamePanelController {
-            AppLog.windowState("scratchpad rename existing before show", window: renamePanelController.window)
             renamePanelController.show()
-            AppLog.windowState("scratchpad rename existing after show", window: renamePanelController.window)
             return
         }
 
@@ -53,7 +45,6 @@ final class ScratchpadService {
     // MARK: - Rename
 
     private func presentRenamePanel() {
-        AppLog.event("ScratchpadService presenting filename baseName=\(currentBaseName)")
         let controller = RenamePanelController(
             initialFilename: currentBaseName + ".md",
             escapeKeyDeletesFile: false,
@@ -62,13 +53,10 @@ final class ScratchpadService {
         controller.onAction = { [weak self] action in self?.handleRenameAction(action) }
         renamePanelController = controller
         centerOnActiveScreen(controller.window)
-        AppLog.windowState("scratchpad rename before show", window: controller.window)
         controller.show()
-        AppLog.windowState("scratchpad rename after show", window: controller.window)
     }
 
     private func handleRenameAction(_ action: RenamePanelAction) {
-        AppLog.event("ScratchpadService rename action=\(action.logLabel)")
         switch action {
         case .save(let newName):
             saveAndClose(text: cachedText, newName: newName, copy: false)
@@ -89,7 +77,6 @@ final class ScratchpadService {
     // MARK: - Note
 
     private func presentNotePanel() {
-        AppLog.event("ScratchpadService presenting note textLength=\(cachedText.count)")
         let controller = NotePanelController(
             initialText: cachedText,
             escapeKeyDeletesFile: false,
@@ -99,13 +86,10 @@ final class ScratchpadService {
         controller.onAction = { [weak self] action in self?.handleNoteAction(action) }
         notePanelController = controller
         centerOnActiveScreen(controller.window)
-        AppLog.windowState("scratchpad note before show", window: controller.window)
         controller.show()
-        AppLog.windowState("scratchpad note after show", window: controller.window)
     }
 
     private func handleNoteAction(_ action: NotePanelAction) {
-        AppLog.event("ScratchpadService note action=\(action.logLabel)")
         switch action {
         case .save(let text):
             saveAndClose(text: text, newName: currentBaseName, copy: false)
@@ -127,7 +111,6 @@ final class ScratchpadService {
 
     private func saveAndClose(text: String, newName: String, copy: Bool) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            AppLog.event("ScratchpadService save blocked: empty text copy=\(copy)")
             NSSound.beep()
             return
         }
@@ -135,19 +118,16 @@ final class ScratchpadService {
         currentBaseName = ScratchpadFilenameLogic.resolveBaseName(userInput: newName, fallback: currentBaseName)
         do {
             let url = try noteWriter.write(text: text, baseName: currentBaseName)
-            AppLog.event("ScratchpadService saved note url=\(url.path) copy=\(copy)")
             if copy {
                 clipboardService.copyFile(at: url, useCache: false)
             }
             closeFlow()
         } catch {
-            AppLog.event("ScratchpadService save failed error=\(error.localizedDescription)")
             AlertPresenter.presentWarning(title: "Couldn't save note", message: error.localizedDescription)
         }
     }
 
     private func closeFlow() {
-        AppLog.event("ScratchpadService closeFlow")
         renamePanelController?.close()
         notePanelController?.close()
         renamePanelController = nil
@@ -195,45 +175,5 @@ struct ScratchpadNoteWriter {
         )
         try text.write(to: url, atomically: true, encoding: .utf8)
         return url
-    }
-}
-
-private extension RenamePanelAction {
-    var logLabel: String {
-        switch self {
-        case .save(let newName):
-            return "save name=\(newName)"
-        case .copyAndSave(let newName):
-            return "copyAndSave name=\(newName)"
-        case .copyAndDelete(let newName):
-            return "copyAndDelete name=\(newName)"
-        case .delete:
-            return "delete"
-        case .close:
-            return "close"
-        case .goToNote(let newName):
-            return "goToNote name=\(newName)"
-        }
-    }
-}
-
-private extension NotePanelAction {
-    var logLabel: String {
-        switch self {
-        case .save(let text):
-            return "save length=\(text.count)"
-        case .copyAndSave(let text):
-            return "copyAndSave length=\(text.count)"
-        case .copyAndDelete(let text):
-            return "copyAndDelete length=\(text.count)"
-        case .delete:
-            return "delete"
-        case .close:
-            return "close"
-        case .backToRename(let text):
-            return "backToRename length=\(text.count)"
-        case .goToEditor(let text):
-            return "goToEditor length=\(text.count)"
-        }
     }
 }

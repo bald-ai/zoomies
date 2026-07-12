@@ -39,46 +39,29 @@ final class SettingsStore {
         do {
             if fileManager.fileExists(atPath: fileURL.path) {
                 settings = try loadSettings(from: fileURL).normalized()
-                do {
-                    try persist(settings)
-                } catch {
-                    AppLog.event("settings normalization persist failed: \(error.localizedDescription)")
-                }
+                try? persist(settings)
                 return
             }
 
             if let legacyFileURL, fileManager.fileExists(atPath: legacyFileURL.path) {
                 settings = try loadSettings(from: legacyFileURL).normalized()
-                do {
-                    try persist(settings)
-                } catch {
-                    AppLog.event("settings migration persist failed: \(error.localizedDescription)")
-                }
+                try? persist(settings)
                 return
             }
 
             // First launch – write out defaults so future loads succeed.
-            do {
-                settings = .default
-                try persist(settings)
-            } catch {
-                AppLog.event("settings defaults persist failed: \(error.localizedDescription)")
-            }
+            settings = .default
+            try? persist(settings)
         } catch {
             // Fall back to defaults but do not overwrite the possibly-bad file.
             // This mirrors many macOS apps' behavior.
             settings = .default
-            AppLog.event("settings load failed: \(error.localizedDescription)")
         }
     }
 
     /// Saves the current settings to disk.
     private func save() {
-        do {
-            try persist(settings)
-        } catch {
-            AppLog.event("settings save failed: \(error.localizedDescription)")
-        }
+        try? persist(settings)
     }
 
     /// Applies a mutation to settings and persists the result.

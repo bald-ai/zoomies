@@ -26,10 +26,14 @@ final class EditorWindowController: NSWindowController {
     private let notePreviewRaw: String?
     private let targetScreen: NSScreen?
     private var notePreviewContainer: NSView?
-    // Toolbar Cancel (X) should mirror the Escape behavior:
+    // Toolbar Cancel (X) and the red window close button mirror Escape:
     // - For editor sessions that own the temp file: delete on cancel.
     // - For Finder-selected originals: close without deleting.
     private let escapeFinalActionCommand: EditorCanvasView.FinalActionCommand
+
+    private var escapeFinalAction: FinalAction {
+        escapeFinalActionCommand == .closeOnly ? .closeOnly : .deleteOnly
+    }
 
     private var toolButtons: [EditorTool: NSButton] = [:]
     private var colorPickerButtons: [NSButton] = []
@@ -107,7 +111,11 @@ final class EditorWindowController: NSWindowController {
          escapeKeyDeletesFile: Bool = true,
          initialState: EditorCanvasState? = nil) {
         let escapeFinal: EditorCanvasView.FinalActionCommand = escapeKeyDeletesFile ? .deleteOnly : .closeOnly
-        self.canvasView = EditorCanvasView(image: image, escapeFinalAction: escapeFinal, initialState: initialState)
+        // A pending composite already contains the current annotations. When
+        // editable state is available, restore its clean base image instead and
+        // redraw the annotations exactly once.
+        let canvasImage = initialState.flatMap { NSImage(data: $0.baseImagePNG) } ?? image
+        self.canvasView = EditorCanvasView(image: canvasImage, escapeFinalAction: escapeFinal, initialState: initialState)
         self.settingsStore = settingsStore
         self.notePreviewRaw = notePreview
         self.targetScreen = targetScreen
@@ -606,12 +614,7 @@ final class EditorWindowController: NSWindowController {
     }
 
     @objc private func deletePressed() {
-        // Match the Escape key behavior (configured per editor session).
-        if escapeFinalActionCommand == .closeOnly {
-            finish(with: .closeOnly)
-        } else {
-            finish(with: .deleteOnly)
-        }
+        finish(with: escapeFinalAction)
     }
 
     // MARK: - Key commands from canvas
@@ -862,7 +865,7 @@ extension EditorWindowController: NSWindowDelegate {
         let image = canvasView.compositeImage()
         let state = canvasView.editableState()
         didSendCompletion = true
-        completion(image, .saveOnly, state)
+        completion(image, escapeFinalAction, state)
     }
 
     func windowDidResize(_ notification: Notification) {

@@ -21,7 +21,6 @@ final class TrayService {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         configureStatusItem()
         menu = makeMenu()
-        AppLog.event("TrayService initialized statusButtonExists=\(statusItem.button != nil) menuItems=\(menu?.items.map { $0.title }.joined(separator: ", ") ?? "nil")")
     }
 
     private func configureStatusItem() {
@@ -59,9 +58,7 @@ final class TrayService {
     // MARK: - Actions
 
     @objc private func statusItemClicked(_ sender: Any?) {
-        AppLog.event("statusItemClicked eventType=\(String(describing: NSApp.currentEvent?.type.rawValue))")
         guard let event = NSApp.currentEvent else {
-            AppLog.event("statusItemClicked has no currentEvent; showing settings")
             onShowSettings()
             return
         }
@@ -73,23 +70,19 @@ final class TrayService {
         }
 
         if event.type == .leftMouseUp || event.type == .rightMouseUp {
-            AppLog.event("statusItemClicked showing menu")
             showMenu()
         }
     }
 
     @objc private func didSelectOpenScratchpad() {
-        AppLog.event("didSelectOpenScratchpad")
         onOpenScratchpad()
     }
 
     @objc private func didSelectSettings() {
-        AppLog.event("didSelectSettings")
         onShowSettings()
     }
 
     @objc private func didSelectQuit() {
-        AppLog.event("didSelectQuit")
         onQuit()
     }
 }

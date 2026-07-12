@@ -3,6 +3,8 @@
 _Take and copy paste screen in 2 seconds. Rename? 3 seconds. Rename + annotate with prompt for agent? 5 seconds. Quick edit? 7? maybe 10..._
 
 > **Requires macOS 14 (Sonoma) or later.** If you have an older macOS version, it is probably best to use this as a product spec and build your own. I had enough headaches with older OS versions already.
+>
+> Zoomies builds natively on both Apple silicon and Intel Macs. Intel is supported but untested because I do not have an Intel Mac.
 
 Mac-only keyboard-first screenshot and scratchpad app for agentic coding.
 Good for touchpad users too, especially if your wrist is already cooked from gaming.
@@ -17,6 +19,9 @@ Fork it, pork it, change it, rebuild it. Have fun.
 - Creates quick scratchpad notes for errors, issues, and ideas you spot in one project while your head is still in another.
 - Lets you rename, annotate, save, copy, or delete without breaking coding flow.
 - Reopens a selected Finder image and sends it back through the Zoomies flow.
+
+When you edit and save a non-PNG image such as a JPEG or HEIC, Zoomies saves the
+edited result as a PNG and removes the original non-PNG file.
 
 ## Quick Start
 
@@ -34,6 +39,26 @@ open dist/Zoomies.app
 ```
 
 A coding agent can run that build script for you too.
+
+### Building on an Intel Mac
+
+Intel users should build Zoomies from source on their Intel Mac:
+
+```bash
+git clone https://github.com/bald-ai/zoomies.git
+cd zoomies
+./scripts/build_app.sh
+open dist/Zoomies.app
+```
+
+Swift automatically builds for the Mac it is running on: Apple silicon produces
+an `arm64` app, while Intel produces an `x86_64` app. A universal binary is only
+needed when distributing one prebuilt `.app` for both architectures; this
+repository distributes source instead.
+
+Intel support requires an Intel Mac running macOS 14 or later with Xcode 15 or
+later. **I do not own an Intel Mac, so the Intel build has not been personally
+tested.**
 
 ## Default Shortcuts
 
@@ -79,8 +104,20 @@ Select now has two jobs:
 - Drag the selected object to move it, or press `Delete` to remove it.
 - Drag on empty screenshot space to select a rectangular image region.
 - With a region selected, use `Cmd+C` to copy it, `Cmd+X` to cut it, and `Cmd+V` to paste it back into the canvas.
+- Switching to another tool clears the rectangular area selection.
+
+Select does not change the contents or shape of an existing annotation. To edit
+existing text, press `T` for the Text tool and double-click the text. Arrows,
+pen strokes, rectangles, and ellipses can be moved or deleted, but not reshaped.
 
 Editable objects are remembered only for PNGs saved by this version of Zoomies or later. Older already-flattened screenshots still open as normal images because their arrows/text are already baked into the pixels.
+
+## Temporary Clipboard Files
+
+`Copy + Delete` needs a temporary file so macOS can still paste the screenshot
+after Zoomies removes it from the Desktop. Zoomies stores that temporary copy in
+`~/Library/Caches/zoomies/clipboard` and clears the folder the next time Zoomies
+starts.
 
 ## Permissions
 
@@ -88,6 +125,16 @@ The app uses `ScreenCaptureKit` (`SCScreenshotManager`) for all screen capture. 
 
 - **Screen Recording** (for screenshots via ScreenCaptureKit)
 - **Automation / Finder** (for reopening flow on selected Finder image via `Option+Shift+2`)
+
+### Permission after rebuilding the app
+
+If you edit the code and build a new copy of Zoomies, macOS may ask for
+permission again even though Zoomies still appears to be allowed in System
+Settings. The listed permission can belong to the previous app build.
+
+Open **System Settings → Privacy & Security**, select the relevant permission,
+use the **−** button to remove the old Zoomies entry, then use the **+** button
+to add and allow the newly built `Zoomies.app`.
 
 ## TODO
 

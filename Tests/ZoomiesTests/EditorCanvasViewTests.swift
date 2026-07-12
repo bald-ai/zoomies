@@ -56,6 +56,21 @@ final class EditorCanvasViewTests: XCTestCase {
                                        keyCode: keyCode))
     }
 
+    private func mouseEvent(type: NSEvent.EventType,
+                            canvas: EditorCanvasView,
+                            location: NSPoint,
+                            clickCount: Int = 1) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.mouseEvent(with: type,
+                                        location: canvas.convert(location, to: nil),
+                                        modifierFlags: [],
+                                        timestamp: 0,
+                                        windowNumber: 0,
+                                        context: nil,
+                                        eventNumber: 0,
+                                        clickCount: clickCount,
+                                        pressure: 0))
+    }
+
     // Core of the fix: passing through the editor must not change pixel dimensions
     // (it used to double them on Retina via NSImage.lockFocus).
     func testCompositeImagePreservesNativeResolution() throws {
@@ -84,23 +99,68 @@ final class EditorCanvasViewTests: XCTestCase {
     }
 
     func testSelectionToolDeletesExistingArrowObject() throws {
-        let (image, _) = quadrantImage(width: 100, height: 80)
         let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
-        let state = EditorCanvasState(
-            baseImagePNG: basePNG,
-            items: [
-                .arrow(start: .init(NSPoint(x: 30, y: 30)),
-                       end: .init(NSPoint(x: 70, y: 30)),
-                       color: .init(.systemRed),
-                       lineWidth: 4)
-            ]
-        )
-        let canvas = EditorCanvasView(image: image, initialState: state)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .arrow(start: .init(NSPoint(x: 30, y: 30)), end: .init(NSPoint(x: 70, y: 30)),
+                   color: .init(.systemRed), lineWidth: 4)
+        ])
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80),
+                                      initialState: state)
         canvas.setTool(.selection)
-
-        XCTAssertTrue(canvas.selectEditableItem(at: NSPoint(x: 50, y: 30)))
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas,
+                                              location: NSPoint(x: 50, y: 30)))
         canvas.keyDown(with: try keyEvent(keyCode: 51))
 
         XCTAssertEqual(canvas.editableState()?.items.count, 0)
+    }
+
+    func testTextToolDoubleClickOpensExistingTextForEditing() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .text(.init(text: "Editable text",
+                        origin: .init(NSPoint(x: 30, y: 30)),
+                        color: .init(.systemRed),
+                        fontSize: 20))
+        ])
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80),
+                                      initialState: state)
+        canvas.setTool(.text)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown,
+                                              canvas: canvas,
+                                              location: NSPoint(x: 40, y: 40),
+                                              clickCount: 2))
+
+        XCTAssertTrue(canvas.subviews.contains { $0 is NSTextView })
+    }
+
+    func testEditableStateKeepsAnnotationsAnchoredToBaseImageAfterRecentering() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .arrow(start: .init(NSPoint(x: 30, y: 30)), end: .init(NSPoint(x: 70, y: 30)),
+                   color: .init(.systemRed), lineWidth: 4)
+        ])
+        let canvas = EditorCanvasView(image: try XCTUnwrap(NSImage(data: basePNG)), initialState: state)
+
+        canvas.ensureDrawableAreaCoversVisibleSize(NSSize(width: 200, height: 160))
+        let restoredState = try XCTUnwrap(canvas.editableState())
+        let restoredCanvas = EditorCanvasView(image: try XCTUnwrap(NSImage(data: restoredState.baseImagePNG)),
+                                              initialState: restoredState)
+
+        XCTAssertTrue(restoredCanvas.selectEditableItem(at: NSPoint(x: 50, y: 30)))
+    }
+
+    func testSwitchingAwayFromSelectionClearsSelectedArea() throws {
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80))
+        canvas.setTool(.selection)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas,
+                                              location: NSPoint(x: 30, y: 30)))
+        canvas.mouseUp(with: try mouseEvent(type: .leftMouseUp, canvas: canvas,
+                                            location: NSPoint(x: 60, y: 50)))
+
+        XCTAssertNotNil(canvas.selectedRegionPayload())
+
+        canvas.setTool(.pen)
+
+        XCTAssertNil(canvas.selectedRegionPayload())
     }
 }

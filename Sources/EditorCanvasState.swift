@@ -160,7 +160,14 @@ struct EditorCanvasState: Codable {
         }
     }
 
-    var version: Int = 1
+    var version: Int = 2
     var baseImagePNG: Data
+    /// Canvas position of the base image when the items were serialized.
+    ///
+    /// Annotation coordinates are measured in the canvas, not in the image.
+    /// The editor may recenter the canvas when it is reopened, so restoring this
+    /// origin lets it preserve each item's position relative to the image.
+    /// `nil` keeps states written by version 1 compatible.
+    var baseImageOrigin: Point? = nil
     var items: [Item]
 }

@@ -147,6 +147,11 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         super.init(frame: frame)
         if let initialState {
             self.items = initialState.items.compactMap(Item.init(stateItem:))
+            if let savedBaseImageOrigin = initialState.baseImageOrigin?.nsPoint {
+                self.items = shiftedItems(self.items,
+                                          byX: baseImageOrigin.x - savedBaseImageOrigin.x,
+                                          byY: baseImageOrigin.y - savedBaseImageOrigin.y)
+            }
             updateCanvasSizeIfNeeded()
         }
     }
@@ -186,8 +191,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             endTextEditingIfNeeded()
         }
         if tool != .selection {
-            selectionDragStart = nil
-            selectionDragCurrent = nil
+            clearSelectionState()
             selectedImageIndex = nil
             selectedItemIndex = nil
             draggingItemIndex = nil
@@ -268,7 +272,9 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     func editableState() -> EditorCanvasState? {
         endTextEditingIfNeeded()
         guard let basePNG = ScreenshotServiceCoreLogic.pngData(from: baseImage) else { return nil }
-        return EditorCanvasState(baseImagePNG: basePNG, items: items.compactMap { $0.stateItem })
+        return EditorCanvasState(baseImagePNG: basePNG,
+                                 baseImageOrigin: EditorCanvasState.Point(baseImageOrigin),
+                                 items: items.compactMap { $0.stateItem })
     }
 
     @discardableResult
@@ -1004,10 +1010,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
                 draggingImageIndex = index
                 imageDragOffset = NSPoint(x: point.x - rect.origin.x, y: point.y - rect.origin.y)
                 didPushUndoForImageDrag = false
-                selectionRect = nil
-                selectionDragStart = nil
-                selectionDragCurrent = nil
-                isCutSelectionPreview = false
+                clearSelectionState()
                 needsDisplay = true
                 return
             }
@@ -1032,6 +1035,10 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         }
 
         if currentTool == .text {
+            // Finishing a new, empty text item can remove it from `items`.
+            // Commit before hit testing so the index we pass to the editor is
+            // always derived from the current collection.
+            endTextEditingIfNeeded()
             let clickCount = event.clickCount
 
             if let (index, rect) = hitTestText(at: point) {
@@ -1041,10 +1048,8 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
                 lastItemDragPoint = nil
                 didPushUndoForItemDrag = false
                 if clickCount >= 2 {
-                    endTextEditingIfNeeded()
                     beginEditingText(at: index, pushUndoOnEnd: true, isNewItem: false)
                 } else {
-                    endTextEditingIfNeeded()
                     pushUndoSnapshot()
                     draggingTextIndex = index
                     textDragOffset = NSPoint(x: point.x - rect.origin.x, y: point.y - rect.origin.y)
@@ -1057,7 +1062,6 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
                 draggingItemIndex = nil
                 lastItemDragPoint = nil
                 didPushUndoForItemDrag = false
-                endTextEditingIfNeeded()
 
                 let item = TextItem(text: "", origin: point, color: currentColor, fontSize: defaultTextFontSize)
                 pushUndoSnapshot()
@@ -1194,7 +1198,6 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             needsDisplay = true
             return
         }
-
         guard let start = dragStartPoint else { return }
         dragCurrentPoint = point
 
@@ -1273,6 +1276,13 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         return nil
     }
 
+    private func isImageItem(_ item: Item) -> Bool {
+        if case .image = item {
+            return true
+        }
+        return false
+    }
+
     private func hitTest(item: Item, at point: NSPoint) -> Bool {
         switch item {
         case .pen(let points, _, let lineWidth):
@@ -1349,17 +1359,12 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         return value >= inner * inner && value <= outer * outer
     }
 
-    private func isImageItem(_ item: Item) -> Bool {
-        if case .image = item {
-            return true
-        }
-        return false
-    }
-
     private func beginEditingText(at index: Int, pushUndoOnEnd: Bool, isNewItem: Bool) {
-        guard case let .text(item) = items[index] else { return }
-
         endTextEditingIfNeeded()
+        guard items.indices.contains(index),
+              case let .text(item) = items[index] else {
+            return
+        }
 
         let rect = textBounds(for: item)
         let editor = EditorInlineTextView(frame: rect)
@@ -1420,7 +1425,12 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
 
     private func commitTextEditing() {
         guard !isCommittingText else { return }
-        guard let index = editingTextIndex, let editor = textEditor else { return }
+        guard let index = editingTextIndex,
+              let editor = textEditor,
+              items.indices.contains(index) else {
+            removeTextEditor()
+            return
+        }
         isCommittingText = true
         defer { isCommittingText = false }
 
@@ -1455,6 +1465,11 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     private func cancelTextEditing() {
         guard let index = editingTextIndex else { return }
         isCancellingText = true
+        guard items.indices.contains(index) else {
+            removeTextEditor()
+            isCancellingText = false
+            return
+        }
         if editingWasNewItem {
             items.remove(at: index)
             selectedTextIndex = nil

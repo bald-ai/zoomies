@@ -13,9 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let screenshotSoundPlayer = ScreenshotSoundPlayer()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        AppLog.event("applicationDidFinishLaunching args=\(CommandLine.arguments.joined(separator: " ")) log=\(AppLog.fileURL.path)")
         settingsStore.load()
-        AppLog.event("settings loaded openScratchpad=\(HotKeyService.describeShortcut(keyCode: settingsStore.settings.shortcuts.openScratchpad.keyCode, carbonFlags: settingsStore.settings.shortcuts.openScratchpad.modifierFlags))")
 
         backupService = BackupService()
         clipboardService = ClipboardService()
@@ -48,7 +46,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         registerHotKeys()
         showWelcomeInfo()
-        AppLog.event("applicationDidFinishLaunching complete")
     }
 
     private func showWelcomeInfo() {
@@ -80,7 +77,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func registerHotKeys() {
         hotKeyService.onRegistrationFailures = { failures in
-            AppLog.event("hotkey registration failures=\(failures.joined(separator: ", "))")
             DispatchQueue.main.async {
                 AlertPresenter.presentWarning(
                     title: "Some shortcuts couldn't be registered",
@@ -99,7 +95,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                         fullHandler: { [weak self] in self?.triggerFullScreenshot() },
                                         reopenFinderSelectionHandler: { [weak self] in self?.triggerReopenFinderSelection() },
                                         openScratchpadHandler: { [weak self] in self?.triggerOpenScratchpad() })
-        AppLog.event("registerHotKeys complete")
     }
 
     private func triggerAreaScreenshot() {
@@ -158,18 +153,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func triggerOpenScratchpad() {
-        AppLog.event("triggerOpenScratchpad requested recording=\(settingsWindowController?.isRecordingAnyShortcut == true) screenshotBusy=\(screenshotService.isBusyForUserCommands)")
         // Menu-item actions run while NSMenu is tracking; defer opening the
         // scratchpad to the next runloop turn so the menu can dismiss first.
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            AppLog.event("triggerOpenScratchpad deferred running recording=\(self.settingsWindowController?.isRecordingAnyShortcut == true)")
             if self.settingsWindowController?.isRecordingAnyShortcut == true {
-                AppLog.event("triggerOpenScratchpad blocked: shortcut recorder is active")
                 return
             }
             self.scratchpadService.open()
-            AppLog.event("triggerOpenScratchpad called ScratchpadService.open")
         }
     }
 
