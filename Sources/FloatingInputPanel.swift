@@ -14,7 +14,9 @@ final class FloatingInputPanel: NSPanel {
         level = .statusBar
         collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .transient]
         hidesOnDeactivate = false
-        becomesKeyOnlyIfNeeded = true
+        // The workflow is keyboard-first, but clicking anywhere on a panel must
+        // restore key focus after the user switches to another window.
+        becomesKeyOnlyIfNeeded = false
         isOpaque = false
         backgroundColor = NSColor.clear
         hasShadow = true

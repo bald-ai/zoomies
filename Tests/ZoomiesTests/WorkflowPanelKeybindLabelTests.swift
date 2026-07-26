@@ -3,6 +3,14 @@ import AppKit
 @testable import Zoomies
 
 final class WorkflowPanelKeybindLabelTests: XCTestCase {
+    func testWorkflowPanelRestoresKeyFocusFromAnyClickWithoutActivatingApp() throws {
+        let controller = RenamePanelController(initialFilename: "Screenshot.png")
+        let panel = try XCTUnwrap(controller.window as? NSPanel)
+
+        XCTAssertTrue(panel.styleMask.contains(.nonactivatingPanel))
+        XCTAssertFalse(panel.becomesKeyOnlyIfNeeded)
+    }
+
     func testRenamePanelShowsExpectedShortcutLabels() throws {
         let controller = RenamePanelController(initialFilename: "Screenshot_01.24.45.png")
         let labels = findLabels(in: controller.window?.contentView).map(\.stringValue)

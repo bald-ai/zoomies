@@ -138,6 +138,7 @@ to add and allow the newly built `Zoomies.app`.
 
 ## TODO
 
+- Double-check that the post-screenshot Filename and Note panels regain focus when clicked after switching to another window.
 - Make a video demonstration?
 - Make a screen demonstration?
 - Add a donation option and create a `$1` validation flow?
