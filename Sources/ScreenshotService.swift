@@ -89,7 +89,6 @@ final class ScreenshotService: NSObject {
         }
 
         showAreaOverlay()
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func showAreaOverlay() {
@@ -124,6 +123,7 @@ final class ScreenshotService: NSObject {
         beginPostCaptureFlow(forExistingFileAt: url,
                              initialImage: nil,
                              initialFilePersistence: nil,
+                             initialScreenshotCounter: nil,
                              on: screen,
                              escapeKeyDeletesFile: escapeKeyDeletesFile)
     }
@@ -131,6 +131,7 @@ final class ScreenshotService: NSObject {
     func beginPostCaptureFlow(forExistingFileAt url: URL,
                               initialImage: NSImage? = nil,
                               initialFilePersistence: Task<URL, Error>? = nil,
+                              initialScreenshotCounter: Int? = nil,
                               on screen: NSScreen? = nil,
                               escapeKeyDeletesFile: Bool = true) {
         if !Thread.isMainThread {
@@ -138,6 +139,7 @@ final class ScreenshotService: NSObject {
                 self?.beginPostCaptureFlow(forExistingFileAt: url,
                                            initialImage: initialImage,
                                            initialFilePersistence: initialFilePersistence,
+                                           initialScreenshotCounter: initialScreenshotCounter,
                                            on: screen,
                                            escapeKeyDeletesFile: escapeKeyDeletesFile)
             }
@@ -150,6 +152,7 @@ final class ScreenshotService: NSObject {
             fileURL: url,
             initialImage: initialImage,
             initialFilePersistence: initialFilePersistence,
+            initialScreenshotCounter: initialScreenshotCounter,
             settingsStore: settingsStore,
             clipboardService: clipboardService,
             backupService: backupService,
@@ -248,6 +251,7 @@ final class ScreenshotService: NSObject {
         beginPostCaptureFlow(forExistingFileAt: preparedSave.targetURL,
                              initialImage: preparedSave.image,
                              initialFilePersistence: initialFilePersistence,
+                             initialScreenshotCounter: preparedSave.currentCounter,
                              on: screenForDisplayID(displayID))
         soundPlayer.playCaptureSound()
     }
@@ -355,7 +359,8 @@ final class ScreenshotService: NSObject {
 
         let date = Date()
         let currentCounter = settings.screenshotCounter
-        let baseName = settings.filenameTemplate.makeFilename(date: date, counter: currentCounter)
+        let rawBaseName = settings.filenameTemplate.makeFilename(date: date, counter: currentCounter)
+        let baseName = WorkflowFilenameLogic.sanitizeBaseName(rawBaseName)
 
         try fileManager.createDirectory(at: desktopDirectory, withIntermediateDirectories: true)
         let targetURL = uniqueScreenshotURL(in: desktopDirectory, baseName: baseName)

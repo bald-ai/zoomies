@@ -11,6 +11,17 @@ final class WorkflowPanelKeybindLabelTests: XCTestCase {
         XCTAssertFalse(panel.becomesKeyOnlyIfNeeded)
     }
 
+    func testSelectionOverlayUsesNonactivatingKeyPanel() {
+        let panel = SelectionOverlayWindow.makeOverlayWindow(screen: nil)
+
+        XCTAssertTrue(panel.styleMask.contains(.nonactivatingPanel))
+        XCTAssertTrue(panel.isFloatingPanel)
+        XCTAssertFalse(panel.becomesKeyOnlyIfNeeded)
+        XCTAssertFalse(panel.hidesOnDeactivate)
+        XCTAssertTrue(panel.canBecomeKey)
+        XCTAssertFalse(panel.canBecomeMain)
+    }
+
     func testRenamePanelShowsExpectedShortcutLabels() throws {
         let controller = RenamePanelController(initialFilename: "Screenshot_01.24.45.png")
         let labels = findLabels(in: controller.window?.contentView).map(\.stringValue)

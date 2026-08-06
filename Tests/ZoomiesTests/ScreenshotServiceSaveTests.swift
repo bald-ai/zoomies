@@ -63,6 +63,52 @@ final class ScreenshotServiceSaveTests: XCTestCase {
         XCTAssertTrue(PNGMetadata.isPNG(savedData), "Saved capture should be a real PNG")
     }
 
+    func testSaveImageToDesktopSanitizesTemplatePathSeparators() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let desktop = root.appendingPathComponent("Desktop", isDirectory: true)
+        let settingsStore = SettingsStore(
+            fileManager: .default,
+            fileURL: root.appendingPathComponent("settings.json")
+        )
+        settingsStore.load()
+        settingsStore.update { settings in
+            settings.screenshotCounter = 1
+            settings.filenameTemplate = FilenameTemplate(blocks: [
+                .init(kind: .staticText, isEnabled: true, text: "UI/UX"),
+                .init(kind: .counter, isEnabled: true)
+            ])
+        }
+
+        let service = ScreenshotService(
+            settingsStore: settingsStore,
+            backupService: BackupService(
+                fileManager: .default,
+                backupsDirectory: root.appendingPathComponent("backups")
+            ),
+            clipboardService: ClipboardService(
+                fileManager: .default,
+                cacheDirectory: root.appendingPathComponent("clipboard")
+            ),
+            fileManager: .default,
+            desktopDirectory: desktop,
+            soundPlayer: NoopSoundPlayer()
+        )
+
+        let output = try service.saveImageToDesktop(
+            TestSupport.solidImage(width: 100, height: 50)
+        )
+
+        XCTAssertEqual(output.deletingLastPathComponent(), desktop)
+        XCTAssertEqual(output.lastPathComponent, "UIUX_1.png")
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: desktop.appendingPathComponent("UI", isDirectory: true).path
+            )
+        )
+    }
+
     func testSaveImageToDesktopUsesSuffixWhenBaseNameExists() throws {
         let root = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(root) }

@@ -103,6 +103,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     private var textEditor: EditorInlineTextView?
     private var draggingTextIndex: Int?
     private var textDragOffset: NSPoint = .zero
+    private var didPushUndoForTextDrag = false
     private var shouldPushUndoOnTextEnd = false
     private var selectedTextIndex: Int?
     private var editingOriginalText: String?
@@ -188,6 +189,8 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         currentTool = tool
         if tool != .text {
             selectedTextIndex = nil
+            draggingTextIndex = nil
+            didPushUndoForTextDrag = false
             endTextEditingIfNeeded()
         }
         if tool != .selection {
@@ -231,6 +234,8 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         items = previous
         updateCanvasSizeIfNeeded()
         selectedTextIndex = nil
+        draggingTextIndex = nil
+        didPushUndoForTextDrag = false
         selectedImageIndex = nil
         selectedItemIndex = nil
         draggingItemIndex = nil
@@ -250,6 +255,8 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         pushUndoSnapshot()
         items.removeAll()
         selectedTextIndex = nil
+        draggingTextIndex = nil
+        didPushUndoForTextDrag = false
         selectedImageIndex = nil
         selectedItemIndex = nil
         draggingItemIndex = nil
@@ -1050,8 +1057,8 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
                 if clickCount >= 2 {
                     beginEditingText(at: index, pushUndoOnEnd: true, isNewItem: false)
                 } else {
-                    pushUndoSnapshot()
                     draggingTextIndex = index
+                    didPushUndoForTextDrag = false
                     textDragOffset = NSPoint(x: point.x - rect.origin.x, y: point.y - rect.origin.y)
                 }
                 needsDisplay = true
@@ -1130,6 +1137,11 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         if let index = draggingTextIndex {
             if case var .text(item) = items[index] {
                 let newOrigin = NSPoint(x: point.x - textDragOffset.x, y: point.y - textDragOffset.y)
+                guard newOrigin != item.origin else { return }
+                if !didPushUndoForTextDrag {
+                    pushUndoSnapshot()
+                    didPushUndoForTextDrag = true
+                }
                 item.origin = newOrigin
                 items[index] = .text(item)
                 needsDisplay = true
@@ -1194,6 +1206,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
 
         if draggingTextIndex != nil {
             draggingTextIndex = nil
+            didPushUndoForTextDrag = false
             updateCanvasSizeIfNeeded()
             needsDisplay = true
             return
@@ -1446,13 +1459,11 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
                 items[index] = .text(item)
             }
         } else if case var .text(item) = items[index] {
-            let colorChanged = item.color != currentColor
             let textChanged = item.text != updatedText
-            if shouldPushUndoOnTextEnd && (textChanged || colorChanged) {
+            if shouldPushUndoOnTextEnd && textChanged {
                 pushUndoSnapshot()
             }
             item.text = updatedText
-            item.color = currentColor
             items[index] = .text(item)
             selectedTextIndex = index
         }
@@ -1580,41 +1591,22 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             }
         }
 
-        if !flags.contains(.command) && !flags.contains(.control) {
-            if !flags.contains(.shift), let chars = event.characters {
-                if chars == "k" || chars == "q" {
-                    if isColorPickerOpen { return }
-                    onKeyCommand?(.toggleColorPicker)
-                    return
-                }
-            }
+        if !flags.contains(.command)
+            && !flags.contains(.control)
+            && !flags.contains(.shift)
+            && Self.colorPickerToggleKeyCodes.contains(event.keyCode) {
+            if isColorPickerOpen { return }
+            onKeyCommand?(.toggleColorPicker)
+            return
         }
 
-        if !flags.contains(.command) && !flags.contains(.control) && !flags.contains(.option) && !flags.contains(.shift) {
-            if let chars = event.characters {
-                switch chars {
-                case "w":
-                    onKeyCommand?(.selectTool(.pen))
-                    return
-                case "a":
-                    onKeyCommand?(.selectTool(.arrow))
-                    return
-                case "r":
-                    onKeyCommand?(.selectTool(.rectangle))
-                    return
-                case "e":
-                    onKeyCommand?(.selectTool(.ellipse))
-                    return
-                case "t":
-                    onKeyCommand?(.selectTool(.text))
-                    return
-                case "s":
-                    onKeyCommand?(.selectTool(.selection))
-                    return
-                default:
-                    break
-                }
-            }
+        if !flags.contains(.command)
+            && !flags.contains(.control)
+            && !flags.contains(.option)
+            && !flags.contains(.shift),
+           let tool = Self.toolKeyCodeToTool[event.keyCode] {
+            onKeyCommand?(.selectTool(tool))
+            return
         }
 
         if flags.contains(.option) && event.keyCode == 51 {
@@ -1766,6 +1758,20 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         UInt16(kVK_ANSI_Keypad4): 3,
         UInt16(kVK_ANSI_Keypad5): 4,
         UInt16(kVK_ANSI_Keypad6): 5
+    ]
+
+    private static let colorPickerToggleKeyCodes: Set<UInt16> = [
+        UInt16(kVK_ANSI_K),
+        UInt16(kVK_ANSI_Q)
+    ]
+
+    private static let toolKeyCodeToTool: [UInt16: EditorTool] = [
+        UInt16(kVK_ANSI_W): .pen,
+        UInt16(kVK_ANSI_A): .arrow,
+        UInt16(kVK_ANSI_R): .rectangle,
+        UInt16(kVK_ANSI_E): .ellipse,
+        UInt16(kVK_ANSI_T): .text,
+        UInt16(kVK_ANSI_S): .selection
     ]
 }
 

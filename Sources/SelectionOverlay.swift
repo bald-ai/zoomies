@@ -85,11 +85,7 @@ final class SelectionOverlay: NSObject {
             return window
         }
 
-        let overlayWindow = SelectionOverlayWindow(contentRect: .zero,
-                                                   styleMask: [.borderless],
-                                                   backing: .buffered,
-                                                   defer: false,
-                                                   screen: screen)
+        let overlayWindow = SelectionOverlayWindow.makeOverlayWindow(screen: screen)
         overlayWindow.isOpaque = false
         overlayWindow.backgroundColor = .clear
         overlayWindow.level = .screenSaver
@@ -148,9 +144,23 @@ final class SelectionOverlay: NSObject {
     }
 }
 
-private final class SelectionOverlayWindow: NSWindow {
+final class SelectionOverlayWindow: NSPanel {
+    static func makeOverlayWindow(screen: NSScreen?) -> SelectionOverlayWindow {
+        let window = SelectionOverlayWindow(
+            contentRect: .zero,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false,
+            screen: screen
+        )
+        window.isFloatingPanel = true
+        window.becomesKeyOnlyIfNeeded = false
+        window.hidesOnDeactivate = false
+        return window
+    }
+
     override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
+    override var canBecomeMain: Bool { false }
 }
 
 private final class SelectionOverlayView: NSView {

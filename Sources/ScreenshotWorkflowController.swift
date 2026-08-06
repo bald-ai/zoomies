@@ -6,6 +6,9 @@ import AppKit
 ///
 /// One instance exists per screenshot and is owned by `ScreenshotService`.
 final class ScreenshotWorkflowController {
+    typealias ImageDataWriter = (_ data: Data, _ outputURL: URL, _ originalURL: URL) throws -> URL
+    typealias ErrorPresenter = (_ title: String, _ message: String) -> Void
+
     enum FinalAction {
         case saveOnly
         case copyAndSave
@@ -18,11 +21,14 @@ final class ScreenshotWorkflowController {
     private var initialImage: NSImage?
     private var initialFilePersistence: Task<URL, Error>?
     private var initialFileReadyURL: URL?
+    private let initialScreenshotCounter: Int?
     private let settingsStore: SettingsStore
     private let clipboardService: ClipboardService
     private let backupService: BackupService
     private let sourceScreen: NSScreen?
     private let escapeKeyDeletesFile: Bool
+    private let imageDataWriter: ImageDataWriter
+    private let errorPresenter: ErrorPresenter
 
     /// The clean (pre-note) original used to round-trip prompt edits when a saved
     /// PNG is reopened. For a fresh capture this is the in-memory image; for a
@@ -41,6 +47,8 @@ final class ScreenshotWorkflowController {
     private var burnedNoteText: String = ""
     private var hasCreatedBackup = false
     private var backupOriginalURL: URL?
+    private var isFinalActionInProgress = false
+    private var hasFinished = false
 
     /// Optional callback invoked once the workflow has fully completed.
     var onFinish: (() -> Void)?
@@ -48,18 +56,32 @@ final class ScreenshotWorkflowController {
     init(fileURL: URL,
          initialImage: NSImage? = nil,
          initialFilePersistence: Task<URL, Error>? = nil,
+         initialScreenshotCounter: Int? = nil,
          settingsStore: SettingsStore,
          clipboardService: ClipboardService,
          backupService: BackupService,
          sourceScreen: NSScreen?,
-         escapeKeyDeletesFile: Bool) {
+         escapeKeyDeletesFile: Bool,
+         imageDataWriter: @escaping ImageDataWriter = { data, outputURL, originalURL in
+             try WorkflowImagePersistenceLogic.writeEncodedImageData(
+                 data,
+                 to: outputURL,
+                 originalURL: originalURL
+             )
+         },
+         errorPresenter: @escaping ErrorPresenter = { title, message in
+             AlertPresenter.presentWarning(title: title, message: message)
+         }) {
         self.fileURL = fileURL
         self.initialFilePersistence = initialFilePersistence
+        self.initialScreenshotCounter = initialScreenshotCounter
         self.settingsStore = settingsStore
         self.clipboardService = clipboardService
         self.backupService = backupService
         self.sourceScreen = sourceScreen
         self.escapeKeyDeletesFile = escapeKeyDeletesFile
+        self.imageDataWriter = imageDataWriter
+        self.errorPresenter = errorPresenter
 
         let reopen = Self.resolveReopenMetadata(fileURL: fileURL, initialImage: initialImage)
         self.cleanOriginalPNG = reopen.cleanOriginalPNG
@@ -114,6 +136,9 @@ final class ScreenshotWorkflowController {
     }
 
     func cancel() {
+        guard !hasFinished else { return }
+        hasFinished = true
+        isFinalActionInProgress = false
         // Close any open panels
         renameController?.close()
         noteController?.close()
@@ -177,6 +202,8 @@ final class ScreenshotWorkflowController {
     // MARK: - Rename handling
 
     func handleRenameAction(_ action: RenamePanelAction) {
+        guard !hasFinished, !isFinalActionInProgress else { return }
+
         // Carry any text typed in the Note panel across a Shift+Tab return to Rename,
         // so saving from Rename still burns the pending note onto the screenshot.
         let carriedNote = pendingNoteText.isEmpty ? nil : pendingNoteText
@@ -222,14 +249,18 @@ final class ScreenshotWorkflowController {
             return true
         }
 
-        if WorkflowFilenameLogic.isSameFilename(trimmed, as: fileURL) {
+        let sanitizedFullName = sanitizeFilename(trimmed, preservingExtensionOf: fileURL)
+        if sanitizedFullName == fileURL.lastPathComponent {
             return true
         }
 
-        let sanitizedFullName = sanitizeFilename(trimmed, preservingExtensionOf: fileURL)
-        let targetURL = uniqueURL(forProposedName: sanitizedFullName, in: fileURL.deletingLastPathComponent())
+        let directory = fileURL.deletingLastPathComponent()
+        let requestedURL = directory.appendingPathComponent(sanitizedFullName)
+        let targetURL = urlsReferToSameFile(fileURL, requestedURL)
+            ? requestedURL
+            : uniqueURL(forProposedName: sanitizedFullName, in: directory)
 
-        if isWaitingForInitialFilePersistence {
+        if isWaitingForInitialFilePersistence || hasUnpersistedInitialCapture {
             fileURL = targetURL
             return true
         }
@@ -256,9 +287,29 @@ final class ScreenshotWorkflowController {
         )
     }
 
+    private func urlsReferToSameFile(_ first: URL, _ second: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: second.path),
+              let firstIdentifier = fileIdentifier(for: first),
+              let secondIdentifier = fileIdentifier(for: second) else {
+            return false
+        }
+        return firstIdentifier.isEqual(secondIdentifier)
+    }
+
+    private func fileIdentifier(for url: URL) -> NSObject? {
+        guard let values = try? url.resourceValues(
+            forKeys: [.fileResourceIdentifierKey]
+        ) else {
+            return nil
+        }
+        return values.fileResourceIdentifier as? NSObject
+    }
+
     // MARK: - Note handling
 
     func handleNoteAction(_ action: NotePanelAction) {
+        guard !hasFinished, !isFinalActionInProgress else { return }
+
         switch action {
         case .save(let text):
             complete(action: .saveOnly, note: text)
@@ -356,18 +407,35 @@ final class ScreenshotWorkflowController {
     }
 
     func handleEditorCompletion(editedImage: NSImage?, action: FinalAction, editorState: EditorCanvasState? = nil) {
+        guard !hasFinished, !isFinalActionInProgress else { return }
+
+        pendingEditedImage = editedImage
+        pendingEditorState = editorState
+        let shouldReopenEditorOnFailure = editorController != nil
+
         if action != .closeOnly && isWaitingForInitialFilePersistence {
+            isFinalActionInProgress = true
             waitForInitialFilePersistence { [weak self] ready in
-                guard let self, ready else { return }
+                guard let self else { return }
+                self.isFinalActionInProgress = false
+                guard ready else {
+                    self.reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
+                    return
+                }
                 self.handleEditorCompletion(editedImage: editedImage, action: action, editorState: editorState)
             }
             return
         }
 
+        isFinalActionInProgress = true
+        guard retryInitialCapturePersistenceIfNeeded() else {
+            isFinalActionInProgress = false
+            reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
+            return
+        }
+
         editorController?.dismissWithoutCompletion()
         editorController = nil
-        pendingEditedImage = nil
-        pendingEditorState = nil
 
         var finalImage: NSImage?
         var baselinePNG: Data?
@@ -393,10 +461,14 @@ final class ScreenshotWorkflowController {
 
         if action == .closeOnly {
             // Cancel/close: do not write to disk; restore original if needed.
-            if restoreOriginalFromBackupIfAvailable() {
-                removeBackupIfNeeded()
+            guard restoreOriginalFromBackupIfAvailable() else {
+                isFinalActionInProgress = false
+                reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
+                return
             }
-            onFinish?()
+            removeBackupIfNeeded()
+            clearPendingEditorState()
+            finishWorkflow()
             return
         }
 
@@ -406,13 +478,22 @@ final class ScreenshotWorkflowController {
             guard saveEditedImage(finalImage,
                                   baselinePNG: baselinePNG,
                                   prompt: embedPrompt,
-                                  editorState: embedEditorState) else { return }
+                                  editorState: embedEditorState) else {
+                isFinalActionInProgress = false
+                reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
+                return
+            }
             // Workflow finished normally: remove backup if one was created.
             removeBackupIfNeeded()
         }
 
-        guard performFinalActionEffects(action, copyAndDeleteImage: finalImage) else { return }
-        onFinish?()
+        guard performFinalActionEffects(action, copyAndDeleteImage: finalImage) else {
+            isFinalActionInProgress = false
+            reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
+            return
+        }
+        clearPendingEditorState()
+        finishWorkflow()
     }
 
     private func saveEditedImage(_ image: NSImage,
@@ -456,9 +537,7 @@ final class ScreenshotWorkflowController {
         }
 
         do {
-            let finalURL = try WorkflowImagePersistenceLogic.writeEncodedImageData(encoded.data,
-                                                                                   to: encoded.outputURL,
-                                                                                   originalURL: fileURL)
+            let finalURL = try imageDataWriter(encoded.data, encoded.outputURL, fileURL)
             if finalURL != fileURL {
                 fileURL = finalURL
             }
@@ -485,6 +564,42 @@ final class ScreenshotWorkflowController {
 
     private var isWaitingForInitialFilePersistence: Bool {
         initialFileReadyURL == nil && initialFilePersistence != nil
+    }
+
+    private var hasUnpersistedInitialCapture: Bool {
+        initialFileReadyURL == nil
+            && initialFilePersistence == nil
+            && initialImage != nil
+            && initialScreenshotCounter != nil
+    }
+
+    private func retryInitialCapturePersistenceIfNeeded() -> Bool {
+        guard hasUnpersistedInitialCapture else { return true }
+        guard let initialImage,
+              let imageData = ScreenshotServiceCoreLogic.pngData(from: initialImage) else {
+            presentError(title: "Failed to save image", message: "Could not encode the screenshot.")
+            return false
+        }
+
+        do {
+            let directory = fileURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try imageData.write(to: fileURL, options: .atomic)
+            if let initialScreenshotCounter {
+                settingsStore.update { settings in
+                    settings.screenshotCounter = max(
+                        settings.screenshotCounter,
+                        initialScreenshotCounter + 1
+                    )
+                }
+            }
+            initialFileReadyURL = fileURL
+            self.initialImage = nil
+            return true
+        } catch {
+            presentError(title: "Failed to save image", message: error.localizedDescription)
+            return false
+        }
     }
 
     private func waitForInitialFilePersistence(completion: @escaping (Bool) -> Void) {
@@ -543,18 +658,29 @@ final class ScreenshotWorkflowController {
     // MARK: - Completion
 
     private func complete(action: FinalAction, note: String?) {
-        if action != .closeOnly && isWaitingForInitialFilePersistence {
+        guard !hasFinished, !isFinalActionInProgress else { return }
+
+        if action == .closeOnly {
+            closeWorkflowWithoutDeleting()
+            return
+        }
+
+        if isWaitingForInitialFilePersistence {
+            isFinalActionInProgress = true
             waitForInitialFilePersistence { [weak self] ready in
-                guard let self, ready else { return }
+                guard let self else { return }
+                self.isFinalActionInProgress = false
+                guard ready else { return }
                 self.complete(action: action, note: note)
             }
             return
         }
 
-        renameController?.close()
-        noteController?.close()
-        renameController = nil
-        noteController = nil
+        isFinalActionInProgress = true
+        guard retryInitialCapturePersistenceIfNeeded() else {
+            isFinalActionInProgress = false
+            return
+        }
 
         let pendingImage: NSImage? = {
             if let editor = editorController {
@@ -577,6 +703,7 @@ final class ScreenshotWorkflowController {
                let preparedNote = WorkflowNoteRenderer.prepareNoteText(note, settings: settingsStore.settings) {
                 guard let noted = WorkflowNoteRenderer.burn(note: preparedNote.rendered, into: finalImage) else {
                     presentError(title: "Failed to apply note", message: "Could not render the note text.")
+                    isFinalActionInProgress = false
                     return
                 }
                 finalImage = noted
@@ -593,7 +720,10 @@ final class ScreenshotWorkflowController {
         } else {
             imageToPersist = nil
             if let note {
-                guard applyNoteIfNeeded(note) else { return }
+                guard applyNoteIfNeeded(note) else {
+                    isFinalActionInProgress = false
+                    return
+                }
             }
         }
 
@@ -601,16 +731,21 @@ final class ScreenshotWorkflowController {
                                    for: action,
                                    baselinePNG: baselinePNG,
                                    prompt: embedPrompt,
-                                   editorState: embedEditorState) else { return }
-        guard performFinalActionEffects(action, copyAndDeleteImage: nil) else { return }
+                                   editorState: embedEditorState) else {
+            isFinalActionInProgress = false
+            return
+        }
+        guard performFinalActionEffects(action, copyAndDeleteImage: nil) else {
+            isFinalActionInProgress = false
+            return
+        }
         if action == .saveOnly || action == .copyAndSave {
             removeBackupIfNeeded()
         }
 
-        pendingEditedImage = nil
-        pendingEditorState = nil
-        burnedNoteText = ""
-        onFinish?()
+        closeInputControllers()
+        clearPendingEditorState()
+        finishWorkflow()
     }
 
     private func deleteFileAndBackup() {
@@ -688,7 +823,6 @@ final class ScreenshotWorkflowController {
         case .deleteOnly:
             deleteFileAndBackup()
         case .closeOnly:
-            closeWorkflowWithoutDeleting()
             return false
         }
         return true
@@ -720,26 +854,61 @@ final class ScreenshotWorkflowController {
     }
 
     private func closeWorkflowWithoutDeleting() {
+        guard !hasFinished, !isFinalActionInProgress else { return }
+        isFinalActionInProgress = true
+
         // Cancel/close semantics for "reopen" flow: close panels without deleting the file.
         // If we have a backup (note/editor touched disk), restore it first.
-        if !restoreOriginalFromBackupIfAvailable() { return }
+        if !restoreOriginalFromBackupIfAvailable() {
+            isFinalActionInProgress = false
+            return
+        }
         removeBackupIfNeeded()
 
+        closeInputControllers()
+        clearPendingEditorState()
+        finishWorkflow()
+    }
+
+    private func closeInputControllers() {
         renameController?.close()
         noteController?.close()
         editorController?.dismissWithoutCompletion()
         renameController = nil
         noteController = nil
         editorController = nil
+    }
+
+    private func clearPendingEditorState() {
         pendingEditedImage = nil
         pendingEditorState = nil
         burnedNoteText = ""
+    }
+
+    private func reopenEditorIfNeeded(afterFailure shouldReopen: Bool) {
+        guard shouldReopen else { return }
+        editorController = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  !self.hasFinished,
+                  !self.isFinalActionInProgress,
+                  self.editorController == nil else {
+                return
+            }
+            self.openEditor(withNote: self.pendingNoteText)
+        }
+    }
+
+    private func finishWorkflow() {
+        guard !hasFinished else { return }
+        hasFinished = true
+        isFinalActionInProgress = false
         onFinish?()
     }
 
     // MARK: - Errors
 
     private func presentError(title: String, message: String) {
-        AlertPresenter.presentWarning(title: title, message: message)
+        errorPresenter(title, message)
     }
 }

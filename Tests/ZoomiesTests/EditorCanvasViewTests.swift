@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import Carbon
 @testable import Zoomies
 
 final class EditorCanvasViewTests: XCTestCase {
@@ -43,15 +44,17 @@ final class EditorCanvasViewTests: XCTestCase {
         try XCTUnwrap(image.representations.compactMap { $0 as? NSBitmapImageRep }.first)
     }
 
-    private func keyEvent(keyCode: UInt16) throws -> NSEvent {
+    private func keyEvent(keyCode: UInt16,
+                          modifierFlags: NSEvent.ModifierFlags = [],
+                          characters: String = "") throws -> NSEvent {
         try XCTUnwrap(NSEvent.keyEvent(with: .keyDown,
                                        location: .zero,
-                                       modifierFlags: [],
+                                       modifierFlags: modifierFlags,
                                        timestamp: 0,
                                        windowNumber: 0,
                                        context: nil,
-                                       characters: "",
-                                       charactersIgnoringModifiers: "",
+                                       characters: characters,
+                                       charactersIgnoringModifiers: characters.lowercased(),
                                        isARepeat: false,
                                        keyCode: keyCode))
     }
@@ -131,6 +134,96 @@ final class EditorCanvasViewTests: XCTestCase {
                                               clickCount: 2))
 
         XCTAssertTrue(canvas.subviews.contains { $0 is NSTextView })
+    }
+
+    func testEditingExistingTextPreservesItsOriginalColor() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .text(.init(text: "Blue text",
+                        origin: .init(NSPoint(x: 30, y: 30)),
+                        color: .init(.systemBlue),
+                        fontSize: 20))
+        ])
+        let canvas = EditorCanvasView(
+            image: TestSupport.solidImage(width: 100, height: 80),
+            initialState: state
+        )
+        canvas.setColor(.systemRed)
+        canvas.setTool(.text)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown,
+                                              canvas: canvas,
+                                              location: NSPoint(x: 40, y: 40),
+                                              clickCount: 2))
+
+        let editor = try XCTUnwrap(canvas.subviews.compactMap { $0 as? NSTextView }.first)
+        editor.string = "Still blue"
+        editor.keyDown(with: try keyEvent(keyCode: 36, characters: "\r"))
+
+        let savedState = try XCTUnwrap(canvas.editableState())
+        guard case .text(let text) = try XCTUnwrap(savedState.items.first) else {
+            return XCTFail("Expected a text item")
+        }
+        XCTAssertEqual(text.text, "Still blue")
+        XCTAssertEqual(text.color, EditorCanvasState.Color(.systemBlue))
+    }
+
+    func testCapsLockToolShortcutUsesPhysicalKeyCode() throws {
+        let canvas = EditorCanvasView(
+            image: TestSupport.solidImage(width: 100, height: 80)
+        )
+        var selectedTool: EditorTool?
+        canvas.onKeyCommand = { command in
+            if case .selectTool(let tool) = command {
+                selectedTool = tool
+            }
+        }
+
+        canvas.keyDown(
+            with: try keyEvent(
+                keyCode: UInt16(kVK_ANSI_S),
+                modifierFlags: [.capsLock],
+                characters: "S"
+            )
+        )
+
+        XCTAssertEqual(selectedTool, .selection)
+    }
+
+    func testClickingExistingTextWithoutDraggingDoesNotConsumeUndo() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .text(.init(text: "Keep",
+                        origin: .init(NSPoint(x: 30, y: 30)),
+                        color: .init(.systemBlue),
+                        fontSize: 20)),
+            .arrow(start: .init(NSPoint(x: 30, y: 70)),
+                   end: .init(NSPoint(x: 70, y: 70)),
+                   color: .init(.systemRed),
+                   lineWidth: 4)
+        ])
+        let canvas = EditorCanvasView(
+            image: TestSupport.solidImage(width: 100, height: 80),
+            initialState: state
+        )
+
+        canvas.setTool(.selection)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown,
+                                              canvas: canvas,
+                                              location: NSPoint(x: 50, y: 70)))
+        canvas.keyDown(with: try keyEvent(keyCode: 51))
+        XCTAssertEqual(canvas.editableState()?.items.count, 1)
+
+        canvas.setTool(.text)
+        let clickPoint = NSPoint(x: 40, y: 40)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown,
+                                              canvas: canvas,
+                                              location: clickPoint))
+        canvas.mouseUp(with: try mouseEvent(type: .leftMouseUp,
+                                            canvas: canvas,
+                                            location: clickPoint))
+        canvas.undo()
+
+        XCTAssertEqual(canvas.editableState()?.items.count, 2)
     }
 
     func testEditableStateKeepsAnnotationsAnchoredToBaseImageAfterRecentering() throws {

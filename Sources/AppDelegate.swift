@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var scratchpadService: ScratchpadService!
     private var backupService: BackupService!
     private let screenshotSoundPlayer = ScreenshotSoundPlayer()
+    private var userCommandGate = UserCommandGate()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         settingsStore.load()
@@ -101,6 +102,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWindowController?.isRecordingAnyShortcut == true {
             return
         }
+        if isScratchpadBusyOrOpening {
+            return
+        }
         screenshotService.captureArea()
     }
 
@@ -108,11 +112,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWindowController?.isRecordingAnyShortcut == true {
             return
         }
+        if isScratchpadBusyOrOpening {
+            return
+        }
         screenshotService.captureFullScreen()
     }
 
     private func triggerReopenFinderSelection() {
         if settingsWindowController?.isRecordingAnyShortcut == true {
+            return
+        }
+        if isScratchpadBusyOrOpening {
             return
         }
         if screenshotService.isBusyForUserCommands {
@@ -153,15 +163,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func triggerOpenScratchpad() {
+        guard userCommandGate.beginScratchpadOpenRequest() else { return }
+
         // Menu-item actions run while NSMenu is tracking; defer opening the
         // scratchpad to the next runloop turn so the menu can dismiss first.
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
+            defer { self.userCommandGate.finishScratchpadOpenRequest() }
             if self.settingsWindowController?.isRecordingAnyShortcut == true {
+                return
+            }
+            if self.screenshotService.isBusyForUserCommands {
                 return
             }
             self.scratchpadService.open()
         }
+    }
+
+    private var isScratchpadBusyOrOpening: Bool {
+        !userCommandGate.canStartScreenshot(
+            scratchpadIsBusy: scratchpadService.isBusyForUserCommands
+        )
     }
 
     private func showSettings() {

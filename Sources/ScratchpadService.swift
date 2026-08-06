@@ -11,6 +11,10 @@ final class ScratchpadService {
     private var currentBaseName: String = ""
     private var cachedText: String = ""
 
+    var isBusyForUserCommands: Bool {
+        renamePanelController != nil || notePanelController != nil
+    }
+
     init(fileManager: FileManager = .default,
          clipboardService: ClipboardService,
          desktopDirectory: URL? = nil) {
@@ -21,8 +25,12 @@ final class ScratchpadService {
     }
 
     func open() {
-        DispatchQueue.main.async { [weak self] in
-            self?.openOnMain()
+        if Thread.isMainThread {
+            openOnMain()
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.openOnMain()
+            }
         }
     }
 

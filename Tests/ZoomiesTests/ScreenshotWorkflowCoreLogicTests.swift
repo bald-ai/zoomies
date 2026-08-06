@@ -19,6 +19,14 @@ final class ScreenshotWorkflowCoreLogicTests: XCTestCase {
         XCTAssertEqual(sanitized, "Original Name.png")
     }
 
+    func testSanitizeTemplateBaseNameCannotCreatePathComponents() {
+        XCTAssertEqual(
+            WorkflowFilenameLogic.sanitizeBaseName("  UI/UX: Review  "),
+            "UIUX Review"
+        )
+        XCTAssertEqual(WorkflowFilenameLogic.sanitizeBaseName(" /: "), "Screenshot")
+    }
+
     func testUniqueURLAddsSuffixWhenNeeded() {
         let dir = URL(fileURLWithPath: "/tmp")
         let taken = Set(["/tmp/Capture.jpg", "/tmp/Capture_2.jpg"])

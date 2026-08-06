@@ -101,7 +101,9 @@ final class FilenameTemplateEditorView: NSView, NSTableViewDataSource, NSTableVi
 
     private func updatePreview() {
         let template = settingsStore.settings.filenameTemplate
-        let exampleName = template.makeFilename(date: Date(), counter: 2)
+        let exampleName = WorkflowFilenameLogic.sanitizeBaseName(
+            template.makeFilename(date: Date(), counter: 2)
+        )
         previewLabel.stringValue = "Preview: \(exampleName).png"
     }
 

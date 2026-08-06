@@ -2,6 +2,13 @@ import Foundation
 import CoreGraphics
 
 enum WorkflowFilenameLogic {
+    static func sanitizeBaseName(_ input: String, fallback: String = "Screenshot") -> String {
+        let forbidden = CharacterSet(charactersIn: "/:")
+        let cleaned = input.components(separatedBy: forbidden).joined()
+        let normalized = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? fallback : normalized
+    }
+
     static func editableFilename(_ fullName: String) -> String {
         let ns = fullName as NSString
         let ext = ns.pathExtension
@@ -17,9 +24,10 @@ enum WorkflowFilenameLogic {
             base = String(base.dropLast(ext.count + 1))
         }
 
-        let forbidden = CharacterSet(charactersIn: "/:")
-        let cleaned = base.components(separatedBy: forbidden).joined()
-        var normalizedBase = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        var normalizedBase = sanitizeBaseName(
+            base,
+            fallback: url.deletingPathExtension().lastPathComponent
+        )
         if !ext.isEmpty, normalizedBase.lowercased().hasSuffix("." + ext.lowercased()) {
             normalizedBase = String(normalizedBase.dropLast(ext.count + 1))
         }

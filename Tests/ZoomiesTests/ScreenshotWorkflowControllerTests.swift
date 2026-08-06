@@ -308,12 +308,197 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
         XCTAssertTrue(PNGMetadata.isPNG(data))
     }
 
+    func testCopyAndDeleteIgnoresDuplicateFinalAction() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("shot.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+        let initialImage = TestSupport.solidImage(width: 80, height: 40, color: .systemBlue)
+        let delayedPersistence = Task<URL, Error> {
+            try await Task.sleep(nanoseconds: 150_000_000)
+            try TestSupport.writeSolidImagePNG(
+                to: fileURL,
+                width: 80,
+                height: 40,
+                color: .systemBlue
+            )
+            return fileURL
+        }
+        let workflow = try makeWorkflow(
+            root: root,
+            fileURL: fileURL,
+            clipboardDirectory: clipboardDirectory,
+            initialImage: initialImage,
+            initialFilePersistence: delayedPersistence,
+            initialScreenshotCounter: 1,
+            writeOriginalFile: false
+        )
+
+        let finished = expectation(description: "workflow finished exactly once")
+        var finishCount = 0
+        workflow.onFinish = {
+            finishCount += 1
+            finished.fulfill()
+        }
+
+        let action = RenamePanelAction.copyAndDelete(newName: fileURL.lastPathComponent)
+        workflow.handleRenameAction(action)
+        workflow.handleRenameAction(action)
+        wait(for: [finished], timeout: 2.0)
+
+        XCTAssertEqual(finishCount, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        let cachedFiles = try FileManager.default.contentsOfDirectory(
+            at: clipboardDirectory,
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertEqual(cachedFiles.count, 1)
+    }
+
+    func testEditorSaveFailureCanBeRetriedWithoutFinishingWorkflow() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("shot.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+        var writeCount = 0
+        let errorShown = expectation(description: "save error shown")
+        let workflow = try makeWorkflow(
+            root: root,
+            fileURL: fileURL,
+            clipboardDirectory: clipboardDirectory,
+            imageDataWriter: { data, outputURL, originalURL in
+                writeCount += 1
+                if writeCount == 1 {
+                    throw NSError(
+                        domain: "ZoomiesTests",
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "simulated write failure"]
+                    )
+                }
+                return try WorkflowImagePersistenceLogic.writeEncodedImageData(
+                    data,
+                    to: outputURL,
+                    originalURL: originalURL
+                )
+            },
+            errorPresenter: { title, _ in
+                XCTAssertEqual(title, "Failed to save image")
+                errorShown.fulfill()
+            }
+        )
+
+        var finishCount = 0
+        let finished = expectation(description: "workflow finishes after retry")
+        workflow.onFinish = {
+            finishCount += 1
+            finished.fulfill()
+        }
+        let editedImage = TestSupport.solidImage(width: 180, height: 90, color: .systemRed)
+
+        workflow.handleEditorCompletion(editedImage: editedImage, action: .saveOnly)
+        wait(for: [errorShown], timeout: 2.0)
+        XCTAssertEqual(finishCount, 0)
+
+        workflow.handleEditorCompletion(editedImage: editedImage, action: .saveOnly)
+        wait(for: [finished], timeout: 2.0)
+
+        XCTAssertEqual(writeCount, 2)
+        XCTAssertEqual(finishCount, 1)
+        let saved = try XCTUnwrap(NSImage(contentsOf: fileURL))
+        XCTAssertEqual(saved.size.width, 180, accuracy: 1.0)
+        XCTAssertEqual(saved.size.height, 90, accuracy: 1.0)
+    }
+
+    func testFailedInitialCapturePersistenceCanBeRetriedFromSameWorkflow() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("pending-shot.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+        let initialImage = TestSupport.solidImage(width: 80, height: 40, color: .systemBlue)
+        let failedPersistence = Task<URL, Error> {
+            throw NSError(
+                domain: "ZoomiesTests",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "simulated initial save failure"]
+            )
+        }
+        let errorShown = expectation(description: "initial save error shown")
+        let workflow = try makeWorkflow(
+            root: root,
+            fileURL: fileURL,
+            clipboardDirectory: clipboardDirectory,
+            initialImage: initialImage,
+            initialFilePersistence: failedPersistence,
+            initialScreenshotCounter: 5,
+            writeOriginalFile: false,
+            errorPresenter: { title, _ in
+                XCTAssertEqual(title, "Failed to save image")
+                errorShown.fulfill()
+            }
+        )
+
+        let finished = expectation(description: "workflow finishes after retry")
+        workflow.onFinish = { finished.fulfill() }
+
+        workflow.handleRenameAction(.save(newName: fileURL.lastPathComponent))
+        wait(for: [errorShown], timeout: 2.0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+
+        workflow.handleRenameAction(.save(newName: fileURL.lastPathComponent))
+        wait(for: [finished], timeout: 2.0)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+        let reloadedSettings = SettingsStore(
+            fileManager: .default,
+            fileURL: root.appendingPathComponent("settings.json")
+        )
+        reloadedSettings.load()
+        XCTAssertEqual(reloadedSettings.settings.screenshotCounter, 6)
+    }
+
+    func testCaseOnlyRenamePreservesRequestedCapitalizationWithoutSuffix() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("shot.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+        let workflow = try makeWorkflow(
+            root: root,
+            fileURL: fileURL,
+            clipboardDirectory: clipboardDirectory
+        )
+        let finished = expectation(description: "workflow finished")
+        workflow.onFinish = { finished.fulfill() }
+
+        workflow.handleRenameAction(.save(newName: "SHOT"))
+        wait(for: [finished], timeout: 2.0)
+
+        let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        XCTAssertTrue(names.contains("SHOT.png"))
+        XCTAssertFalse(names.contains("SHOT_2.png"))
+    }
+
     private func makeWorkflow(root: URL,
                               fileURL: URL,
                               clipboardDirectory: URL,
                               initialImage: NSImage? = nil,
                               initialFilePersistence: Task<URL, Error>? = nil,
-                              writeOriginalFile: Bool = true) throws -> ScreenshotWorkflowController {
+                              initialScreenshotCounter: Int? = nil,
+                              writeOriginalFile: Bool = true,
+                              imageDataWriter: @escaping ScreenshotWorkflowController.ImageDataWriter = {
+                                  data, outputURL, originalURL in
+                                  try WorkflowImagePersistenceLogic.writeEncodedImageData(
+                                      data,
+                                      to: outputURL,
+                                      originalURL: originalURL
+                                  )
+                              },
+                              errorPresenter: @escaping ScreenshotWorkflowController.ErrorPresenter = {
+                                  _, _ in
+                              }) throws -> ScreenshotWorkflowController {
         if writeOriginalFile {
             try TestSupport.writeSolidImagePNG(to: fileURL, width: 80, height: 40)
         }
@@ -333,10 +518,13 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
         return ScreenshotWorkflowController(fileURL: fileURL,
                                             initialImage: initialImage,
                                             initialFilePersistence: initialFilePersistence,
+                                            initialScreenshotCounter: initialScreenshotCounter,
                                             settingsStore: settingsStore,
                                             clipboardService: clipboardService,
                                             backupService: backupService,
                                             sourceScreen: nil,
-                                            escapeKeyDeletesFile: true)
+                                            escapeKeyDeletesFile: true,
+                                            imageDataWriter: imageDataWriter,
+                                            errorPresenter: errorPresenter)
     }
 }
