@@ -55,16 +55,9 @@ enum WorkflowNoteRenderer {
         let noteHeight = ceil(CGFloat(lines.count) * lineHeight + padding * 2)
 
         let outputSize = NSSize(width: effectiveWidth, height: baseHeight + noteHeight)
-        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
-                                         pixelsWide: Int(effectiveWidth),
-                                         pixelsHigh: Int(baseHeight + noteHeight),
-                                         bitsPerSample: 8,
-                                         samplesPerPixel: 4,
-                                         hasAlpha: true,
-                                         isPlanar: false,
-                                         colorSpaceName: .deviceRGB,
-                                         bytesPerRow: 0,
-                                         bitsPerPixel: 0) else {
+        guard let outputWidth = ImageSafety.pixelLength(effectiveWidth),
+              let outputHeight = ImageSafety.pixelLength(baseHeight + noteHeight),
+              let rep = ImageSafety.makeBitmapRep(pixelsWide: outputWidth, pixelsHigh: outputHeight) else {
             return nil
         }
         rep.size = outputSize

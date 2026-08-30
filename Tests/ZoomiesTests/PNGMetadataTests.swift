@@ -88,4 +88,115 @@ final class PNGMetadataTests: XCTestCase {
         XCTAssertFalse(PNGMetadata.isPNG(Data([0x00, 0x01, 0x02])))
         XCTAssertFalse(PNGMetadata.isPNG(Data()))
     }
+
+    func testPixelDimensionsReadsIHDRWithoutDecodingBitmap() throws {
+        let png = try TestSupport.solidImagePNGData(width: 40, height: 20)
+        let dimensions = try XCTUnwrap(PNGMetadata.pixelDimensions(ofPNG: png))
+        XCTAssertGreaterThan(dimensions.width, 0)
+        XCTAssertGreaterThan(dimensions.height, 0)
+        XCTAssertLessThanOrEqual(dimensions.width, Int(EditorCanvasState.SafetyLimits.runtime.maxDimension))
+        XCTAssertLessThanOrEqual(dimensions.height, Int(EditorCanvasState.SafetyLimits.runtime.maxDimension))
+    }
+
+    func testExtractEditorStateRejectsNonFiniteAndExtremeGeometry() throws {
+        let output = try TestSupport.solidImagePNGData(width: 40, height: 20)
+        let base = try TestSupport.solidImagePNGData(width: 40, height: 20)
+
+        var nanState = EditorCanvasState(
+            baseImagePNG: base,
+            items: [.arrow(start: .init(NSPoint(x: 1, y: 2)),
+                           end: .init(NSPoint(x: 3, y: 4)),
+                           color: .init(.systemRed),
+                           lineWidth: 4)]
+        )
+        nanState.items = [.arrow(start: EditorCanvasState.Point(NSPoint(x: CGFloat.nan, y: 2)),
+                                 end: .init(NSPoint(x: 3, y: 4)),
+                                 color: .init(.systemRed),
+                                 lineWidth: 4)]
+        XCTAssertFalse(nanState.isSafeToRestore())
+
+        let extreme = EditorCanvasState(
+            baseImagePNG: base,
+            items: [.arrow(start: .init(NSPoint(x: 2_000_000, y: 2)),
+                           end: .init(NSPoint(x: 3, y: 4)),
+                           color: .init(.systemRed),
+                           lineWidth: 4)]
+        )
+        let embedded = try XCTUnwrap(PNGMetadata.embed(intoPNG: output, editorState: extreme))
+        XCTAssertNil(PNGMetadata.extractEditorState(fromPNG: embedded))
+    }
+
+    func testExtractEditorStateRejectsTooManyItemsAndOversizedChunks() throws {
+        let output = try TestSupport.solidImagePNGData(width: 40, height: 20)
+        let base = try TestSupport.solidImagePNGData(width: 40, height: 20)
+        let state = EditorCanvasState(
+            baseImagePNG: base,
+            items: [
+                .erase(rect: .init(NSRect(x: 1, y: 2, width: 3, height: 4))),
+                .erase(rect: .init(NSRect(x: 5, y: 6, width: 7, height: 8)))
+            ]
+        )
+        let embedded = try XCTUnwrap(PNGMetadata.embed(intoPNG: output, editorState: state))
+
+        var itemLimits = EditorCanvasState.SafetyLimits.runtime
+        itemLimits.maxItemCount = 1
+        XCTAssertFalse(state.isSafeToRestore(limits: itemLimits))
+        XCTAssertNil(PNGMetadata.extractEditorState(fromPNG: embedded, limits: itemLimits))
+
+        var chunkLimits = EditorCanvasState.SafetyLimits.runtime
+        chunkLimits.maxEditorStateChunkBytes = 16
+        XCTAssertNil(PNGMetadata.extractEditorState(fromPNG: embedded, limits: chunkLimits))
+    }
+
+    func testExtractEditorStateRejectsOversizedEmbeddedImages() throws {
+        let output = try TestSupport.solidImagePNGData(width: 40, height: 20)
+        let base = try TestSupport.solidImagePNGData(width: 40, height: 20)
+        let state = EditorCanvasState(baseImagePNG: base, items: [])
+        let embedded = try XCTUnwrap(PNGMetadata.embed(intoPNG: output, editorState: state))
+
+        var limits = EditorCanvasState.SafetyLimits.runtime
+        limits.maxEmbeddedImageBytes = 8
+        XCTAssertFalse(state.isSafeToRestore(limits: limits))
+        XCTAssertNil(PNGMetadata.extractEditorState(fromPNG: embedded, limits: limits))
+    }
+
+    func testInvalidEditorMetadataFallsBackToFlattenedVisibleImage() throws {
+        let burned = try TestSupport.solidImagePNGData(width: 60, height: 30, color: .systemRed)
+        let original = try TestSupport.solidImagePNGData(width: 40, height: 20, color: .systemBlue)
+        let invalidState = EditorCanvasState(
+            baseImagePNG: original,
+            items: [.arrow(start: .init(NSPoint(x: 2_000_000, y: 1)),
+                           end: .init(NSPoint(x: 2, y: 3)),
+                           color: .init(.systemRed),
+                           lineWidth: 4)]
+        )
+        let embedded = try XCTUnwrap(
+            PNGMetadata.embed(intoPNG: burned, originalPNG: original, prompt: "keep me", editorState: invalidState)
+        )
+
+        XCTAssertNil(PNGMetadata.extractEditorState(fromPNG: embedded))
+        let resolved = WorkflowReopenMetadataLogic.resolve(fileData: embedded)
+        XCTAssertNil(resolved.editorState)
+        XCTAssertEqual(resolved.prompt, "keep me")
+        XCTAssertEqual(resolved.cleanOriginalPNG, original)
+        let image = try XCTUnwrap(resolved.image)
+        XCTAssertGreaterThan(image.size.width, 0)
+        XCTAssertGreaterThan(image.size.height, 0)
+    }
+
+    func testEditorCanvasIgnoresUnsafeInitialState() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let unsafe = EditorCanvasState(
+            baseImagePNG: basePNG,
+            items: [.arrow(start: .init(NSPoint(x: CGFloat.infinity, y: 30)),
+                           end: .init(NSPoint(x: 70, y: 30)),
+                           color: .init(.systemRed),
+                           lineWidth: 4)]
+        )
+        let canvas = EditorCanvasView(
+            image: TestSupport.solidImage(width: 100, height: 80),
+            initialState: unsafe
+        )
+        XCTAssertEqual(canvas.editableState()?.items.count ?? 0, 0)
+    }
 }

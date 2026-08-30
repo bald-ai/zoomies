@@ -171,3 +171,139 @@ struct EditorCanvasState: Codable {
     var baseImageOrigin: Point? = nil
     var items: [Item]
 }
+
+extension EditorCanvasState {
+    typealias SafetyLimits = ImageSafetyLimits
+
+    /// True when this state is safe to restore into the editor.
+    func isSafeToRestore(limits: SafetyLimits = .runtime) -> Bool {
+        guard ImageSafety.isSafePNG(baseImagePNG, limits: limits),
+              baseImagePNG.count <= limits.maxEmbeddedImageBytes else {
+            return false
+        }
+        if let origin = baseImageOrigin, !origin.isSafe(limits: limits) {
+            return false
+        }
+        guard items.count <= limits.maxItemCount,
+              items.allSatisfy({ $0.isSafeToRestore(limits: limits) }) else {
+            return false
+        }
+        return hasSafeEstimatedExportArea(limits: limits)
+    }
+
+    private func hasSafeEstimatedExportArea(limits: SafetyLimits) -> Bool {
+        guard let dimensions = PNGMetadata.pixelDimensions(ofPNG: baseImagePNG) else {
+            return false
+        }
+        let origin = baseImageOrigin?.nsPoint ?? .zero
+        var union = NSRect(x: origin.x,
+                           y: origin.y,
+                           width: CGFloat(dimensions.width),
+                           height: CGFloat(dimensions.height))
+        for item in items {
+            guard let bounds = item.estimatedCanvasBounds(limits: limits) else {
+                return false
+            }
+            union = union.union(bounds)
+        }
+        guard union.width.isFinite, union.height.isFinite,
+              let width = ImageSafety.pixelLength(union.width),
+              let height = ImageSafety.pixelLength(union.height) else {
+            return false
+        }
+        return ImageSafety.isSafePixelSize(width: width,
+                                           height: height,
+                                           limits: limits,
+                                           maxPixels: limits.maxExportPixelArea)
+    }
+}
+
+private extension EditorCanvasState.Point {
+    func isSafe(limits: EditorCanvasState.SafetyLimits) -> Bool {
+        x.isFinite && y.isFinite
+            && abs(x) <= limits.maxAbsoluteCoordinate
+            && abs(y) <= limits.maxAbsoluteCoordinate
+    }
+}
+
+private extension EditorCanvasState.Rect {
+    func isSafe(limits: EditorCanvasState.SafetyLimits) -> Bool {
+        x.isFinite && y.isFinite && width.isFinite && height.isFinite
+            && abs(x) <= limits.maxAbsoluteCoordinate
+            && abs(y) <= limits.maxAbsoluteCoordinate
+            && width > 0 && height > 0
+            && width <= CGFloat(limits.maxDimension)
+            && height <= CGFloat(limits.maxDimension)
+    }
+}
+
+private extension EditorCanvasState.Color {
+    var isSafe: Bool {
+        red.isFinite && green.isFinite && blue.isFinite && alpha.isFinite
+    }
+}
+
+private extension EditorCanvasState.Item {
+    func isSafeToRestore(limits: EditorCanvasState.SafetyLimits) -> Bool {
+        switch self {
+        case .pen(let points, let color, let lineWidth):
+            return points.count <= limits.maxPenPointCount
+                && points.allSatisfy { $0.isSafe(limits: limits) }
+                && color.isSafe
+                && isSafeLineWidth(lineWidth, limits: limits)
+        case .arrow(let start, let end, let color, let lineWidth):
+            return start.isSafe(limits: limits)
+                && end.isSafe(limits: limits)
+                && color.isSafe
+                && isSafeLineWidth(lineWidth, limits: limits)
+        case .rect(let rect, let color, let lineWidth),
+             .ellipse(let rect, let color, let lineWidth):
+            return rect.isSafe(limits: limits)
+                && color.isSafe
+                && isSafeLineWidth(lineWidth, limits: limits)
+        case .text(let text):
+            return text.text.count <= limits.maxTextLength
+                && text.origin.isSafe(limits: limits)
+                && text.color.isSafe
+                && text.fontSize.isFinite
+                && text.fontSize > 0
+                && text.fontSize <= limits.maxFontSize
+        case .image(let pngData, let rect):
+            return pngData.count <= limits.maxEmbeddedImageBytes
+                && ImageSafety.isSafePNG(pngData, limits: limits)
+                && rect.isSafe(limits: limits)
+        case .erase(let rect):
+            return rect.isSafe(limits: limits)
+        }
+    }
+
+    func isSafeLineWidth(_ lineWidth: CGFloat, limits: EditorCanvasState.SafetyLimits) -> Bool {
+        lineWidth.isFinite && lineWidth > 0 && lineWidth <= limits.maxLineWidth
+    }
+
+    func estimatedCanvasBounds(limits _: EditorCanvasState.SafetyLimits) -> NSRect? {
+        switch self {
+        case .pen(let points, _, let lineWidth):
+            guard let first = points.first else { return nil }
+            var union = NSRect(x: first.x, y: first.y, width: 0, height: 0)
+            for point in points {
+                union = union.union(NSRect(x: point.x, y: point.y, width: 0, height: 0))
+            }
+            return union.insetBy(dx: -lineWidth, dy: -lineWidth)
+        case .arrow(let start, let end, _, let lineWidth):
+            let union = NSRect(x: start.x, y: start.y, width: 0, height: 0)
+                .union(NSRect(x: end.x, y: end.y, width: 0, height: 0))
+            return union.insetBy(dx: -lineWidth, dy: -lineWidth)
+        case .rect(let rect, _, let lineWidth),
+             .ellipse(let rect, _, let lineWidth):
+            return rect.nsRect.insetBy(dx: -lineWidth / 2, dy: -lineWidth / 2)
+        case .text(let text):
+            let width = CGFloat(text.text.count) * text.fontSize
+            let height = text.fontSize * 1.5
+            guard width.isFinite, height.isFinite else { return nil }
+            return NSRect(x: text.origin.x, y: text.origin.y, width: max(width, 1), height: max(height, 1))
+        case .image(_, let rect), .erase(let rect):
+            return rect.nsRect
+        }
+    }
+}

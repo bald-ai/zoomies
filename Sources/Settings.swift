@@ -39,18 +39,37 @@ extension Settings {
 
     /// Returns a copy normalized to all invariants/constraints.
     func normalized() -> Settings {
+        normalizedReportingRepairs().settings
+    }
+
+    /// Normalizes settings and reports whether any semantically invalid fields
+    /// were reset. Retired-shortcut migration and filename-template invariants
+    /// are not treated as repairs.
+    func normalizedReportingRepairs() -> (settings: Settings, repairedInvalidFields: Bool) {
         var copy = self
+        var repairedInvalidFields = false
 
         // Ensure maxWidth is never negative; 0 means "Original".
-        copy.maxWidth = max(0, maxWidth)
+        if maxWidth < 0 {
+            copy.maxWidth = 0
+            repairedInvalidFields = true
+        }
 
         // Ensure note prefix length <= 50.
         if copy.notePrefix.count > 50 {
             copy.notePrefix = String(copy.notePrefix.prefix(50))
+            repairedInvalidFields = true
         }
 
         // Ensure screenshot counter is always >= 1.
-        copy.screenshotCounter = max(1, screenshotCounter)
+        if screenshotCounter < 1 {
+            copy.screenshotCounter = 1
+            repairedInvalidFields = true
+        }
+
+        copy.shortcuts = copy.shortcuts.repairingUnsupportedKeyCodes {
+            repairedInvalidFields = true
+        }
 
         // Move older shipped defaults to current defaults, unless the user has
         // explicitly changed shortcuts in Settings.
@@ -61,7 +80,15 @@ extension Settings {
         // Enforce filename template invariants.
         copy.filenameTemplate.ensureTimeOrCounterEnabled()
 
-        return copy
+        return (copy, repairedInvalidFields)
+    }
+
+    /// Non-trapping increment used after a screenshot is written.
+    /// Values below 1 start at 2; `Int.max` stays at `Int.max`.
+    static func nextScreenshotCounter(after current: Int) -> Int {
+        let start = current < 1 ? 1 : current
+        let (next, overflowed) = start.addingReportingOverflow(1)
+        return overflowed ? start : next
     }
 }
 
@@ -109,6 +136,12 @@ struct Shortcut: Codable, Equatable, Hashable {
         self.keyCode = keyCode
         self.modifierFlags = modifierFlags
     }
+
+    /// True when `keyCode` can be formatted and registered without trapping.
+    var hasSupportedKeyCode: Bool {
+        guard keyCode <= UInt32(UInt16.max) else { return false }
+        return HotKeyService.isAllowedKeyCode(UInt16(keyCode))
+    }
 }
 
 /// Grouping of all shortcuts used by the app.
@@ -147,6 +180,27 @@ extension Shortcuts {
 }
 
 extension Shortcuts {
+    func repairingUnsupportedKeyCodes(onRepair: () -> Void) -> Shortcuts {
+        var copy = self
+        if !copy.screenshotArea.hasSupportedKeyCode {
+            copy.screenshotArea = Shortcuts.default.screenshotArea
+            onRepair()
+        }
+        if !copy.screenshotFull.hasSupportedKeyCode {
+            copy.screenshotFull = Shortcuts.default.screenshotFull
+            onRepair()
+        }
+        if !copy.reopenFinderSelection.hasSupportedKeyCode {
+            copy.reopenFinderSelection = Shortcuts.default.reopenFinderSelection
+            onRepair()
+        }
+        if !copy.openScratchpad.hasSupportedKeyCode {
+            copy.openScratchpad = Shortcuts.default.openScratchpad
+            onRepair()
+        }
+        return copy
+    }
+
     mutating func replaceRetiredDefaultShortcutsIfNeeded() {
         let retiredArea = Shortcut(
             keyCode: UInt32(kVK_ANSI_4),

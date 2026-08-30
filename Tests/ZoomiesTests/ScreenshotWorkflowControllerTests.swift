@@ -481,6 +481,171 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
         XCTAssertFalse(names.contains("SHOT_2.png"))
     }
 
+    func testCopyAndDeleteKeepsSourceWhenClipboardCopyFails() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("shot.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+        let errorShown = expectation(description: "copy error shown")
+        let clipboardService = ClipboardService(
+            fileManager: .default,
+            cacheDirectory: clipboardDirectory,
+            pasteboardWriter: { _ in false }
+        )
+        let workflow = try makeWorkflow(
+            root: root,
+            fileURL: fileURL,
+            clipboardDirectory: clipboardDirectory,
+            clipboardService: clipboardService,
+            errorPresenter: { title, _ in
+                XCTAssertEqual(title, "Copy failed")
+                errorShown.fulfill()
+            }
+        )
+
+        var finishCount = 0
+        workflow.onFinish = { finishCount += 1 }
+
+        workflow.handleRenameAction(.copyAndDelete(newName: fileURL.lastPathComponent))
+        wait(for: [errorShown], timeout: 2.0)
+
+        XCTAssertEqual(finishCount, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    func testCopyAndDeleteDeleteFailureCanBeRetriedIdempotently() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("shot.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+        var deleteAttempts = 0
+        let errorShown = expectation(description: "delete error shown")
+        var pasteboardWrites = 0
+        let clipboardService = ClipboardService(
+            fileManager: .default,
+            cacheDirectory: clipboardDirectory,
+            pasteboardWriter: { _ in
+                pasteboardWrites += 1
+                return true
+            }
+        )
+        let workflow = try makeWorkflow(
+            root: root,
+            fileURL: fileURL,
+            clipboardDirectory: clipboardDirectory,
+            clipboardService: clipboardService,
+            errorPresenter: { title, _ in
+                XCTAssertEqual(title, "Couldn't delete screenshot")
+                errorShown.fulfill()
+            },
+            removeFile: { url in
+                deleteAttempts += 1
+                if deleteAttempts == 1 {
+                    throw NSError(
+                        domain: "ZoomiesTests",
+                        code: 4,
+                        userInfo: [NSLocalizedDescriptionKey: "simulated delete failure"]
+                    )
+                }
+                try FileManager.default.removeItem(at: url)
+            }
+        )
+
+        var finishCount = 0
+        let finished = expectation(description: "workflow finishes after retry")
+        workflow.onFinish = {
+            finishCount += 1
+            finished.fulfill()
+        }
+
+        let action = RenamePanelAction.copyAndDelete(newName: fileURL.lastPathComponent)
+        workflow.handleRenameAction(action)
+        wait(for: [errorShown], timeout: 2.0)
+
+        XCTAssertEqual(finishCount, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+
+        workflow.handleRenameAction(action)
+        wait(for: [finished], timeout: 2.0)
+
+        XCTAssertEqual(deleteAttempts, 2)
+        XCTAssertEqual(finishCount, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+
+        let cachedFiles = try FileManager.default.contentsOfDirectory(
+            at: clipboardDirectory,
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertEqual(cachedFiles.count, 1)
+        XCTAssertEqual(pasteboardWrites, 1)
+    }
+
+    func testEditorCloseAndDeleteSkipImagePersistence() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("shot.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+        var writeCount = 0
+        let closeWorkflow = try makeWorkflow(
+            root: root,
+            fileURL: fileURL,
+            clipboardDirectory: clipboardDirectory,
+            imageDataWriter: { data, outputURL, originalURL in
+                writeCount += 1
+                return try WorkflowImagePersistenceLogic.writeEncodedImageData(
+                    data,
+                    to: outputURL,
+                    originalURL: originalURL
+                )
+            }
+        )
+
+        let originalData = try Data(contentsOf: fileURL)
+        let closed = expectation(description: "close finished")
+        closeWorkflow.onFinish = { closed.fulfill() }
+        closeWorkflow.pendingNoteText = "should not burn"
+        closeWorkflow.handleEditorCompletion(
+            editedImage: TestSupport.solidImage(width: 180, height: 90, color: .systemRed),
+            action: .closeOnly
+        )
+        wait(for: [closed], timeout: 2.0)
+
+        XCTAssertEqual(writeCount, 0)
+        XCTAssertEqual(try Data(contentsOf: fileURL), originalData)
+
+        writeCount = 0
+        let deleteFileURL = root.appendingPathComponent("delete-me.png")
+        try TestSupport.writeSolidImagePNG(to: deleteFileURL, width: 80, height: 40)
+        let deleteWorkflow = try makeWorkflow(
+            root: root,
+            fileURL: deleteFileURL,
+            clipboardDirectory: clipboardDirectory,
+            writeOriginalFile: false,
+            imageDataWriter: { data, outputURL, originalURL in
+                writeCount += 1
+                return try WorkflowImagePersistenceLogic.writeEncodedImageData(
+                    data,
+                    to: outputURL,
+                    originalURL: originalURL
+                )
+            }
+        )
+        let deleted = expectation(description: "delete finished")
+        deleteWorkflow.onFinish = { deleted.fulfill() }
+        deleteWorkflow.pendingNoteText = "should not burn"
+        deleteWorkflow.handleEditorCompletion(
+            editedImage: TestSupport.solidImage(width: 180, height: 90, color: .systemRed),
+            action: .deleteOnly
+        )
+        wait(for: [deleted], timeout: 2.0)
+
+        XCTAssertEqual(writeCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: deleteFileURL.path))
+    }
+
     private func makeWorkflow(root: URL,
                               fileURL: URL,
                               clipboardDirectory: URL,
@@ -488,6 +653,7 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
                               initialFilePersistence: Task<URL, Error>? = nil,
                               initialScreenshotCounter: Int? = nil,
                               writeOriginalFile: Bool = true,
+                              clipboardService: ClipboardService? = nil,
                               imageDataWriter: @escaping ScreenshotWorkflowController.ImageDataWriter = {
                                   data, outputURL, originalURL in
                                   try WorkflowImagePersistenceLogic.writeEncodedImageData(
@@ -498,6 +664,9 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
                               },
                               errorPresenter: @escaping ScreenshotWorkflowController.ErrorPresenter = {
                                   _, _ in
+                              },
+                              removeFile: @escaping ScreenshotWorkflowController.FileRemover = { url in
+                                  try FileManager.default.removeItem(at: url)
                               }) throws -> ScreenshotWorkflowController {
         if writeOriginalFile {
             try TestSupport.writeSolidImagePNG(to: fileURL, width: 80, height: 40)
@@ -512,19 +681,20 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
 
         let backupService = BackupService(fileManager: .default,
                                           backupsDirectory: root.appendingPathComponent("backups", isDirectory: true))
-        let clipboardService = ClipboardService(fileManager: .default,
-                                                cacheDirectory: clipboardDirectory)
+        let resolvedClipboard = clipboardService ?? ClipboardService(fileManager: .default,
+                                                                     cacheDirectory: clipboardDirectory)
 
         return ScreenshotWorkflowController(fileURL: fileURL,
                                             initialImage: initialImage,
                                             initialFilePersistence: initialFilePersistence,
                                             initialScreenshotCounter: initialScreenshotCounter,
                                             settingsStore: settingsStore,
-                                            clipboardService: clipboardService,
+                                            clipboardService: resolvedClipboard,
                                             backupService: backupService,
                                             sourceScreen: nil,
                                             escapeKeyDeletesFile: true,
                                             imageDataWriter: imageDataWriter,
-                                            errorPresenter: errorPresenter)
+                                            errorPresenter: errorPresenter,
+                                            removeFile: removeFile)
     }
 }

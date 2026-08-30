@@ -114,8 +114,18 @@ final class EditorWindowController: NSWindowController {
         // A pending composite already contains the current annotations. When
         // editable state is available, restore its clean base image instead and
         // redraw the annotations exactly once.
-        let canvasImage = initialState.flatMap { NSImage(data: $0.baseImagePNG) } ?? image
-        self.canvasView = EditorCanvasView(image: canvasImage, escapeFinalAction: escapeFinal, initialState: initialState)
+        let canvasImage: NSImage
+        if let initialState, initialState.isSafeToRestore(),
+           let restoredBase = NSImage(data: initialState.baseImagePNG) {
+            canvasImage = restoredBase
+        } else {
+            canvasImage = image
+        }
+        self.canvasView = EditorCanvasView(
+            image: canvasImage,
+            escapeFinalAction: escapeFinal,
+            initialState: initialState?.isSafeToRestore() == true ? initialState : nil
+        )
         self.settingsStore = settingsStore
         self.notePreviewRaw = notePreview
         self.targetScreen = targetScreen
@@ -850,8 +860,9 @@ final class EditorWindowController: NSWindowController {
             return
         }
 
-        let image = canvasView.compositeImage()
-        let state = canvasView.editableState()
+        let shouldExportEditedImage = action != .deleteOnly && action != .closeOnly
+        let image = shouldExportEditedImage ? canvasView.compositeImage() : nil
+        let state = shouldExportEditedImage ? canvasView.editableState() : nil
         didSendCompletion = true
         completion(image, action, state)
         close()
@@ -862,10 +873,8 @@ extension EditorWindowController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard !didSendCompletion else { return }
         guard let completion = onComplete else { return }
-        let image = canvasView.compositeImage()
-        let state = canvasView.editableState()
         didSendCompletion = true
-        completion(image, escapeFinalAction, state)
+        completion(nil, escapeFinalAction, nil)
     }
 
     func windowDidResize(_ notification: Notification) {

@@ -55,8 +55,10 @@ enum PNGMetadata {
     }
 
     /// Extracts the embedded clean original and prompt. Returns nil for non-PNG
-    /// input or when either chunk is missing.
-    static func extract(fromPNG pngData: Data) -> (originalPNG: Data, prompt: String)? {
+    /// input, when either chunk is missing, or when a chunk/original image
+    /// exceeds safety limits.
+    static func extract(fromPNG pngData: Data,
+                        limits: ImageSafetyLimits = .runtime) -> (originalPNG: Data, prompt: String)? {
         let bytes = [UInt8](pngData)
         guard hasPNGSignature(bytes) else { return nil }
 
@@ -71,11 +73,29 @@ enum PNGMetadata {
             guard dataStart + len + 4 <= bytes.count else { break }
 
             let type = String(bytes: bytes[typeStart..<dataStart], encoding: .ascii) ?? ""
-            if type == "iTXt", let (keyword, text) = parseITXt(Array(bytes[dataStart..<dataStart + len])) {
-                if keyword == originalPNGKeyword {
-                    original = Data(base64Encoded: text)
-                } else if keyword == promptKeyword {
-                    prompt = text
+            if type == "iTXt" {
+                if isKeyword(originalPNGKeyword, in: bytes, dataStart: dataStart, length: len) {
+                    if len > limits.maxOriginalPNGChunkBytes {
+                        return nil
+                    }
+                    if let (_, text) = parseITXt(Array(bytes[dataStart..<dataStart + len])),
+                       let decoded = Data(base64Encoded: text),
+                       ImageSafety.isSafePNG(decoded, limits: limits),
+                       decoded.count <= limits.maxEmbeddedImageBytes {
+                        original = decoded
+                    } else {
+                        return nil
+                    }
+                } else if isKeyword(promptKeyword, in: bytes, dataStart: dataStart, length: len) {
+                    if len > limits.maxPromptChunkBytes {
+                        return nil
+                    }
+                    if let (_, text) = parseITXt(Array(bytes[dataStart..<dataStart + len])),
+                       text.count <= limits.maxPromptLength {
+                        prompt = text
+                    } else {
+                        return nil
+                    }
                 }
             }
             if type == "IEND" { break }
@@ -86,7 +106,8 @@ enum PNGMetadata {
         return (original, prompt)
     }
 
-    static func extractEditorState(fromPNG pngData: Data) -> EditorCanvasState? {
+    static func extractEditorState(fromPNG pngData: Data,
+                                   limits: EditorCanvasState.SafetyLimits = .runtime) -> EditorCanvasState? {
         let bytes = [UInt8](pngData)
         guard hasPNGSignature(bytes) else { return nil }
 
@@ -101,9 +122,13 @@ enum PNGMetadata {
 
             let type = String(bytes: bytes[typeStart..<dataStart], encoding: .ascii) ?? ""
             if type == "iTXt",
-               let (keyword, text) = parseITXt(Array(bytes[dataStart..<dataStart + len])),
-               keyword == editorStateKeyword {
-                editorState = decodeEditorState(text)
+               isKeyword(editorStateKeyword, in: bytes, dataStart: dataStart, length: len) {
+                if len > limits.maxEditorStateChunkBytes {
+                    return nil
+                }
+                if let (_, text) = parseITXt(Array(bytes[dataStart..<dataStart + len])) {
+                    editorState = decodeEditorState(text, limits: limits)
+                }
             }
             if type == "IEND" { break }
             index = dataStart + len + 4
@@ -137,9 +162,58 @@ enum PNGMetadata {
         return String(data: data, encoding: .utf8)
     }
 
-    private static func decodeEditorState(_ text: String) -> EditorCanvasState? {
-        guard let data = text.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(EditorCanvasState.self, from: data)
+    private static func decodeEditorState(_ text: String,
+                                          limits: EditorCanvasState.SafetyLimits = .runtime) -> EditorCanvasState? {
+        guard let data = text.data(using: .utf8),
+              let state = try? JSONDecoder().decode(EditorCanvasState.self, from: data),
+              state.isSafeToRestore(limits: limits) else {
+            return nil
+        }
+        return state
+    }
+
+    /// Reads width/height from the IHDR chunk without allocating a bitmap.
+    static func pixelDimensions(ofPNG data: Data) -> (width: Int, height: Int)? {
+        let bytes = [UInt8](data)
+        guard hasPNGSignature(bytes), bytes.count >= 24 else { return nil }
+        let type = String(bytes: bytes[12..<16], encoding: .ascii)
+        guard type == "IHDR",
+              let width = readUInt32(bytes, at: 16),
+              let height = readUInt32(bytes, at: 20),
+              width > 0,
+              height > 0 else {
+            return nil
+        }
+        return (Int(width), Int(height))
+    }
+
+    /// Minimal PNG with a declared IHDR size and no pixel payload. Used to
+    /// inspect dimensions without allocating a decoded bitmap.
+    static func stubPNGDeclaringSize(width: Int, height: Int) -> Data? {
+        guard width > 0, height > 0,
+              width <= Int(UInt32.max), height <= Int(UInt32.max) else {
+            return nil
+        }
+        var ihdr = Data()
+        ihdr.append(contentsOf: bigEndianBytes(UInt32(width)))
+        ihdr.append(contentsOf: bigEndianBytes(UInt32(height)))
+        ihdr.append(contentsOf: [8, 2, 0, 0, 0]) // 8-bit truecolor, no interlace
+        let ihdrChunk = assembleChunk(type: "IHDR", payload: ihdr)
+        let iendChunk = assembleChunk(type: "IEND", payload: Data())
+
+        var png = Data(signature)
+        png.append(ihdrChunk)
+        png.append(iendChunk)
+        return png
+    }
+
+    private static func isKeyword(_ keyword: String, in bytes: [UInt8], dataStart: Int, length: Int) -> Bool {
+        let keywordBytes = Array(keyword.utf8)
+        guard length > keywordBytes.count, dataStart + keywordBytes.count < bytes.count else { return false }
+        if Array(bytes[dataStart..<(dataStart + keywordBytes.count)]) != keywordBytes {
+            return false
+        }
+        return bytes[dataStart + keywordBytes.count] == 0
     }
 
     private static func assembleChunk(type: String, payload: Data) -> Data {

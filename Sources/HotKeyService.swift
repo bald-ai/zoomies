@@ -233,8 +233,15 @@ final class HotKeyService {
     }
 
     /// Returns a human-readable description of the shortcut, e.g. "⌘⇧6".
+    ///
+    /// Out-of-range key codes must not trap; they render as "?".
     static func describeShortcut(keyCode: UInt32, carbonFlags: UInt32) -> String {
-        let keyString = keyName(for: UInt16(keyCode)) ?? "?"
+        let keyString: String
+        if keyCode <= UInt32(UInt16.max), let name = keyName(for: UInt16(keyCode)) {
+            keyString = name
+        } else {
+            keyString = "?"
+        }
         let modifiers = modifierDescription(for: carbonFlags)
         return modifiers + keyString
     }

@@ -23,6 +23,12 @@ final class HotKeyServiceTests: XCTestCase {
         XCTAssertTrue(desc.contains("6"))
     }
 
+    func testDescribeShortcutDoesNotTrapOnOutOfRangeKeyCode() {
+        let desc = HotKeyService.describeShortcut(keyCode: UInt32.max, carbonFlags: UInt32(cmdKey))
+        XCTAssertTrue(desc.contains("⌘"))
+        XCTAssertTrue(desc.hasSuffix("?"))
+    }
+
     func testIsAllowedKeyCodeRecognizesKnownAndUnknown() {
         XCTAssertTrue(HotKeyService.isAllowedKeyCode(UInt16(kVK_ANSI_A)))
         XCTAssertTrue(HotKeyService.isAllowedKeyCode(UInt16(kVK_F12)))

@@ -46,24 +46,16 @@ enum ScreenshotServiceCoreLogic {
         let pointSize = image.size
         let pixelSize = image.representations
             .compactMap({ $0 as? NSBitmapImageRep })
-            .max(by: { lhs, rhs in lhs.pixelsWide * lhs.pixelsHigh < rhs.pixelsWide * rhs.pixelsHigh })
+            .max(by: { lhs, rhs in
+                (ImageSafety.pixelCount(width: lhs.pixelsWide, height: lhs.pixelsHigh) ?? 0)
+                    < (ImageSafety.pixelCount(width: rhs.pixelsWide, height: rhs.pixelsHigh) ?? 0)
+            })
             .map { NSSize(width: CGFloat($0.pixelsWide), height: CGFloat($0.pixelsHigh)) }
             ?? pointSize
 
-        let pixelWidth = Int(pixelSize.width.rounded(.up))
-        let pixelHeight = Int(pixelSize.height.rounded(.up))
-        guard pixelWidth > 0,
-              pixelHeight > 0,
-              let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil,
-                                            pixelsWide: pixelWidth,
-                                            pixelsHigh: pixelHeight,
-                                            bitsPerSample: 8,
-                                            samplesPerPixel: 4,
-                                            hasAlpha: true,
-                                            isPlanar: false,
-                                            colorSpaceName: .deviceRGB,
-                                            bytesPerRow: 0,
-                                            bitsPerPixel: 0) else {
+        guard let pixelWidth = ImageSafety.pixelLength(pixelSize.width.rounded(.up)),
+              let pixelHeight = ImageSafety.pixelLength(pixelSize.height.rounded(.up)),
+              let bitmap = ImageSafety.makeBitmapRep(pixelsWide: pixelWidth, pixelsHigh: pixelHeight) else {
             return nil
         }
 

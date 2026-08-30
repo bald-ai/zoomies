@@ -6,14 +6,26 @@ import Foundation
 /// On first launch after upgrading, the old `~/.screenshot_app_settings.json`
 /// file is read and copied to the new location.
 final class SettingsStore {
+    typealias PersistWriter = (_ data: Data, _ url: URL) throws -> Void
+
     private(set) var settings: Settings
+
+    /// True when the most recent `load()` reset one or more semantically invalid
+    /// fields *and* those repairs were written durably. An unwritable file must
+    /// not claim a repair, or the launch notice would repeat forever.
+    private(set) var didRepairInvalidSettingsOnLastLoad = false
 
     private let fileURL: URL
     private let legacyFileURL: URL?
     private let fileManager: FileManager
+    private let persistWriter: PersistWriter?
 
-    init(fileManager: FileManager = .default, fileURL: URL? = nil, legacyFileURL: URL? = nil) {
+    init(fileManager: FileManager = .default,
+         fileURL: URL? = nil,
+         legacyFileURL: URL? = nil,
+         persistWriter: PersistWriter? = nil) {
         self.fileManager = fileManager
+        self.persistWriter = persistWriter
 
         if let fileURL {
             self.fileURL = fileURL
@@ -36,26 +48,42 @@ final class SettingsStore {
     ///
     /// On any decoding error, the file is ignored and defaults are used.
     func load() {
+        didRepairInvalidSettingsOnLastLoad = false
         do {
             if fileManager.fileExists(atPath: fileURL.path) {
-                settings = try loadSettings(from: fileURL).normalized()
-                try? persist(settings)
+                let repaired = applyLoadedSettings(try loadSettings(from: fileURL))
+                persistLoadedSettings(repaired: repaired)
                 return
             }
 
             if let legacyFileURL, fileManager.fileExists(atPath: legacyFileURL.path) {
-                settings = try loadSettings(from: legacyFileURL).normalized()
-                try? persist(settings)
+                let repaired = applyLoadedSettings(try loadSettings(from: legacyFileURL))
+                persistLoadedSettings(repaired: repaired)
                 return
             }
 
             // First launch – write out defaults so future loads succeed.
             settings = .default
-            try? persist(settings)
+            persistLoadedSettings(repaired: false)
         } catch {
             // Fall back to defaults but do not overwrite the possibly-bad file.
             // This mirrors many macOS apps' behavior.
             settings = .default
+        }
+    }
+
+    private func applyLoadedSettings(_ loaded: Settings) -> Bool {
+        let normalized = loaded.normalizedReportingRepairs()
+        settings = normalized.settings
+        return normalized.repairedInvalidFields
+    }
+
+    private func persistLoadedSettings(repaired: Bool) {
+        do {
+            try persist(settings)
+            didRepairInvalidSettingsOnLastLoad = repaired
+        } catch {
+            didRepairInvalidSettingsOnLastLoad = false
         }
     }
 
@@ -90,6 +118,10 @@ final class SettingsStore {
             try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         }
 
-        try data.write(to: fileURL, options: [.atomic])
+        if let persistWriter {
+            try persistWriter(data, fileURL)
+        } else {
+            try data.write(to: fileURL, options: [.atomic])
+        }
     }
 }

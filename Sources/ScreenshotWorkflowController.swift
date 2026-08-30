@@ -8,6 +8,7 @@ import AppKit
 final class ScreenshotWorkflowController {
     typealias ImageDataWriter = (_ data: Data, _ outputURL: URL, _ originalURL: URL) throws -> URL
     typealias ErrorPresenter = (_ title: String, _ message: String) -> Void
+    typealias FileRemover = (_ url: URL) throws -> Void
 
     enum FinalAction {
         case saveOnly
@@ -29,6 +30,7 @@ final class ScreenshotWorkflowController {
     private let escapeKeyDeletesFile: Bool
     private let imageDataWriter: ImageDataWriter
     private let errorPresenter: ErrorPresenter
+    private let removeFile: FileRemover
 
     /// The clean (pre-note) original used to round-trip prompt edits when a saved
     /// PNG is reopened. For a fresh capture this is the in-memory image; for a
@@ -49,6 +51,7 @@ final class ScreenshotWorkflowController {
     private var backupOriginalURL: URL?
     private var isFinalActionInProgress = false
     private var hasFinished = false
+    private var publishedCopyAndDeleteURL: URL?
 
     /// Optional callback invoked once the workflow has fully completed.
     var onFinish: (() -> Void)?
@@ -71,6 +74,9 @@ final class ScreenshotWorkflowController {
          },
          errorPresenter: @escaping ErrorPresenter = { title, message in
              AlertPresenter.presentWarning(title: title, message: message)
+         },
+         removeFile: @escaping FileRemover = { url in
+             try FileManager.default.removeItem(at: url)
          }) {
         self.fileURL = fileURL
         self.initialFilePersistence = initialFilePersistence
@@ -82,8 +88,9 @@ final class ScreenshotWorkflowController {
         self.escapeKeyDeletesFile = escapeKeyDeletesFile
         self.imageDataWriter = imageDataWriter
         self.errorPresenter = errorPresenter
+        self.removeFile = removeFile
 
-        let reopen = Self.resolveReopenMetadata(fileURL: fileURL, initialImage: initialImage)
+        let reopen = WorkflowReopenMetadataLogic.resolve(fileURL: fileURL, initialImage: initialImage)
         self.cleanOriginalPNG = reopen.cleanOriginalPNG
         self.initialEditorState = reopen.editorState
         // Swap the burned-on-disk image for the recovered clean original and
@@ -92,34 +99,6 @@ final class ScreenshotWorkflowController {
         if let prompt = reopen.prompt {
             self.pendingNoteText = prompt
         }
-    }
-
-    /// Resolves the clean baseline image, in-memory image, and pre-filled prompt
-    /// for a workflow, recovering embedded round-trip metadata on reopen.
-    private static func resolveReopenMetadata(fileURL: URL, initialImage: NSImage?)
-        -> (cleanOriginalPNG: Data?, image: NSImage?, prompt: String?, editorState: EditorCanvasState?) {
-        // Fresh capture: the in-memory image is already the clean original.
-        // Snapshot it as PNG so it can be embedded as the round-trip baseline.
-        if let initialImage {
-            return (ScreenshotServiceCoreLogic.pngData(from: initialImage), nil, nil, nil)
-        }
-        // Reopen: inspect the existing file for embedded round-trip metadata.
-        guard let fileData = try? Data(contentsOf: fileURL) else {
-            return (nil, nil, nil, nil)
-        }
-        let editorState = PNGMetadata.extractEditorState(fromPNG: fileData)
-        if let extracted = PNGMetadata.extract(fromPNG: fileData) {
-            let image = editorState.flatMap { NSImage(data: $0.baseImagePNG) } ?? NSImage(data: extracted.originalPNG)
-            return (extracted.originalPNG, image, extracted.prompt, editorState)
-        }
-        if let editorState {
-            return (nil, NSImage(data: editorState.baseImagePNG), nil, editorState)
-        }
-        // Plain PNG with no metadata: the file itself is the clean baseline.
-        if PNGMetadata.isPNG(fileData) {
-            return (fileData, nil, nil, nil)
-        }
-        return (nil, nil, nil, nil)
     }
 
     // MARK: - Public API
@@ -437,6 +416,30 @@ final class ScreenshotWorkflowController {
         editorController?.dismissWithoutCompletion()
         editorController = nil
 
+        if action == .closeOnly {
+            // Cancel/close: do not write to disk or composite discarded edits.
+            guard restoreOriginalFromBackupIfAvailable() else {
+                isFinalActionInProgress = false
+                reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
+                return
+            }
+            removeBackupIfNeeded()
+            clearPendingEditorState()
+            finishWorkflow()
+            return
+        }
+
+        if action == .deleteOnly {
+            guard deleteSourceFileAndBackup() else {
+                isFinalActionInProgress = false
+                reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
+                return
+            }
+            clearPendingEditorState()
+            finishWorkflow()
+            return
+        }
+
         var finalImage: NSImage?
         var baselinePNG: Data?
         var embedPrompt: String?
@@ -457,19 +460,6 @@ final class ScreenshotWorkflowController {
                 burnedNoteText = ""
                 embedEditorState = editorState
             }
-        }
-
-        if action == .closeOnly {
-            // Cancel/close: do not write to disk; restore original if needed.
-            guard restoreOriginalFromBackupIfAvailable() else {
-                isFinalActionInProgress = false
-                reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
-                return
-            }
-            removeBackupIfNeeded()
-            clearPendingEditorState()
-            finishWorkflow()
-            return
         }
 
         if let finalImage,
@@ -589,7 +579,7 @@ final class ScreenshotWorkflowController {
                 settingsStore.update { settings in
                     settings.screenshotCounter = max(
                         settings.screenshotCounter,
-                        initialScreenshotCounter + 1
+                        Settings.nextScreenshotCounter(after: initialScreenshotCounter)
                     )
                 }
             }
@@ -682,6 +672,17 @@ final class ScreenshotWorkflowController {
             return
         }
 
+        if action == .deleteOnly {
+            guard deleteSourceFileAndBackup() else {
+                isFinalActionInProgress = false
+                return
+            }
+            closeInputControllers()
+            clearPendingEditorState()
+            finishWorkflow()
+            return
+        }
+
         let pendingImage: NSImage? = {
             if let editor = editorController {
                 let image = editor.currentCompositeImage()
@@ -748,14 +749,22 @@ final class ScreenshotWorkflowController {
         finishWorkflow()
     }
 
-    private func deleteFileAndBackup() {
-        let fm = FileManager.default
-        if fm.fileExists(atPath: fileURL.path) {
-            try? fm.removeItem(at: fileURL)
+    private func deleteSourceFileAndBackup() -> Bool {
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            do {
+                try removeFile(fileURL)
+            } catch {
+                presentError(
+                    title: "Couldn't delete screenshot",
+                    message: "The original file is still on disk. You can try again."
+                )
+                return false
+            }
         }
         backupService.removeBackup(forOriginalURL: backupOriginalURL ?? fileURL)
         hasCreatedBackup = false
         backupOriginalURL = nil
+        return true
     }
 
     // MARK: - Note rendering
@@ -812,16 +821,29 @@ final class ScreenshotWorkflowController {
         case .saveOnly:
             break
         case .copyAndSave:
-            clipboardService.copyFile(at: fileURL, useCache: false)
+            _ = clipboardService.copyFile(at: fileURL, useCache: false)
         case .copyAndDelete:
-            if let copyAndDeleteImage {
-                clipboardService.copyImageAsFile(copyAndDeleteImage, fileName: fileURL.lastPathComponent)
-            } else {
-                clipboardService.copyFile(at: fileURL, useCache: true)
+            if let published = publishedCopyAndDeleteURL,
+               FileManager.default.fileExists(atPath: published.path) {
+                return deleteSourceFileAndBackup()
             }
-            deleteFileAndBackup()
+            let published: URL?
+            if let copyAndDeleteImage {
+                published = clipboardService.copyImageAsFile(copyAndDeleteImage, fileName: fileURL.lastPathComponent)
+            } else {
+                published = clipboardService.copyFile(at: fileURL, useCache: true)
+            }
+            guard let published else {
+                presentError(
+                    title: "Copy failed",
+                    message: "Zoomies couldn’t copy the screenshot to the clipboard, so the original file was left in place. You can try Copy + Delete again."
+                )
+                return false
+            }
+            publishedCopyAndDeleteURL = published
+            return deleteSourceFileAndBackup()
         case .deleteOnly:
-            deleteFileAndBackup()
+            return deleteSourceFileAndBackup()
         case .closeOnly:
             return false
         }

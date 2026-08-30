@@ -148,6 +148,19 @@ final class ScreenshotService: NSObject {
 
         guard activeWorkflow == nil else { return }
 
+        if initialImage == nil {
+            switch ImageSafety.inspectFile(at: url) {
+            case .tooLarge:
+                presentError(
+                    title: "Image is too large",
+                    message: "This image is too large to open safely."
+                )
+                return
+            case .notAnImage, .safe:
+                break
+            }
+        }
+
         let workflow = ScreenshotWorkflowController(
             fileURL: url,
             initialImage: initialImage,
@@ -413,7 +426,10 @@ final class ScreenshotService: NSObject {
     private func advanceScreenshotCounter(afterWritingCounter currentCounter: Int) {
         let applyUpdate = { [settingsStore] in
             settingsStore.update { settings in
-                settings.screenshotCounter = max(settings.screenshotCounter, currentCounter + 1)
+                settings.screenshotCounter = max(
+                    settings.screenshotCounter,
+                    Settings.nextScreenshotCounter(after: currentCounter)
+                )
             }
         }
 

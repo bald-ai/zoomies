@@ -146,7 +146,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
                                height: image.size.height + canvasEdgeInset * 2)
         let frame = NSRect(origin: .zero, size: frameSize)
         super.init(frame: frame)
-        if let initialState {
+        if let initialState, initialState.isSafeToRestore() {
             self.items = initialState.items.compactMap(Item.init(stateItem:))
             if let savedBaseImageOrigin = initialState.baseImageOrigin?.nsPoint {
                 self.items = shiftedItems(self.items,
@@ -819,21 +819,14 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         // passed through the editor. Drawing into an explicit bitmap keeps the
         // edited image at the same resolution it came in with.
         let pixelScale = baseImagePixelScale()
-        let pixelWidth = max(1, Int((normalizedCrop.width * pixelScale).rounded()))
-        let pixelHeight = max(1, Int((normalizedCrop.height * pixelScale).rounded()))
+        let rawWidth = ImageSafety.pixelLength(normalizedCrop.width * pixelScale) ?? 0
+        let rawHeight = ImageSafety.pixelLength(normalizedCrop.height * pixelScale) ?? 0
+        let pixelWidth = max(1, rawWidth)
+        let pixelHeight = max(1, rawHeight)
 
-        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
-                                         pixelsWide: pixelWidth,
-                                         pixelsHigh: pixelHeight,
-                                         bitsPerSample: 8,
-                                         samplesPerPixel: 4,
-                                         hasAlpha: true,
-                                         isPlanar: false,
-                                         colorSpaceName: .deviceRGB,
-                                         bytesPerRow: 0,
-                                         bitsPerPixel: 0),
+        guard let rep = ImageSafety.makeBitmapRep(pixelsWide: pixelWidth, pixelsHigh: pixelHeight),
               let bitmapContext = NSGraphicsContext(bitmapImageRep: rep) else {
-            return NSImage(size: normalizedCrop.size)
+            return NSImage(size: NSSize(width: 1, height: 1))
         }
         // Map the point-sized canvas coordinates onto the pixel-sized backing.
         rep.size = normalizedCrop.size
@@ -888,7 +881,10 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     private func baseImagePixelSize() -> NSSize {
         let largest = baseImage.representations
             .compactMap { $0 as? NSBitmapImageRep }
-            .max(by: { $0.pixelsWide * $0.pixelsHigh < $1.pixelsWide * $1.pixelsHigh })
+            .max(by: { lhs, rhs in
+                (ImageSafety.pixelCount(width: lhs.pixelsWide, height: lhs.pixelsHigh) ?? 0)
+                    < (ImageSafety.pixelCount(width: rhs.pixelsWide, height: rhs.pixelsHigh) ?? 0)
+            })
         if let largest {
             return NSSize(width: CGFloat(largest.pixelsWide), height: CGFloat(largest.pixelsHigh))
         }
@@ -991,7 +987,12 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
 
         let newWidth = max(unionRect.maxX, minimumCanvasSize.width, frame.size.width)
         let newHeight = max(unionRect.maxY, minimumCanvasSize.height, frame.size.height)
-        let newSize = NSSize(width: ceil(newWidth), height: ceil(newHeight))
+        guard let width = ImageSafety.pixelLength(newWidth),
+              let height = ImageSafety.pixelLength(newHeight),
+              ImageSafety.canAllocateBitmap(width: width, height: height) else {
+            return
+        }
+        let newSize = NSSize(width: CGFloat(width), height: CGFloat(height))
 
         if newSize != frame.size {
             setFrameSize(newSize)

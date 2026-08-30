@@ -241,4 +241,43 @@ final class SettingsTests: XCTestCase {
 
         XCTAssertFalse(decoded.shortcutsCustomized)
     }
+
+    func testNextScreenshotCounterDoesNotTrapOnOverflow() {
+        XCTAssertEqual(Settings.nextScreenshotCounter(after: 1), 2)
+        XCTAssertEqual(Settings.nextScreenshotCounter(after: 0), 2)
+        XCTAssertEqual(Settings.nextScreenshotCounter(after: -8), 2)
+        XCTAssertEqual(Settings.nextScreenshotCounter(after: Int.max), Int.max)
+    }
+
+    func testNormalizedRepairsOnlyInvalidShortcutAndReportsRepair() {
+        var settings = Settings.default
+        settings.screenshotCounter = 9
+        settings.shortcuts.screenshotArea = Shortcut(keyCode: UInt32.max, modifierFlags: 768)
+        settings.shortcutsCustomized = true
+
+        let result = settings.normalizedReportingRepairs()
+        XCTAssertTrue(result.repairedInvalidFields)
+        XCTAssertEqual(result.settings.screenshotCounter, 9)
+        XCTAssertEqual(result.settings.shortcuts.screenshotArea, Shortcuts.default.screenshotArea)
+        XCTAssertEqual(result.settings.shortcuts.screenshotFull, Shortcuts.default.screenshotFull)
+        XCTAssertTrue(result.settings.shortcutsCustomized)
+    }
+
+    func testNormalizedDoesNotTreatRetiredShortcutMigrationAsRepair() {
+        var settings = Settings.default
+        settings.shortcuts = Shortcuts(
+            screenshotArea: Shortcut(keyCode: UInt32(kVK_ANSI_4),
+                                      modifierFlags: UInt32(controlKey | shiftKey)),
+            screenshotFull: Shortcut(keyCode: UInt32(kVK_ANSI_3),
+                                      modifierFlags: UInt32(controlKey | shiftKey)),
+            reopenFinderSelection: Shortcut(keyCode: UInt32(kVK_ANSI_2),
+                                             modifierFlags: UInt32(controlKey | shiftKey)),
+            openScratchpad: Shortcut(keyCode: UInt32(kVK_ANSI_5),
+                                     modifierFlags: UInt32(cmdKey | shiftKey))
+        )
+
+        let result = settings.normalizedReportingRepairs()
+        XCTAssertFalse(result.repairedInvalidFields)
+        XCTAssertEqual(result.settings.shortcuts, Shortcuts.default)
+    }
 }

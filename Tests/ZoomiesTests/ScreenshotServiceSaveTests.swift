@@ -171,4 +171,42 @@ final class ScreenshotServiceSaveTests: XCTestCase {
         XCTAssertNotNil(saved)
         XCTAssertLessThanOrEqual(saved?.size.width ?? 0, 50)
     }
+
+    func testSaveImageToDesktopDoesNotTrapWhenCounterIsMax() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let desktop = root.appendingPathComponent("Desktop", isDirectory: true)
+        let settingsStore = SettingsStore(
+            fileManager: .default,
+            fileURL: root.appendingPathComponent("settings.json")
+        )
+        settingsStore.load()
+        settingsStore.update { settings in
+            settings.screenshotCounter = Int.max
+            settings.filenameTemplate = FilenameTemplate(blocks: [
+                .init(kind: .staticText, isEnabled: true, text: "Max"),
+                .init(kind: .counter, isEnabled: true)
+            ])
+        }
+
+        let service = ScreenshotService(
+            settingsStore: settingsStore,
+            backupService: BackupService(
+                fileManager: .default,
+                backupsDirectory: root.appendingPathComponent("backups")
+            ),
+            clipboardService: ClipboardService(
+                fileManager: .default,
+                cacheDirectory: root.appendingPathComponent("clipboard")
+            ),
+            fileManager: .default,
+            desktopDirectory: desktop,
+            soundPlayer: NoopSoundPlayer()
+        )
+
+        let output = try service.saveImageToDesktop(TestSupport.solidImage(width: 40, height: 20))
+        XCTAssertTrue(output.lastPathComponent.contains(String(Int.max)))
+        XCTAssertEqual(settingsStore.settings.screenshotCounter, Int.max)
+    }
 }

@@ -9,11 +9,17 @@ import AppKit
 ///   `~/Library/Caches/zoomies/clipboard` so paste still works after
 ///   the original file is removed.
 final class ClipboardService {
+    typealias PasteboardWriter = (_ objects: [any NSPasteboardWriting]) -> Bool
+
     private let cacheDirectory: URL
     private let fileManager: FileManager
+    private let pasteboardWriter: PasteboardWriter
 
-    init(fileManager: FileManager = .default, cacheDirectory: URL? = nil) {
+    init(fileManager: FileManager = .default,
+         cacheDirectory: URL? = nil,
+         pasteboardWriter: PasteboardWriter? = nil) {
         self.fileManager = fileManager
+        self.pasteboardWriter = pasteboardWriter ?? ClipboardService.writeToGeneralPasteboard
 
         if let cacheDirectory {
             self.cacheDirectory = cacheDirectory
@@ -39,15 +45,14 @@ final class ClipboardService {
     /// Places an image on the general pasteboard. Used by the editor's Copy
     /// action where only image data (not a file URL) is required.
     func writeImage(_ image: NSImage) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        if pasteboard.writeObjects([image]) {
+        if pasteboardWriter([image]) {
             return
         }
 
         // Fallback for targets that expect explicit TIFF data.
         if let tiffData = image.tiffRepresentation {
-            pasteboard.setData(tiffData, forType: .tiff)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setData(tiffData, forType: .tiff)
         }
     }
 
@@ -59,19 +64,23 @@ final class ClipboardService {
     ///     clipboard cache directory and publishes that cached URL on the
     ///     pasteboard. This is used for "Copy+Delete" so that paste continues
     ///     to work after the original file is deleted.
-    func copyFile(at url: URL, useCache: Bool) {
+    /// - Returns: The published file URL when cache (if requested) and pasteboard
+    ///   publication both succeeded; otherwise `nil`. Copy+Delete must not delete
+    ///   the source on `nil`.
+    @discardableResult
+    func copyFile(at url: URL, useCache: Bool) -> URL? {
         let sourceURL: URL
 
         if useCache {
-            let cachedURL = uniqueCachedURL(for: url.lastPathComponent)
             do {
+                try fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+                let cachedURL = uniqueCachedURL(for: url.lastPathComponent)
                 // Best-effort replacement to avoid fileExists/remove TOCTOU windows.
                 try? fileManager.removeItem(at: cachedURL)
                 try fileManager.copyItem(at: url, to: cachedURL)
                 sourceURL = cachedURL
             } catch {
-                // Fall back to using the original URL.
-                sourceURL = url
+                return nil
             }
         } else {
             sourceURL = url
@@ -80,50 +89,39 @@ final class ClipboardService {
         guard let image = NSImage(contentsOf: sourceURL) else {
             // Even if we can't build an NSImage, still publish the file URL so
             // Finder-style pastes work.
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.writeObjects([sourceURL as NSURL])
-            return
+            return pasteboardWriter([sourceURL as NSURL]) ? sourceURL : nil
         }
 
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-
-        // Publish both the file URL and image data so both file-paste and
-        // image-paste targets can consume the clipboard contents.
-        pasteboard.writeObjects([sourceURL as NSURL, image])
+        return pasteboardWriter([sourceURL as NSURL, image]) ? sourceURL : nil
     }
 
     /// Writes an in-memory image to the clipboard cache as a file and publishes
     /// the cached file URL on the pasteboard. Used for "Copy+Delete" from the
     /// editor where the edited image was never saved to disk.
-    func copyImageAsFile(_ image: NSImage, fileName: String) {
+    ///
+    /// - Returns: The cached file URL when the cache file was written and the
+    ///   pasteboard accepted it; otherwise `nil`. Callers must keep the source
+    ///   file if this returns `nil`.
+    @discardableResult
+    func copyImageAsFile(_ image: NSImage, fileName: String) -> URL? {
         // PNG-only: always cache the clipboard file as PNG.
         let pngFileName = (fileName as NSString).deletingPathExtension + ".png"
         let cachedURL = uniqueCachedURL(for: pngFileName)
 
         guard let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff) else {
-            // Can't encode — fall back to image-only clipboard.
-            writeImage(image)
-            return
-        }
-
-        guard let data = bitmap.representation(using: .png, properties: [:]) else {
-            writeImage(image)
-            return
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let data = bitmap.representation(using: .png, properties: [:]) else {
+            return nil
         }
 
         do {
+            try fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
             try data.write(to: cachedURL, options: .atomic)
         } catch {
-            writeImage(image)
-            return
+            return nil
         }
 
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.writeObjects([cachedURL as NSURL, image])
+        return pasteboardWriter([cachedURL as NSURL, image]) ? cachedURL : nil
     }
 
     // MARK: - Helpers
@@ -134,5 +132,11 @@ final class ClipboardService {
             in: cacheDirectory,
             fileExists: { [fileManager] path in fileManager.fileExists(atPath: path) }
         )
+    }
+
+    private static func writeToGeneralPasteboard(_ objects: [any NSPasteboardWriting]) -> Bool {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        return pasteboard.writeObjects(objects)
     }
 }

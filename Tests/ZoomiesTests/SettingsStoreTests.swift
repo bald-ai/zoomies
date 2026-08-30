@@ -52,6 +52,7 @@ final class SettingsStoreTests: XCTestCase {
         let store = SettingsStore(fileManager: .default, fileURL: fileURL)
         store.load()
 
+        XCTAssertTrue(store.didRepairInvalidSettingsOnLastLoad)
         XCTAssertEqual(store.settings.maxWidth, 0)
         XCTAssertEqual(store.settings.screenshotCounter, 1)
         XCTAssertEqual(store.settings.notePrefix.count, 50)
@@ -60,6 +61,9 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(persisted.maxWidth, 0)
         XCTAssertEqual(persisted.screenshotCounter, 1)
         XCTAssertEqual(persisted.notePrefix.count, 50)
+
+        store.load()
+        XCTAssertFalse(store.didRepairInvalidSettingsOnLastLoad)
     }
 
     func testLoadCorruptFileFallsBackToDefaultsWithoutOverwrite() throws {
@@ -97,5 +101,101 @@ final class SettingsStoreTests: XCTestCase {
         let decoded = try JSONDecoder().decode(Settings.self, from: Data(contentsOf: fileURL))
         XCTAssertEqual(decoded.maxWidth, 0)
         XCTAssertEqual(decoded.screenshotCounter, 1)
+    }
+
+    func testLoadRepairsInvalidShortcutKeyCodesWithoutTouchingValidFields() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("settings.json")
+        var raw = Settings.default
+        raw.screenshotCounter = 42
+        raw.notePrefixEnabled = true
+        raw.notePrefix = "keep me"
+        raw.shortcutsCustomized = true
+        raw.shortcuts.screenshotArea = Shortcut(keyCode: UInt32.max, modifierFlags: 768)
+        raw.shortcuts.openScratchpad = Shortcut(keyCode: 0xFFFF, modifierFlags: 256)
+        try JSONEncoder().encode(raw).write(to: fileURL, options: .atomic)
+
+        let store = SettingsStore(fileManager: .default, fileURL: fileURL)
+        store.load()
+
+        XCTAssertTrue(store.didRepairInvalidSettingsOnLastLoad)
+        XCTAssertEqual(store.settings.screenshotCounter, 42)
+        XCTAssertEqual(store.settings.notePrefix, "keep me")
+        XCTAssertTrue(store.settings.notePrefixEnabled)
+        XCTAssertTrue(store.settings.shortcutsCustomized)
+        XCTAssertEqual(store.settings.shortcuts.screenshotArea, Shortcuts.default.screenshotArea)
+        XCTAssertEqual(store.settings.shortcuts.openScratchpad, Shortcuts.default.openScratchpad)
+        XCTAssertEqual(store.settings.shortcuts.screenshotFull, Shortcuts.default.screenshotFull)
+        XCTAssertEqual(store.settings.shortcuts.reopenFinderSelection, Shortcuts.default.reopenFinderSelection)
+    }
+
+    func testLoadDoesNotReportRepairForValidMaximumCounter() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("settings.json")
+        var raw = Settings.default
+        raw.screenshotCounter = Int.max
+        try JSONEncoder().encode(raw).write(to: fileURL, options: .atomic)
+
+        let store = SettingsStore(fileManager: .default, fileURL: fileURL)
+        store.load()
+
+        XCTAssertFalse(store.didRepairInvalidSettingsOnLastLoad)
+        XCTAssertEqual(store.settings.screenshotCounter, Int.max)
+    }
+
+    func testCorruptFileFallbackDoesNotClaimARepair() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("settings.json")
+        try Data("{not-json".utf8).write(to: fileURL, options: .atomic)
+
+        let store = SettingsStore(fileManager: .default, fileURL: fileURL)
+        store.load()
+
+        XCTAssertFalse(store.didRepairInvalidSettingsOnLastLoad)
+        XCTAssertEqual(store.settings.maxWidth, Settings.default.maxWidth)
+        XCTAssertEqual(store.settings.screenshotCounter, Settings.default.screenshotCounter)
+    }
+
+    func testLoadDoesNotReportRepairWhenPersistenceFails() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("settings.json")
+        var raw = Settings.default
+        raw.maxWidth = -5
+        raw.screenshotCounter = 42
+        raw.notePrefixEnabled = true
+        raw.notePrefix = "keep me"
+        try JSONEncoder().encode(raw).write(to: fileURL, options: .atomic)
+        let originalData = try Data(contentsOf: fileURL)
+
+        let store = SettingsStore(
+            fileManager: .default,
+            fileURL: fileURL,
+            persistWriter: { _, _ in
+                throw NSError(
+                    domain: "ZoomiesTests",
+                    code: 7,
+                    userInfo: [NSLocalizedDescriptionKey: "simulated persist failure"]
+                )
+            }
+        )
+        store.load()
+
+        XCTAssertFalse(store.didRepairInvalidSettingsOnLastLoad)
+        XCTAssertEqual(store.settings.maxWidth, 0)
+        XCTAssertEqual(store.settings.screenshotCounter, 42)
+        XCTAssertEqual(store.settings.notePrefix, "keep me")
+        XCTAssertEqual(try Data(contentsOf: fileURL), originalData)
+
+        store.load()
+        XCTAssertFalse(store.didRepairInvalidSettingsOnLastLoad)
+        XCTAssertEqual(try Data(contentsOf: fileURL), originalData)
     }
 }

@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var backupService: BackupService!
     private let screenshotSoundPlayer = ScreenshotSoundPlayer()
     private var userCommandGate = UserCommandGate()
+    private let finderSelectionLookup = FinderSelectionLookupCoordinator()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         settingsStore.load()
@@ -47,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         registerHotKeys()
         showWelcomeInfo()
+        presentSettingsRepairNoticeIfNeeded()
     }
 
     private func showWelcomeInfo() {
@@ -74,6 +76,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
+    }
+
+    private func presentSettingsRepairNoticeIfNeeded() {
+        guard settingsStore.didRepairInvalidSettingsOnLastLoad else { return }
+        DispatchQueue.main.async {
+            AlertPresenter.presentWarning(
+                title: "Some settings were repaired",
+                message: "Zoomies found invalid values in its saved settings and restored those to their defaults. Your other settings were left unchanged."
+            )
+        }
     }
 
     private func registerHotKeys() {
@@ -129,8 +141,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        do {
-            let selection = try FinderSelectionService.selection()
+        finderSelectionLookup.requestSelection { [weak self] result in
+            self?.handleFinderSelectionResult(result)
+        }
+    }
+
+    private func handleFinderSelectionResult(_ result: Result<FinderSelectionService.Selection, Error>) {
+        switch result {
+        case .success(let selection):
             let url: URL
             switch selection {
             case .none:
@@ -142,13 +160,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .single(let selectedURL):
                 url = selectedURL
             }
-            guard NSImage(contentsOf: url) != nil else {
+            switch ImageSafety.inspectFile(at: url) {
+            case .tooLarge:
+                presentError(
+                    title: "Image is too large",
+                    message: "This image is too large to open safely. Choose a smaller screenshot and try again."
+                )
+                return
+            case .notAnImage:
                 presentError(title: "Not an Image", message: "The selected Finder item is not a readable image.")
                 return
+            case .safe:
+                break
             }
 
             screenshotService.beginPostCaptureFlow(forExistingFileAt: url, on: nil, escapeKeyDeletesFile: false)
-        } catch {
+        case .failure(let error):
             let nsError = error as NSError
             if nsError.domain == "FinderSelectionService" && nsError.code == -2 {
                 AlertPresenter.presentWarningWithSettingsButton(
@@ -156,6 +183,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     message: "Zoomies needs permission to communicate with Finder.\n\nOpen System Settings → Privacy & Security → Automation, and enable Finder under Zoomies.",
                     settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
                 )
+            } else if nsError.domain == "FinderSelectionService" && nsError.code == -3 {
+                presentError(title: "Finder didn’t respond", message: nsError.localizedDescription)
             } else {
                 presentError(title: "Finder Error", message: error.localizedDescription)
             }

@@ -92,6 +92,113 @@ enum FinderSelectionService {
 
 }
 
+enum FinderSelectionLookupError: Error, Equatable {
+    case timeout
+
+    var asNSError: NSError {
+        NSError(
+            domain: "FinderSelectionService",
+            code: -3,
+            userInfo: [
+                NSLocalizedDescriptionKey: "Finder didn’t respond in time. Select an image file and try the shortcut again."
+            ]
+        )
+    }
+}
+
+/// Looks up the current Finder selection off the main UI thread, with a short
+/// deadline and single-flight gating so a hung AppleScript cannot freeze the app
+/// or stack duplicate lookups.
+final class FinderSelectionLookupCoordinator {
+    static let defaultTimeout: TimeInterval = 3
+
+    typealias SelectionRunner = () throws -> FinderSelectionService.Selection
+    typealias Completion = (Result<FinderSelectionService.Selection, Error>) -> Void
+
+    /// True while an AppleScript worker is still alive, including after the
+    /// user-facing timeout has already been delivered.
+    private(set) var isLookupInProgress = false
+    var timeout: TimeInterval
+    var executeOffMain: (@escaping () -> Void) -> Void
+    var scheduleTimeout: (_ delay: TimeInterval, _ work: @escaping () -> Void) -> Void
+    var deliverOnMain: (@escaping () -> Void) -> Void
+
+    private var lookupGeneration: UInt64 = 0
+    private var didDeliverCurrentLookup = false
+
+    init(
+        timeout: TimeInterval = FinderSelectionLookupCoordinator.defaultTimeout,
+        executeOffMain: @escaping (@escaping () -> Void) -> Void = { work in
+            DispatchQueue.global(qos: .userInitiated).async(execute: work)
+        },
+        scheduleTimeout: @escaping (TimeInterval, @escaping () -> Void) -> Void = { delay, work in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        },
+        deliverOnMain: @escaping (@escaping () -> Void) -> Void = { work in
+            if Thread.isMainThread {
+                work()
+            } else {
+                DispatchQueue.main.async(execute: work)
+            }
+        }
+    ) {
+        self.timeout = timeout
+        self.executeOffMain = executeOffMain
+        self.scheduleTimeout = scheduleTimeout
+        self.deliverOnMain = deliverOnMain
+    }
+
+    /// Starts a Finder selection lookup if one is not already pending.
+    /// Duplicate requests while a lookup is in flight are ignored.
+    func requestSelection(
+        runSelection: @escaping SelectionRunner = { try FinderSelectionService.selection() },
+        completion: @escaping Completion
+    ) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.requestSelection(runSelection: runSelection, completion: completion)
+            }
+            return
+        }
+
+        guard !isLookupInProgress else { return }
+
+        isLookupInProgress = true
+        didDeliverCurrentLookup = false
+        lookupGeneration += 1
+        let generation = lookupGeneration
+
+        executeOffMain { [weak self] in
+            let result = Result { try runSelection() }
+            self?.deliverOnMain {
+                self?.finishWorker(generation: generation, result: result, completion: completion)
+            }
+        }
+
+        scheduleTimeout(timeout) { [weak self] in
+            self?.deliverTimeout(generation: generation, completion: completion)
+        }
+    }
+
+    /// Delivers the retryable timeout once. The worker gate stays closed until
+    /// that AppleScript actually returns, so a retry cannot start a second hung lookup.
+    private func deliverTimeout(generation: UInt64, completion: Completion) {
+        guard generation == lookupGeneration, !didDeliverCurrentLookup else { return }
+        didDeliverCurrentLookup = true
+        completion(.failure(FinderSelectionLookupError.timeout.asNSError))
+    }
+
+    private func finishWorker(generation: UInt64,
+                              result: Result<FinderSelectionService.Selection, Error>,
+                              completion: Completion) {
+        guard generation == lookupGeneration else { return }
+        isLookupInProgress = false
+        guard !didDeliverCurrentLookup else { return }
+        didDeliverCurrentLookup = true
+        completion(result)
+    }
+}
+
 enum FinderSelectionParser {
     static func parseSelectionResult(_ raw: String, fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> FinderSelectionService.Selection {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
