@@ -6,6 +6,7 @@ import Carbon
 /// without depending on its internal implementation details.
 enum EditorTool: Hashable {
     case pen
+    case line
     case arrow
     case rectangle
     case ellipse
@@ -38,6 +39,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         case zoomOut
         case zoomReset
         case undo
+        case redo
         case clear
         case selectColor(index: Int)
         case backToNote
@@ -86,6 +88,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
 
     private var items: [Item] = []
     private var undoStack: [[Item]] = []
+    private var redoStack: [[Item]] = []
     private let maxUndoLevels = 30
     private let annotationStrokeWidth: CGFloat = 4.0
     private let canvasEdgeInset: CGFloat = 24.0
@@ -231,7 +234,25 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
 
     func undo() {
         guard let previous = undoStack.popLast() else { return }
+        if redoStack.count >= maxUndoLevels {
+            redoStack.removeFirst()
+        }
+        redoStack.append(items)
         items = previous
+        resetTransientSelectionState()
+    }
+
+    func redo() {
+        guard let next = redoStack.popLast() else { return }
+        if undoStack.count >= maxUndoLevels {
+            undoStack.removeFirst()
+        }
+        undoStack.append(items)
+        items = next
+        resetTransientSelectionState()
+    }
+
+    private func resetTransientSelectionState() {
         updateCanvasSizeIfNeeded()
         selectedTextIndex = nil
         draggingTextIndex = nil
@@ -414,6 +435,8 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             switch currentTool {
             case .pen:
                 drawPen(points: currentPoints, color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
+            case .line:
+                drawPen(points: [start, current], color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
             case .arrow:
                 drawArrow(from: start, to: current, color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
             case .rectangle:
@@ -684,6 +707,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         baseImageOrigin = shiftedPoint(baseImageOrigin, byX: dx, byY: dy)
         items = shiftedItems(items, byX: dx, byY: dy)
         undoStack = undoStack.map { shiftedItems($0, byX: dx, byY: dy) }
+        redoStack = redoStack.map { shiftedItems($0, byX: dx, byY: dy) }
 
         if let point = dragStartPoint {
             dragStartPoint = shiftedPoint(point, byX: dx, byY: dy)
@@ -974,6 +998,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             undoStack.removeFirst()
         }
         undoStack.append(items)
+        redoStack.removeAll()
     }
 
     /// Ensure the canvas is large enough to contain the base image and all annotations.
@@ -1220,6 +1245,14 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             if currentPoints.count > 1 {
                 pushUndoSnapshot()
                 items.append(.pen(points: currentPoints, color: currentColor, lineWidth: annotationStrokeWidth))
+                updateCanvasSizeIfNeeded()
+            }
+        case .line:
+            if distance(from: start, to: point) >= 2 {
+                pushUndoSnapshot()
+                // A two-point stroke is a straight line and already supports
+                // selection, moving, clipboard operations, and saved edit state.
+                items.append(.pen(points: [start, point], color: currentColor, lineWidth: annotationStrokeWidth))
                 updateCanvasSizeIfNeeded()
             }
         case .arrow:
@@ -1627,7 +1660,13 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
                 onKeyCommand?(.zoomReset)
                 return
             case "z":
-                onKeyCommand?(.undo)
+                // FloatingInputPanel models the same distinction for text views:
+                // Cmd+Z undoes, Cmd+Shift+Z redoes.
+                if flags.contains(.shift) {
+                    onKeyCommand?(.redo)
+                } else {
+                    onKeyCommand?(.undo)
+                }
                 return
             case "c":
                 onKeyCommand?(.copyToClipboard)
@@ -1668,14 +1707,28 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         // Cmd-based key equivalents can be intercepted by the window/menu before keyDown.
-        // Handle copy/cut here so shortcuts work reliably in the canvas.
+        // Handle editor commands here so they work reliably in the canvas.
         if textEditor != nil {
             return super.performKeyEquivalent(with: event)
         }
 
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard flags == [.command],
-              let chars = event.charactersIgnoringModifiers?.lowercased() else {
+        guard let chars = event.charactersIgnoringModifiers?.lowercased() else {
+            return super.performKeyEquivalent(with: event)
+        }
+
+        if chars == "z" {
+            if flags == [.command] {
+                onKeyCommand?(.undo)
+                return true
+            }
+            if flags == [.command, .shift] {
+                onKeyCommand?(.redo)
+                return true
+            }
+        }
+
+        guard flags == [.command] else {
             return super.performKeyEquivalent(with: event)
         }
 
@@ -1768,6 +1821,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
 
     private static let toolKeyCodeToTool: [UInt16: EditorTool] = [
         UInt16(kVK_ANSI_W): .pen,
+        UInt16(kVK_ANSI_D): .line,
         UInt16(kVK_ANSI_A): .arrow,
         UInt16(kVK_ANSI_R): .rectangle,
         UInt16(kVK_ANSI_E): .ellipse,

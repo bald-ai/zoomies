@@ -9,6 +9,7 @@ final class ScreenshotWorkflowController {
     typealias ImageDataWriter = (_ data: Data, _ outputURL: URL, _ originalURL: URL) throws -> URL
     typealias ErrorPresenter = (_ title: String, _ message: String) -> Void
     typealias FileRemover = (_ url: URL) throws -> Void
+    typealias DeleteConfirmer = () -> Bool
 
     enum FinalAction {
         case saveOnly
@@ -31,6 +32,7 @@ final class ScreenshotWorkflowController {
     private let imageDataWriter: ImageDataWriter
     private let errorPresenter: ErrorPresenter
     private let removeFile: FileRemover
+    private let deleteConfirmer: DeleteConfirmer
 
     /// The clean (pre-note) original used to round-trip prompt edits when a saved
     /// PNG is reopened. For a fresh capture this is the in-memory image; for a
@@ -77,7 +79,8 @@ final class ScreenshotWorkflowController {
          },
          removeFile: @escaping FileRemover = { url in
              try FileManager.default.removeItem(at: url)
-         }) {
+         },
+         deleteConfirmer: DeleteConfirmer? = nil) {
         self.fileURL = fileURL
         self.initialFilePersistence = initialFilePersistence
         self.initialScreenshotCounter = initialScreenshotCounter
@@ -89,6 +92,11 @@ final class ScreenshotWorkflowController {
         self.imageDataWriter = imageDataWriter
         self.errorPresenter = errorPresenter
         self.removeFile = removeFile
+        self.deleteConfirmer = deleteConfirmer ?? {
+            ScreenshotWorkflowController.defaultDeleteConfirmation(
+                confirmBeforeClosing: settingsStore.settings.confirmBeforeClosing
+            )
+        }
 
         let reopen = WorkflowReopenMetadataLogic.resolve(fileURL: fileURL, initialImage: initialImage)
         self.cleanOriginalPNG = reopen.cleanOriginalPNG
@@ -367,6 +375,13 @@ final class ScreenshotWorkflowController {
         editor.onComplete = { [weak self] image, action, editorState in
             self?.handleEditorCompletion(editedImage: image, action: action, editorState: editorState)
         }
+        // The editor confirms Esc/X cancellation itself so a Cancel leaves the
+        // window open with drawings intact. The workflow never re-asks, which
+        // also keeps fresh captures to a single prompt after persistence lands.
+        editor.onConfirmDelete = deleteConfirmer
+        editor.onConfirmClose = {
+            ScreenshotWorkflowController.defaultCloseConfirmation()
+        }
         editor.onBackToNote = { [weak self] in
             self?.returnToNoteFromEditor()
         }
@@ -540,9 +555,15 @@ final class ScreenshotWorkflowController {
 
     private func ensureBackupExists() {
         guard !hasCreatedBackup else { return }
-        backupService.createBackup(forOriginalURL: fileURL)
-        hasCreatedBackup = true
-        backupOriginalURL = fileURL
+        if backupService.createBackup(forOriginalURL: fileURL) {
+            hasCreatedBackup = true
+            backupOriginalURL = fileURL
+        } else {
+            presentError(
+                title: "Couldn't back up screenshot",
+                message: "Zoomies couldn't back up the original file, so restoring it later may not work. Your save will continue."
+            )
+        }
     }
 
     private func removeBackupIfNeeded() {
@@ -673,6 +694,10 @@ final class ScreenshotWorkflowController {
         }
 
         if action == .deleteOnly {
+            guard deleteConfirmer() else {
+                isFinalActionInProgress = false
+                return
+            }
             guard deleteSourceFileAndBackup() else {
                 isFinalActionInProgress = false
                 return
@@ -781,17 +806,25 @@ final class ScreenshotWorkflowController {
 
         // Prefer the recovered clean original so re-saving a reopened Zoomies PNG
         // never bakes a note on top of an already-burned image.
-        guard let image = initialImage ?? NSImage(contentsOf: fileURL) else {
+        guard let base = initialImage ?? NSImage(contentsOf: fileURL) else {
             presentError(title: "Failed to apply note", message: "Could not read the screenshot image.")
             return false
         }
+        // A reopened annotated file carries its drawings in initialEditorState
+        // while initialImage is the bare base. Composite first so a note-only
+        // save keeps the visible drawings instead of flattening over the base.
+        let image = annotatedBaseImage(from: base)
         guard let updated = WorkflowNoteRenderer.burn(note: preparedNote.rendered, into: image) else {
             presentError(title: "Failed to apply note", message: "Could not render the note text.")
             return false
         }
 
+        // Editor-state-only reopens have no recovered clean original; fall back
+        // to the composited pre-note image so the prompt still embeds and
+        // round-trips instead of being silently dropped.
+        let baseline = cleanOriginalPNG ?? baselinePNGForEmbedding(preNoteImage: image)
         guard encodeAndWriteImage(updated,
-                                  baselinePNG: cleanOriginalPNG,
+                                  baselinePNG: baseline,
                                   prompt: preparedNote.identity,
                                   editorState: initialEditorState,
                                   errorTitle: "Failed to apply note") else {
@@ -799,6 +832,20 @@ final class ScreenshotWorkflowController {
         }
         burnedNoteText = preparedNote.identity
         return true
+    }
+
+    /// Rebuilds the visible annotated image for a note-only save on a reopened
+    /// file. Returns the base unchanged when there is no carried editor state.
+    private func annotatedBaseImage(from base: NSImage) -> NSImage {
+        guard let state = initialEditorState,
+              state.isSafeToRestore(),
+              !state.items.isEmpty else {
+            return base
+        }
+        // Mirror EditorWindowController: redraw the carried annotations over
+        // the state's own clean base exactly once.
+        let canvasBase = NSImage(data: state.baseImagePNG) ?? base
+        return EditorCanvasView(image: canvasBase, initialState: state).compositeImage()
     }
 
     private func persistImageIfNeeded(_ image: NSImage?,
@@ -821,7 +868,15 @@ final class ScreenshotWorkflowController {
         case .saveOnly:
             break
         case .copyAndSave:
-            _ = clipboardService.copyFile(at: fileURL, useCache: false)
+            // The save already persisted above, so the save stands; warn and
+            // stay open so the user can retry the copy.
+            guard clipboardService.copyFile(at: fileURL, useCache: false) != nil else {
+                presentError(
+                    title: "Copy failed",
+                    message: "Zoomies couldn't copy the screenshot to the clipboard, but your save was kept. You can try Copy + Save again."
+                )
+                return false
+            }
         case .copyAndDelete:
             if let published = publishedCopyAndDeleteURL,
                FileManager.default.fileExists(atPath: published.path) {
@@ -932,5 +987,52 @@ final class ScreenshotWorkflowController {
 
     private func presentError(title: String, message: String) {
         errorPresenter(title, message)
+    }
+
+    /// When a confirmation is shown, Return confirms and Escape cancels.
+    static func makeDeleteConfirmationAlert() -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete this screenshot?"
+        alert.informativeText = "This permanently deletes the screenshot file. This can't be undone.\n\nYou can disable this confirmation in Settings."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.keyEquivalent = "\r"
+        alert.buttons.last?.keyEquivalent = "\u{1b}"
+        return alert
+    }
+
+    static func defaultDeleteConfirmation(confirmBeforeClosing: Bool = true) -> Bool {
+        guard confirmBeforeClosing else { return true }
+        return presentCancellationConfirmation(makeDeleteConfirmationAlert)
+    }
+
+    static func makeCloseConfirmationAlert() -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Close this editing session?"
+        alert.informativeText = "Unsaved edits will be discarded. The original image will not be deleted.\n\nYou can disable this confirmation in Settings."
+        alert.addButton(withTitle: "Close")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.keyEquivalent = "\r"
+        alert.buttons.last?.keyEquivalent = "\u{1b}"
+        return alert
+    }
+
+    static func defaultCloseConfirmation() -> Bool {
+        presentCancellationConfirmation(makeCloseConfirmationAlert)
+    }
+
+    private static func presentCancellationConfirmation(_ makeAlert: @escaping () -> NSAlert) -> Bool {
+        var confirmed = false
+        let ask = {
+            confirmed = AlertPresenter.runModal(makeAlert()) == .alertFirstButtonReturn
+        }
+        if Thread.isMainThread {
+            ask()
+        } else {
+            DispatchQueue.main.sync(execute: ask)
+        }
+        return confirmed
     }
 }

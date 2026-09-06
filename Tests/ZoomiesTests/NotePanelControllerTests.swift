@@ -26,6 +26,14 @@ final class NotePanelControllerTests: XCTestCase {
         XCTAssertEqual(effectiveColor, .white)
     }
 
+    func testShortcutLabelAdvertisesShiftEnterNewline() throws {
+        let controller = NotePanelController(initialText: "")
+        let labels = findLabels(in: controller.window?.contentView).map(\.stringValue)
+
+        XCTAssertTrue(labels.contains { $0.contains("Shift+↩: new line") })
+        XCTAssertTrue(labels.contains { $0.contains("Enter: Save") })
+    }
+
     func testScratchpadModeUsesNotePanelWithoutScreenshotOnlyActions() throws {
         let controller = NotePanelController(initialText: "",
                                              escapeKeyDeletesFile: false,

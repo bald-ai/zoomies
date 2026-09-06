@@ -6,6 +6,9 @@ struct Settings: Codable {
     /// Maximum width in pixels (0 = original size).
     var maxWidth: Int
 
+    /// Whether cancelling an editing session asks before deleting or closing.
+    var confirmBeforeClosing: Bool
+
     /// Whether to prepend a fixed prefix to burned-in notes.
     var notePrefixEnabled: Bool
 
@@ -29,6 +32,7 @@ extension Settings {
     /// Default settings used on first launch or when decoding fails.
     static let `default` = Settings(
         maxWidth: 0,
+        confirmBeforeClosing: true,
         notePrefixEnabled: false,
         notePrefix: "",
         filenameTemplate: .defaultTemplate,
@@ -95,6 +99,8 @@ extension Settings {
 extension Settings {
     private enum CodingKeys: String, CodingKey {
         case maxWidth
+        // Preserve the existing on-disk preference while correcting its behavior.
+        case confirmBeforeClosing = "enterConfirmsDelete"
         case notePrefixEnabled
         case notePrefix
         case filenameTemplate
@@ -107,6 +113,8 @@ extension Settings {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.maxWidth = try container.decodeIfPresent(Int.self, forKey: .maxWidth)
             ?? Settings.default.maxWidth
+        self.confirmBeforeClosing = try container.decodeIfPresent(Bool.self, forKey: .confirmBeforeClosing)
+            ?? Settings.default.confirmBeforeClosing
         self.notePrefixEnabled = try container.decodeIfPresent(Bool.self, forKey: .notePrefixEnabled)
             ?? Settings.default.notePrefixEnabled
         self.notePrefix = try container.decodeIfPresent(String.self, forKey: .notePrefix)

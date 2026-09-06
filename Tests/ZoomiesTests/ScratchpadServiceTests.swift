@@ -29,6 +29,19 @@ final class ScratchpadServiceTests: XCTestCase {
         XCTAssertNotEqual(first, second)
     }
 
+    func testRepeatBaseNameNeverOverwritesExistingNote() throws {
+        let desktop = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(desktop) }
+        let writer = ScratchpadNoteWriter(directory: desktop)
+
+        let first = try writer.write(text: "original", baseName: "Note")
+        let second = try writer.write(text: "repeat", baseName: "Note")
+
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(try String(contentsOf: first, encoding: .utf8), "original")
+        XCTAssertEqual(try String(contentsOf: second, encoding: .utf8), "repeat")
+    }
+
     func testWriteCreatesDirectoryIfMissing() throws {
         let base = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(base) }
@@ -38,5 +51,19 @@ final class ScratchpadServiceTests: XCTestCase {
         let url = try writer.write(text: "x", baseName: "N")
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testOpenPresentsNotePanelFirst() throws {
+        let base = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(base) }
+        let cache = base.appendingPathComponent("clipboard", isDirectory: true)
+        let clipboard = ClipboardService(fileManager: .default, cacheDirectory: cache)
+        let service = ScratchpadService(fileManager: .default,
+                                        clipboardService: clipboard,
+                                        desktopDirectory: base.appendingPathComponent("desktop", isDirectory: true))
+
+        service.open()
+
+        XCTAssertEqual(service.presentedPanel, .note, "Opening the scratchpad must land on the note panel so Enter saves immediately.")
     }
 }

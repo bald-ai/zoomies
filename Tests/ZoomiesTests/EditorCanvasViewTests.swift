@@ -256,4 +256,105 @@ final class EditorCanvasViewTests: XCTestCase {
 
         XCTAssertNil(canvas.selectedRegionPayload())
     }
+
+    func testUndoRedoRoundTripRestoresDeletedArrow() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .arrow(start: .init(NSPoint(x: 30, y: 30)), end: .init(NSPoint(x: 70, y: 30)),
+                   color: .init(.systemRed), lineWidth: 4)
+        ])
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80),
+                                      initialState: state)
+        canvas.setTool(.selection)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas,
+                                              location: NSPoint(x: 50, y: 30)))
+        canvas.keyDown(with: try keyEvent(keyCode: 51))
+        XCTAssertEqual(canvas.editableState()?.items.count, 0)
+
+        canvas.undo()
+        XCTAssertEqual(canvas.editableState()?.items.count, 1)
+
+        canvas.redo()
+        XCTAssertEqual(canvas.editableState()?.items.count, 0)
+
+        canvas.undo()
+        XCTAssertEqual(canvas.editableState()?.items.count, 1)
+    }
+
+    func testNewStrokeClearsRedoStack() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .arrow(start: .init(NSPoint(x: 30, y: 30)), end: .init(NSPoint(x: 70, y: 30)),
+                   color: .init(.systemRed), lineWidth: 4)
+        ])
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80),
+                                      initialState: state)
+        canvas.setTool(.selection)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas,
+                                              location: NSPoint(x: 50, y: 30)))
+        canvas.keyDown(with: try keyEvent(keyCode: 51))
+        canvas.undo()
+        XCTAssertEqual(canvas.editableState()?.items.count, 1)
+
+        // A new pen stroke must discard the pending redo; redo becomes a no-op.
+        canvas.setTool(.pen)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas,
+                                              location: NSPoint(x: 30, y: 60)))
+        canvas.mouseDragged(with: try mouseEvent(type: .leftMouseDragged, canvas: canvas,
+                                                 location: NSPoint(x: 70, y: 60)))
+        canvas.mouseUp(with: try mouseEvent(type: .leftMouseUp, canvas: canvas,
+                                            location: NSPoint(x: 70, y: 60)))
+        XCTAssertEqual(canvas.editableState()?.items.count, 2)
+
+        canvas.redo()
+        XCTAssertEqual(canvas.editableState()?.items.count, 2)
+    }
+
+    func testCommandShiftZRedoesWhileCommandZUndoes() throws {
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80))
+        var received: [EditorCanvasView.KeyCommand] = []
+        canvas.onKeyCommand = { received.append($0) }
+
+        canvas.keyDown(with: try keyEvent(keyCode: UInt16(kVK_ANSI_Z),
+                                          modifierFlags: [.command],
+                                          characters: "z"))
+        canvas.keyDown(with: try keyEvent(keyCode: UInt16(kVK_ANSI_Z),
+                                          modifierFlags: [.command, .shift],
+                                          characters: "Z"))
+
+        XCTAssertEqual(received.count, 2)
+        guard received.count == 2 else { return }
+        guard case .undo = received[0] else {
+            return XCTFail("Cmd+Z must send .undo")
+        }
+        guard case .redo = received[1] else {
+            return XCTFail("Cmd+Shift+Z must send .redo")
+        }
+    }
+
+    func testPerformKeyEquivalentRoutesCommandZAndCommandShiftZ() throws {
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80))
+        var received: [EditorCanvasView.KeyCommand] = []
+        canvas.onKeyCommand = { received.append($0) }
+
+        XCTAssertTrue(canvas.performKeyEquivalent(
+            with: try keyEvent(keyCode: UInt16(kVK_ANSI_Z),
+                               modifierFlags: [.command],
+                               characters: "z")
+        ))
+        XCTAssertTrue(canvas.performKeyEquivalent(
+            with: try keyEvent(keyCode: UInt16(kVK_ANSI_Z),
+                               modifierFlags: [.command, .shift],
+                               characters: "Z")
+        ))
+
+        XCTAssertEqual(received.count, 2)
+        guard received.count == 2 else { return }
+        guard case .undo = received[0] else {
+            return XCTFail("Window-level Cmd+Z must send .undo")
+        }
+        guard case .redo = received[1] else {
+            return XCTFail("Window-level Cmd+Shift+Z must send .redo")
+        }
+    }
 }

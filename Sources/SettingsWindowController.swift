@@ -8,6 +8,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
     // UI elements we need to read/write after initialization.
     private let maxSizePopUp: NSPopUpButton
+    private let confirmBeforeClosingCheckbox: NSButton
     private let notePrefixCheckbox: NSButton
     private let notePrefixField: NSTextField
     private let notePrefixCountLabel: NSTextField
@@ -27,6 +28,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         self.hotKeyService = hotKeyService
 
         maxSizePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
+        confirmBeforeClosingCheckbox = NSButton(
+            checkboxWithTitle: "Confirm before deleting or closing",
+            target: nil,
+            action: nil
+        )
         notePrefixCheckbox = NSButton(checkboxWithTitle: "Enable Note Prefix", target: nil, action: nil)
         notePrefixField = NSTextField(string: "")
         notePrefixCountLabel = NSTextField(labelWithString: "0/50")
@@ -38,7 +44,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         scratchpadShortcutRecorder = ShortcutRecorderView(frame: .zero)
         duplicateWarningLabel = NSTextField(labelWithString: "")
 
-        let contentRect = NSRect(x: 0, y: 0, width: 520, height: 520)
+        let contentRect = NSRect(x: 0, y: 0, width: 520, height: 550)
         let style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
         let window = NSWindow(contentRect: contentRect, styleMask: style, backing: .buffered, defer: false)
         window.center()
@@ -114,8 +120,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
         maxSizeLabel.setContentHuggingPriority(.required, for: .horizontal)
 
+        confirmBeforeClosingCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        confirmBeforeClosingCheckbox.target = self
+        confirmBeforeClosingCheckbox.action = #selector(confirmBeforeClosingToggled(_:))
+        confirmBeforeClosingCheckbox.toolTip = "Ask before Escape or a close button deletes a new screenshot or closes an existing image. When off, proceed immediately."
+        confirmBeforeClosingCheckbox.setAccessibilityIdentifier("settings.confirmBeforeClosing")
+
         rootStack.addArrangedSubview(generalHeader)
         rootStack.addArrangedSubview(maxSizeRow)
+        rootStack.addArrangedSubview(confirmBeforeClosingCheckbox)
         rootStack.addArrangedSubview(makeSeparator())
 
         // MARK: Note Settings section
@@ -290,6 +303,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         }
 
         // Note prefix
+        confirmBeforeClosingCheckbox.state = settings.confirmBeforeClosing ? .on : .off
         notePrefixCheckbox.state = settings.notePrefixEnabled ? .on : .off
         notePrefixField.stringValue = settings.notePrefix
         notePrefixField.isEnabled = settings.notePrefixEnabled
@@ -316,6 +330,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         let width = sender.selectedItem?.tag ?? 0
         settingsStore.update { settings in
             settings.maxWidth = width
+        }
+    }
+
+    @objc private func confirmBeforeClosingToggled(_ sender: NSButton) {
+        let isOn = sender.state == .on
+        settingsStore.update { settings in
+            settings.confirmBeforeClosing = isOn
         }
     }
 

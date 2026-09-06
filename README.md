@@ -86,7 +86,7 @@ the relevant shortcut code and build a new `.app` for you.
 | Edit | `W` / `A` / `R` / `E` / `T` / `S` | Pen / arrow / rectangle / ellipse / text / select |
 | Edit | `K` or `Q` | Open colors |
 | Edit | `1-6` | Pick color |
-| Edit | `Cmd+Z` | Undo |
+| Edit | `Cmd+Z` / `Cmd+Shift+Z` | Undo / redo |
 | Edit | `Option+Backspace` | Clear |
 | Edit | `Cmd+C` / `Cmd+X` / `Cmd+V` | Copy / cut / paste |
 | Edit | `Cmd +` / `Cmd -` / `Cmd 0` | Zoom in / out / reset |

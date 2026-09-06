@@ -5,7 +5,8 @@ private let blockPasteboardType = NSPasteboard.PasteboardType("com.zoomies.filen
 final class FilenameTemplateEditorView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private let settingsStore: SettingsStore
 
-    private let tableView = NSTableView()
+    // Internal so tests can verify keystrokes don't rebuild cells.
+    let tableView = NSTableView()
     private let scrollView = NSScrollView()
     private let previewLabel = NSTextField(labelWithString: "")
     private let resetButton = NSButton(title: "Reset to Defaults", target: nil, action: nil)
@@ -115,6 +116,15 @@ final class FilenameTemplateEditorView: NSView, NSTableViewDataSource, NSTableVi
         updatePreview()
     }
 
+    /// Text/format keystrokes update the model and preview only. Reloading the
+    /// table here rebuilds the editing cell on every keystroke and drops focus.
+    private func updateTemplateText(_ body: (inout FilenameTemplate) -> Void) {
+        settingsStore.update { settings in
+            body(&settings.filenameTemplate)
+        }
+        updatePreview()
+    }
+
     // MARK: - NSTableViewDataSource
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -174,7 +184,7 @@ final class FilenameTemplateEditorView: NSView, NSTableViewDataSource, NSTableVi
         }
 
         cell.onTextChanged = { [weak self] newText in
-            self?.mutateTemplate { template in
+            self?.updateTemplateText { template in
                 if let i = template.blocks.firstIndex(where: { $0.id == block.id }) {
                     template.blocks[i].text = newText
                 }
@@ -182,7 +192,7 @@ final class FilenameTemplateEditorView: NSView, NSTableViewDataSource, NSTableVi
         }
 
         cell.onFormatChanged = { [weak self] newFormat in
-            self?.mutateTemplate { template in
+            self?.updateTemplateText { template in
                 if let i = template.blocks.firstIndex(where: { $0.id == block.id }) {
                     template.blocks[i].format = newFormat.isEmpty ? "" : newFormat
                 }

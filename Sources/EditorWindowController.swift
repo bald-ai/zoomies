@@ -1,5 +1,28 @@
 import AppKit
 
+/// Routes command-key equivalents before AppKit's window/menu handling can
+/// consume them. The canvas remains the first responder during normal editing;
+/// inline text editors intentionally keep their standard text undo manager.
+final class EditorWindow: NSWindow {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let chars = event.charactersIgnoringModifiers?.lowercased()
+
+        if chars == "z", let canvas = firstResponder as? EditorCanvasView {
+            if flags == [.command] {
+                canvas.undo()
+                return true
+            }
+            if flags == [.command, .shift] {
+                canvas.redo()
+                return true
+            }
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
 /// Window controller for the screenshot editor.
 ///
 /// The editor provides basic annotation tools (pen, arrow, rectangle,
@@ -18,6 +41,10 @@ final class EditorWindowController: NSWindowController {
     ///   - action: The requested final action.
     var onComplete: ((NSImage?, FinalAction, EditorCanvasState?) -> Void)?
     var onBackToNote: (() -> Void)?
+    /// Confirmation callbacks for Esc/X paths. Cancelling keeps drawings intact.
+    /// The setting gates both callbacks; nil proceeds without a prompt.
+    var onConfirmDelete: (() -> Bool)?
+    var onConfirmClose: (() -> Bool)?
 
     private let canvasView: EditorCanvasView
     private let scrollView = EditorScrollView()
@@ -76,6 +103,7 @@ final class EditorWindowController: NSWindowController {
     private let maxEffectiveZoom: CGFloat = 8.0
 
     private var didSendCompletion = false
+    private var keyDownMonitor: Any?
 
     private weak var toolbarBackgroundView: NSView?
     private var toolbarMinimumWidth: CGFloat = 520.0
@@ -135,10 +163,10 @@ final class EditorWindowController: NSWindowController {
         let contentRect = NSRect(x: 0, y: 0, width: 720, height: 520)
 
         let style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
-        let window = NSWindow(contentRect: contentRect,
-                              styleMask: style,
-                              backing: .buffered,
-                              defer: false)
+        let window = EditorWindow(contentRect: contentRect,
+                                  styleMask: style,
+                                  backing: .buffered,
+                                  defer: false)
         window.title = "Edit Screenshot"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
@@ -162,14 +190,46 @@ final class EditorWindowController: NSWindowController {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        removeKeyDownMonitor()
+    }
+
     func show() {
         guard let window = window else { return }
+        installKeyDownMonitor()
         // Make the editor immediately key so keyboard shortcuts work without extra click.
         NSApp.activate(ignoringOtherApps: true)
         window.orderFrontRegardless()
         window.makeKey()
         window.makeFirstResponder(canvasView)
         updateScrollLockAndRecentering()
+    }
+
+    private func installKeyDownMonitor() {
+        guard keyDownMonitor == nil else { return }
+        keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.window?.isKeyWindow == true else { return event }
+            // Inline annotation text uses the standard NSTextView undo manager.
+            guard !(self.window?.firstResponder is NSTextView) else { return event }
+
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard event.charactersIgnoringModifiers?.lowercased() == "z" else { return event }
+            if flags == [.command] {
+                self.canvasView.undo()
+                return nil
+            }
+            if flags == [.command, .shift] {
+                self.canvasView.redo()
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func removeKeyDownMonitor() {
+        guard let keyDownMonitor else { return }
+        NSEvent.removeMonitor(keyDownMonitor)
+        self.keyDownMonitor = nil
     }
 
     func currentCompositeImage() -> NSImage {
@@ -307,8 +367,10 @@ final class EditorWindowController: NSWindowController {
         let background = NSView()
         background.translatesAutoresizingMaskIntoConstraints = false
         background.wantsLayer = true
-        background.layer?.cornerRadius = 10
-        background.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+        background.layer?.cornerRadius = 13
+        background.layer?.backgroundColor = NSColor(hex: "#131515").cgColor
+        background.layer?.borderWidth = 1
+        background.layer?.borderColor = NSColor(hex: "#343737").cgColor
         return background
     }
 
@@ -320,6 +382,7 @@ final class EditorWindowController: NSWindowController {
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         let penButton = makeToolButton(symbol: "pencil", tool: .pen, toolTip: "Pen (W)")
+        let lineButton = makeToolButton(symbol: "line.diagonal", tool: .line, toolTip: "Line (D)")
         let arrowButton = makeToolButton(symbol: "arrow.right", tool: .arrow, toolTip: "Arrow (A)")
         let rectButton = makeToolButton(symbol: "square", tool: .rectangle, toolTip: "Rectangle (R, Hold ⇧: Square)")
         let ovalButton = makeToolButton(symbol: "circle", tool: .ellipse, toolTip: "Ellipse (E, Hold ⇧: Circle)")
@@ -327,6 +390,7 @@ final class EditorWindowController: NSWindowController {
         let selectionButton = makeToolButton(symbol: "rectangle.dashed", tool: .selection, toolTip: "Selection (S)")
 
         let undoButton = makeActionButton(symbol: "arrow.uturn.left", toolTip: "Undo (Cmd+Z)", action: #selector(undoPressed))
+        let redoButton = makeActionButton(symbol: "arrow.uturn.right", toolTip: "Redo (Cmd+Shift+Z)", action: #selector(redoPressed))
         let clearButton = makeActionButton(symbol: "eraser", toolTip: "Clear (Option+Backspace)", action: #selector(clearPressed))
 
         let zoomOutButton = makeActionButton(symbol: "minus.magnifyingglass", toolTip: "Zoom Out (Cmd+-)", action: #selector(zoomOutPressed))
@@ -345,16 +409,7 @@ final class EditorWindowController: NSWindowController {
         zoomLabel.translatesAutoresizingMaskIntoConstraints = false
         zoomLabel.widthAnchor.constraint(equalToConstant: 40).isActive = true
 
-        // Drawing tools - tight group
-        let drawingTools = NSStackView(views: [
-            penButton, arrowButton, rectButton, ovalButton,
-            textButton, selectionButton
-        ])
-        drawingTools.orientation = .horizontal
-        drawingTools.alignment = .centerY
-        drawingTools.spacing = 2
-
-        // Color indicator wrapped in a 32x32 container so it optically matches buttons
+        // Give the color swatch the same footprint as the icon buttons.
         let colorContainer = NSView()
         colorContainer.translatesAutoresizingMaskIntoConstraints = false
         colorContainer.addSubview(colorIndicatorButton)
@@ -365,35 +420,44 @@ final class EditorWindowController: NSWindowController {
             colorIndicatorButton.centerYAnchor.constraint(equalTo: colorContainer.centerYAnchor),
         ])
 
-        // Edit actions
-        let editActions = NSStackView(views: [undoButton, clearButton])
-        editActions.orientation = .horizontal
-        editActions.alignment = .centerY
-        editActions.spacing = 2
+        let drawingTools = makeToolbarGroup([
+            penButton, lineButton, arrowButton, rectButton, ovalButton,
+            textButton, selectionButton, colorContainer
+        ])
+        let editActions = makeToolbarGroup([undoButton, redoButton, clearButton])
+        let zoomControls = makeToolbarGroup([zoomOutButton, zoomLabel, zoomInButton])
+        let sessionActions = makeToolbarGroup([cancelButton, saveButton])
 
-        // Zoom controls
-        let zoomControls = NSStackView(views: [zoomOutButton, zoomLabel, zoomInButton])
-        zoomControls.orientation = .horizontal
-        zoomControls.alignment = .centerY
-        zoomControls.spacing = 0
-
-        // Session actions
-        let sessionActions = NSStackView(views: [cancelButton, saveButton])
-        sessionActions.orientation = .horizontal
-        sessionActions.alignment = .centerY
-        sessionActions.spacing = 2
-
-        [drawingTools, colorContainer, editActions, zoomControls, sessionActions]
+        [drawingTools, editActions, zoomControls, sessionActions]
             .forEach { stack.addArrangedSubview($0) }
 
-        // Spacing between groups: tighter within left side, breathe between logical sections
-        stack.spacing = 12
-        stack.setCustomSpacing(6, after: drawingTools)
-        stack.setCustomSpacing(18, after: colorContainer)
-        stack.setCustomSpacing(12, after: editActions)
-        stack.setCustomSpacing(12, after: zoomControls)
+        stack.spacing = 8
 
         return stack
+    }
+
+    private func makeToolbarGroup(_ controls: [NSView]) -> NSView {
+        let surface = NSView()
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        surface.wantsLayer = true
+        surface.layer?.cornerRadius = 9
+        surface.layer?.backgroundColor = NSColor(hex: "#2b2e2e").cgColor
+        surface.layer?.borderWidth = 0.5
+        surface.layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
+
+        let controlsStack = NSStackView(views: controls)
+        controlsStack.orientation = .horizontal
+        controlsStack.alignment = .centerY
+        controlsStack.spacing = 2
+        controlsStack.translatesAutoresizingMaskIntoConstraints = false
+        surface.addSubview(controlsStack)
+        NSLayoutConstraint.activate([
+            controlsStack.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 3),
+            controlsStack.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -3),
+            controlsStack.topAnchor.constraint(equalTo: surface.topAnchor, constant: 3),
+            controlsStack.bottomAnchor.constraint(equalTo: surface.bottomAnchor, constant: -3)
+        ])
+        return surface
     }
 
     private func makeToolButton(symbol: String, tool: EditorTool, toolTip: String) -> NSButton {
@@ -418,7 +482,7 @@ final class EditorWindowController: NSWindowController {
         button.refusesFirstResponder = true
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         button.imagePosition = .imageOnly
-        button.contentTintColor = NSColor.labelColor
+        button.contentTintColor = NSColor(hex: "#dedfe0")
         button.toolTip = toolTip
         button.wantsLayer = true
         button.layer?.cornerRadius = 6
@@ -530,9 +594,9 @@ final class EditorWindowController: NSWindowController {
         for (key, button) in toolButtons {
             let isActive = key == tool
             button.layer?.backgroundColor = isActive
-                ? NSColor.controlAccentColor.withAlphaComponent(0.92).cgColor
+                ? NSColor(hex: "#253e54").cgColor
                 : NSColor.clear.cgColor
-            button.contentTintColor = isActive ? .white : .labelColor
+            button.contentTintColor = isActive ? NSColor(hex: "#8ac5ff") : NSColor(hex: "#dedfe0")
         }
     }
 
@@ -607,6 +671,10 @@ final class EditorWindowController: NSWindowController {
         canvasView.undo()
     }
 
+    @objc private func redoPressed() {
+        canvasView.redo()
+    }
+
     @objc private func clearPressed() {
         canvasView.clearAll()
     }
@@ -653,6 +721,8 @@ final class EditorWindowController: NSWindowController {
             setZoom(defaultUserZoomFactor)
         case .undo:
             canvasView.undo()
+        case .redo:
+            canvasView.redo()
         case .clear:
             canvasView.clearAll()
         case .selectColor(let index):
@@ -855,6 +925,10 @@ final class EditorWindowController: NSWindowController {
     // MARK: - Finishing
 
     private func finish(with action: FinalAction) {
+        // Cancelling keeps the editor open with drawings intact: no
+        // completion is sent, so the workflow stays alive and the window
+        // never closes.
+        guard confirmCancellation(for: action) else { return }
         guard let completion = onComplete else {
             close()
             return
@@ -867,10 +941,30 @@ final class EditorWindowController: NSWindowController {
         completion(image, action, state)
         close()
     }
+
+    private func confirmCancellation(for action: FinalAction) -> Bool {
+        guard settingsStore.settings.confirmBeforeClosing else { return true }
+        switch action {
+        case .deleteOnly:
+            return onConfirmDelete?() ?? true
+        case .closeOnly:
+            return onConfirmClose?() ?? true
+        default:
+            return true
+        }
+    }
 }
 
 extension EditorWindowController: NSWindowDelegate {
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        // Post-completion and programmatic closes always proceed.
+        guard !didSendCompletion else { return true }
+        // Cancelling either confirmation leaves the editing session intact.
+        return confirmCancellation(for: escapeFinalAction)
+    }
+
     func windowWillClose(_ notification: Notification) {
+        removeKeyDownMonitor()
         guard !didSendCompletion else { return }
         guard let completion = onComplete else { return }
         didSendCompletion = true

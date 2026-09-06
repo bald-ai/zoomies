@@ -14,7 +14,7 @@ func interpretKeyCommand(from event: NSEvent) -> KeyCommand? {
     let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
     switch event.keyCode {
-    case 36:
+    case 36, 76:
         if flags.contains(.command) && flags.contains(.shift) { return .commandShiftEnter }
         if flags.contains(.command) { return .commandEnter }
         return .enter

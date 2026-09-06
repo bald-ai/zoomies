@@ -11,6 +11,11 @@ final class ScratchpadService {
     private var currentBaseName: String = ""
     private var cachedText: String = ""
 
+    enum PresentedPanel: Equatable { case rename, note }
+    /// Which panel the flow is currently showing. Test seam: open() must land
+    /// on the note panel so Enter saves immediately.
+    private(set) var presentedPanel: PresentedPanel?
+
     var isBusyForUserCommands: Bool {
         renamePanelController != nil || notePanelController != nil
     }
@@ -47,7 +52,9 @@ final class ScratchpadService {
 
         currentBaseName = ScratchpadFilenameLogic.defaultBaseName(date: Date())
         cachedText = ""
-        presentRenamePanel()
+        // Open on the note box so Enter saves a note immediately; Shift+Tab
+        // returns to Rename via the existing backToRename flow.
+        presentNotePanel()
     }
 
     // MARK: - Rename
@@ -60,6 +67,7 @@ final class ScratchpadService {
         )
         controller.onAction = { [weak self] action in self?.handleRenameAction(action) }
         renamePanelController = controller
+        presentedPanel = .rename
         centerOnActiveScreen(controller.window)
         controller.show()
     }
@@ -93,6 +101,7 @@ final class ScratchpadService {
         )
         controller.onAction = { [weak self] action in self?.handleNoteAction(action) }
         notePanelController = controller
+        presentedPanel = .note
         centerOnActiveScreen(controller.window)
         controller.show()
     }
@@ -140,6 +149,7 @@ final class ScratchpadService {
         notePanelController?.close()
         renamePanelController = nil
         notePanelController = nil
+        presentedPanel = nil
         currentBaseName = ""
         cachedText = ""
     }

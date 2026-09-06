@@ -646,6 +646,212 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: deleteFileURL.path))
     }
 
+    func testNoteOnlySaveOnReopenedAnnotatedFileKeepsAnnotationPixels() throws {
+        // Data-loss regression test: a reopened editor-state-only PNG shows the
+        // bare base in initialImage while the drawings live in
+        // initialEditorState. A note-only save must composite first so the
+        // visible drawings survive instead of being flattened away.
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("annotated.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80, color: .systemBlue)
+        // Canvas coordinates: the base sits at the 24pt canvas inset.
+        let midY: CGFloat = 24 + 40
+        let penPoints = stride(from: 28, through: 120, by: 2).map {
+            EditorCanvasState.Point(NSPoint(x: CGFloat($0), y: midY))
+        }
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .pen(points: penPoints, color: .init(.systemRed), lineWidth: 8)
+        ])
+        let annotated = try XCTUnwrap(PNGMetadata.embed(intoPNG: basePNG, editorState: state))
+        try annotated.write(to: fileURL, options: .atomic)
+
+        let workflow = try makeWorkflow(root: root,
+                                        fileURL: fileURL,
+                                        clipboardDirectory: clipboardDirectory,
+                                        writeOriginalFile: false)
+        let done = expectation(description: "note saved")
+        workflow.onFinish = { done.fulfill() }
+        workflow.handleNoteAction(.save(text: "keep my drawing"))
+        wait(for: [done], timeout: 2.0)
+
+        let saved = try XCTUnwrap(NSImage(contentsOf: fileURL))
+        let rep = try XCTUnwrap(saved.representations.compactMap { $0 as? NSBitmapImageRep }.first)
+        var redPixels = 0
+        for x in 0..<rep.pixelsWide {
+            for y in 0..<rep.pixelsHigh {
+                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                if color.redComponent > 0.8 && color.greenComponent < 0.4 && color.blueComponent < 0.4 {
+                    redPixels += 1
+                }
+            }
+        }
+        XCTAssertGreaterThan(redPixels, 0, "Note-only save must preserve annotation pixels.")
+    }
+
+    func testNoteOnlySaveOnReopenedAnnotatedFileKeepsPrompt() throws {
+        // Companion to the pixel test above: the note text itself must also
+        // round-trip through the embedded metadata, not just the drawings.
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("annotated.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80, color: .systemBlue)
+        let midY: CGFloat = 24 + 40
+        let penPoints = stride(from: 28, through: 120, by: 2).map {
+            EditorCanvasState.Point(NSPoint(x: CGFloat($0), y: midY))
+        }
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .pen(points: penPoints, color: .init(.systemRed), lineWidth: 8)
+        ])
+        let annotated = try XCTUnwrap(PNGMetadata.embed(intoPNG: basePNG, editorState: state))
+        try annotated.write(to: fileURL, options: .atomic)
+
+        let workflow = try makeWorkflow(root: root,
+                                        fileURL: fileURL,
+                                        clipboardDirectory: clipboardDirectory,
+                                        writeOriginalFile: false)
+        let done = expectation(description: "note saved")
+        workflow.onFinish = { done.fulfill() }
+        workflow.handleNoteAction(.save(text: "keep my drawing"))
+        wait(for: [done], timeout: 2.0)
+
+        let savedData = try Data(contentsOf: fileURL)
+        let extracted = PNGMetadata.extract(fromPNG: savedData)
+        XCTAssertEqual(extracted?.prompt, "keep my drawing", "Note text must survive a note-only save on an annotated reopen.")
+    }
+
+    func testDeleteConfirmationAlertWiring() {
+        let alert = ScreenshotWorkflowController.makeDeleteConfirmationAlert()
+
+        XCTAssertEqual(alert.buttons.count, 2)
+        XCTAssertEqual(alert.buttons[0].title, "Delete")
+        XCTAssertEqual(alert.buttons[0].keyEquivalent, "\r", "Enter must confirm the delete.")
+        XCTAssertEqual(alert.buttons[1].title, "Cancel")
+        XCTAssertEqual(alert.buttons[1].keyEquivalent, "\u{1b}", "Esc must keep the file.")
+    }
+
+    func testDisabledConfirmationProceedsWithoutShowingAlert() {
+        XCTAssertTrue(ScreenshotWorkflowController.defaultDeleteConfirmation(confirmBeforeClosing: false))
+    }
+
+    func testCloseConfirmationPreservesOriginalImage() {
+        let alert = ScreenshotWorkflowController.makeCloseConfirmationAlert()
+
+        XCTAssertEqual(alert.buttons.count, 2)
+        XCTAssertEqual(alert.buttons[0].title, "Close")
+        XCTAssertEqual(alert.buttons[0].keyEquivalent, "\r")
+        XCTAssertTrue(alert.informativeText.contains("original image will not be deleted"))
+        XCTAssertEqual(alert.buttons[1].title, "Cancel")
+        XCTAssertEqual(alert.buttons[1].keyEquivalent, "\u{1b}", "Esc must keep the file in both modes.")
+    }
+
+    func testCopyAndSaveFailureWarnsButKeepsSave() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("shot.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+
+        var errors: [(title: String, message: String)] = []
+        let failingClipboard = ClipboardService(fileManager: .default,
+                                                cacheDirectory: clipboardDirectory,
+                                                pasteboardWriter: { _ in false })
+        let workflow = try makeWorkflow(root: root,
+                                        fileURL: fileURL,
+                                        clipboardDirectory: clipboardDirectory,
+                                        clipboardService: failingClipboard,
+                                        errorPresenter: { title, message in
+                                            errors.append((title, message))
+                                        })
+        var finished = false
+        workflow.onFinish = { finished = true }
+        workflow.pendingNoteText = "burn me first"
+        workflow.handleRenameAction(.copyAndSave(newName: fileURL.lastPathComponent))
+
+        XCTAssertFalse(finished, "A failed copy must stay open for retry.")
+        XCTAssertTrue(errors.contains { $0.title == "Copy failed" })
+        // The save already persisted before the copy was attempted.
+        let saved = try XCTUnwrap(NSImage(contentsOf: fileURL))
+        XCTAssertGreaterThan(saved.size.height, 40, "The note burn (save) must stand despite the copy failure.")
+    }
+
+    func testDeleteCancelledByConfirmationKeepsFileAndStaysOpen() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("shot.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+        let workflow = try makeWorkflow(root: root,
+                                        fileURL: fileURL,
+                                        clipboardDirectory: clipboardDirectory,
+                                        deleteConfirmer: { return false })
+        var finished = false
+        workflow.onFinish = { finished = true }
+        workflow.handleRenameAction(.delete)
+
+        XCTAssertFalse(finished)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    func testDeleteConfirmedDeletesFile() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("shot.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+        let workflow = try makeWorkflow(root: root,
+                                        fileURL: fileURL,
+                                        clipboardDirectory: clipboardDirectory,
+                                        deleteConfirmer: { return true })
+        let done = expectation(description: "delete finished")
+        workflow.onFinish = { done.fulfill() }
+        workflow.handleNoteAction(.delete)
+        wait(for: [done], timeout: 2.0)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    func testBackupFailureWarnsButSaveContinues() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("shot.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+
+        // A backups "directory" that is actually a regular file can never be
+        // written to (init's createDirectory fails silently against it).
+        let blocker = root.appendingPathComponent("blocker")
+        try Data("blocked".utf8).write(to: blocker, options: .atomic)
+        let backupService = BackupService(fileManager: .default, backupsDirectory: blocker)
+
+        var errors: [(title: String, message: String)] = []
+        let workflow = try makeWorkflow(root: root,
+                                        fileURL: fileURL,
+                                        clipboardDirectory: clipboardDirectory,
+                                        customBackupService: backupService,
+                                        errorPresenter: { title, message in
+                                            errors.append((title, message))
+                                        })
+        // The source file exists now, so a false here proves the backups
+        // directory itself rejects writes.
+        XCTAssertFalse(backupService.createBackup(forOriginalURL: fileURL))
+        let done = expectation(description: "save finished")
+        workflow.onFinish = { done.fulfill() }
+        workflow.pendingNoteText = "save despite backup failure"
+        workflow.handleRenameAction(.save(newName: fileURL.lastPathComponent))
+        wait(for: [done], timeout: 2.0)
+
+        XCTAssertTrue(errors.contains { $0.title == "Couldn't back up screenshot" })
+        let saved = try XCTUnwrap(NSImage(contentsOf: fileURL))
+        XCTAssertGreaterThan(saved.size.height, 40, "The save must continue despite the backup failure.")
+    }
+
     private func makeWorkflow(root: URL,
                               fileURL: URL,
                               clipboardDirectory: URL,
@@ -654,6 +860,7 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
                               initialScreenshotCounter: Int? = nil,
                               writeOriginalFile: Bool = true,
                               clipboardService: ClipboardService? = nil,
+                              customBackupService: BackupService? = nil,
                               imageDataWriter: @escaping ScreenshotWorkflowController.ImageDataWriter = {
                                   data, outputURL, originalURL in
                                   try WorkflowImagePersistenceLogic.writeEncodedImageData(
@@ -667,7 +874,8 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
                               },
                               removeFile: @escaping ScreenshotWorkflowController.FileRemover = { url in
                                   try FileManager.default.removeItem(at: url)
-                              }) throws -> ScreenshotWorkflowController {
+                              },
+                              deleteConfirmer: @escaping ScreenshotWorkflowController.DeleteConfirmer = { return true }) throws -> ScreenshotWorkflowController {
         if writeOriginalFile {
             try TestSupport.writeSolidImagePNG(to: fileURL, width: 80, height: 40)
         }
@@ -679,7 +887,7 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
             settings.notePrefixEnabled = false
         }
 
-        let backupService = BackupService(fileManager: .default,
+        let backupService = customBackupService ?? BackupService(fileManager: .default,
                                           backupsDirectory: root.appendingPathComponent("backups", isDirectory: true))
         let resolvedClipboard = clipboardService ?? ClipboardService(fileManager: .default,
                                                                      cacheDirectory: clipboardDirectory)
@@ -695,6 +903,7 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
                                             escapeKeyDeletesFile: true,
                                             imageDataWriter: imageDataWriter,
                                             errorPresenter: errorPresenter,
-                                            removeFile: removeFile)
+                                            removeFile: removeFile,
+                                            deleteConfirmer: deleteConfirmer)
     }
 }

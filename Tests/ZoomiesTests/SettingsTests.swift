@@ -240,6 +240,17 @@ final class SettingsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(Settings.self, from: legacy)
 
         XCTAssertFalse(decoded.shortcutsCustomized)
+        XCTAssertTrue(decoded.confirmBeforeClosing, "Confirmation must be enabled by default for existing installations.")
+    }
+
+    func testCloseConfirmationPreferenceRoundTrips() throws {
+        var settings = Settings.default
+        settings.confirmBeforeClosing = false
+
+        let encoded = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(Settings.self, from: encoded)
+
+        XCTAssertFalse(decoded.confirmBeforeClosing)
     }
 
     func testNextScreenshotCounterDoesNotTrapOnOverflow() {

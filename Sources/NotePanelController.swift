@@ -75,10 +75,11 @@ final class NotePanelController: NSWindowController {
             switch command {
             case .enter:
                 self.onAction?(.save(text: value))
-            case .commandEnter:
+            case .commandEnter, .commandShiftEnter:
+                // The note interpreter folds Cmd+Shift+Enter into commandEnter
+                // (Command wins over Shift); the second case only guards
+                // exhaustiveness if that ever changes.
                 self.onAction?(.copyAndSave(text: value))
-            case .commandShiftEnter:
-                break
             case .commandBackspace:
                 if self.showsCopyAndDelete {
                     self.onAction?(.copyAndDelete(text: value))
@@ -112,7 +113,7 @@ final class NotePanelController: NSWindowController {
         shortcutLabel.textColor = NSColor.secondaryLabelColor
         shortcutLabel.lineBreakMode = .byWordWrapping
         let escapeLabel = escapeKeyDeletesFile ? "Delete" : "Close"
-        var shortcutParts = ["Enter: Save", "⌘↩: Copy+Save"]
+        var shortcutParts = ["Enter: Save", "Shift+↩: new line", "⌘↩: Copy+Save"]
         if showsCopyAndDelete {
             shortcutParts.append("⌘⌫: Copy+Delete")
         }
@@ -271,11 +272,14 @@ private final class LockedWhiteNoteTextView: NSTextView {
     }
 }
 
-private func interpretNoteKeyCommand(from event: NSEvent) -> KeyCommand? {
+func interpretNoteKeyCommand(from event: NSEvent) -> KeyCommand? {
     let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
     switch event.keyCode {
-    case 36:
+    case 36, 76:
+        // Shift+Enter falls through to super.keyDown so the text view inserts
+        // a newline; plain Enter still saves. Mirrors EditorInlineTextView.
+        if flags.contains(.shift) && !flags.contains(.command) { return nil }
         return flags.contains(.command) ? .commandEnter : .enter
     case 51:
         return flags.contains(.command) ? .commandBackspace : nil
