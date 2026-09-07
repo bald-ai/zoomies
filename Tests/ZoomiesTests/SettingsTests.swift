@@ -140,7 +140,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(Shortcuts.default.screenshotFull.modifierFlags, UInt32(optionKey | shiftKey))
         XCTAssertEqual(Shortcuts.default.reopenFinderSelection.keyCode, UInt32(kVK_ANSI_2))
         XCTAssertEqual(Shortcuts.default.reopenFinderSelection.modifierFlags, UInt32(optionKey | shiftKey))
-        XCTAssertEqual(Shortcuts.default.openScratchpad.keyCode, UInt32(kVK_ANSI_5))
+        XCTAssertEqual(Shortcuts.default.openScratchpad.keyCode, UInt32(kVK_ANSI_1))
         XCTAssertEqual(Shortcuts.default.openScratchpad.modifierFlags, UInt32(optionKey | shiftKey))
     }
 
@@ -191,6 +191,17 @@ final class SettingsTests: XCTestCase {
         settings.shortcutsCustomized = true
 
         XCTAssertEqual(settings.normalized().shortcuts, customized)
+    }
+
+    func testNormalizedMigratesOptionShift5ScratchpadUnlessCustomized() {
+        var settings = Settings.default
+        let oldShortcut = Shortcut(keyCode: UInt32(kVK_ANSI_5),
+                                   modifierFlags: UInt32(optionKey | shiftKey))
+        settings.shortcuts.openScratchpad = oldShortcut
+        XCTAssertEqual(settings.normalized().shortcuts.openScratchpad, Shortcuts.default.openScratchpad)
+
+        settings.shortcutsCustomized = true
+        XCTAssertEqual(settings.normalized().shortcuts.openScratchpad, oldShortcut)
     }
 
     func testNormalizedMigratesTemporaryControlShiftNScratchpadShortcut() {

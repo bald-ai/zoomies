@@ -63,7 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             • Option+Shift+4 → Area capture
             • Option+Shift+3 → Full-screen capture
             • Option+Shift+2 → Select an image in Finder, press this to edit/rename it with Zoomies
-            • Option+Shift+5 → Create a scratchpad note
+            • Option+Shift+1 → Create a scratchpad note
 
             These avoid the default macOS Cmd+Shift screenshot shortcuts.
 

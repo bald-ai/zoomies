@@ -92,7 +92,8 @@ final class SelectionOverlay: NSObject {
         overlayWindow.ignoresMouseEvents = false
         overlayWindow.hasShadow = false
         overlayWindow.acceptsMouseMovedEvents = true
-        overlayWindow.collectionBehavior = [.fullScreenAuxiliary]
+        // Keep selection available when the user switches desktop or full-screen Spaces.
+        overlayWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let overlayView = SelectionOverlayView(frame: .zero)
         overlayView.autoresizingMask = [.width, .height]

@@ -179,9 +179,9 @@ extension Shortcuts {
             keyCode: UInt32(kVK_ANSI_2),
             modifierFlags: UInt32(optionKey | shiftKey)
         ),
-        // Option + Shift + 5
+        // Option + Shift + 1
         openScratchpad: Shortcut(
-            keyCode: UInt32(kVK_ANSI_5),
+            keyCode: UInt32(kVK_ANSI_1),
             modifierFlags: UInt32(optionKey | shiftKey)
         )
     )
@@ -238,6 +238,10 @@ extension Shortcuts {
             keyCode: UInt32(kVK_ANSI_5),
             modifierFlags: UInt32(cmdKey | shiftKey)
         )
+        let retiredOptionShiftScratchpad = Shortcut(
+            keyCode: UInt32(kVK_ANSI_5),
+            modifierFlags: UInt32(optionKey | shiftKey)
+        )
         let temporaryOpenScratchpad = Shortcut(
             keyCode: UInt32(kVK_ANSI_N),
             modifierFlags: UInt32(controlKey | shiftKey)
@@ -253,7 +257,7 @@ extension Shortcuts {
             || reopenFinderSelection == retiredCommandShiftReopenFinderSelection {
             reopenFinderSelection = Shortcuts.default.reopenFinderSelection
         }
-        if openScratchpad == retiredOpenScratchpad {
+        if openScratchpad == retiredOpenScratchpad || openScratchpad == retiredOptionShiftScratchpad {
             openScratchpad = Shortcuts.default.openScratchpad
         }
         if openScratchpad == temporaryOpenScratchpad {

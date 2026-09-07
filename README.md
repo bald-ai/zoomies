@@ -65,7 +65,7 @@ tested.**
 - `Option+Shift+4` -> area capture
 - `Option+Shift+3` -> full-screen capture
 - `Option+Shift+2` -> select an image in Finder, press this to edit/rename it with Zoomies
-- `Option+Shift+5` -> create a scratchpad note
+- `Option+Shift+1` -> create a scratchpad note
 
 The defaults intentionally avoid the standard macOS `Cmd+Shift` screenshot shortcuts.
 
