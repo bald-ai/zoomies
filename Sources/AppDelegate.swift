@@ -53,21 +53,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showWelcomeInfo() {
         DispatchQueue.main.async {
-            // Intentional product decision: keep the explicit first-run-style welcome copy
-            // visible on launch instead of replacing it with a softer or hidden help surface.
+            // Keep the welcome and shortcut setup tips visible on launch.
             let alert = NSAlert()
             alert.alertStyle = .informational
-            alert.messageText = "🚨🚨🚨 READ THIS YOU DUMFUS OR YOU WILL BE CONFUSED AS FUCK 🚨🚨🚨"
+            alert.messageText = "Welcome to Zoomies"
             alert.informativeText = """
+            Hello! Please take 30 seconds to get set up and give Zoomies a proper chance.
+
+            For the best experience, I recommend swapping your screenshot shortcuts: use Cmd+Shift for Zoomies and Option+Shift for macOS screenshots.
+
+            First, move the macOS shortcuts to Option+Shift in System Settings → Keyboard → Keyboard Shortcuts → Screenshots. Then set Zoomies to Cmd+Shift from the Zoomies menu-bar icon → Settings → Shortcuts.
+
             Default shortcuts:
             • Option+Shift+4 → Area capture
             • Option+Shift+3 → Full-screen capture
-            • Option+Shift+2 → Select an image in Finder, press this to edit/rename it with Zoomies
+            • Option+Shift+2 → Edit or rename an image selected in Finder
             • Option+Shift+1 → Create a scratchpad note
 
-            These avoid the default macOS Cmd+Shift screenshot shortcuts.
-
-            ⚠️ Permissions: macOS will ask for Screen Recording permission the first time you capture. If you deny it, enable Zoomies in System Settings → Privacy & Security → Screen Recording, then try again.
+            On your first capture, allow Screen Recording when macOS asks. You can also enable it later in System Settings → Privacy & Security → Screen Recording.
             """
             alert.addButton(withTitle: "OK")
             alert.runModal()
