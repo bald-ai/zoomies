@@ -6,7 +6,7 @@ import Carbon
 ///
 /// This service owns the lifecycle of the global hotkeys and provides a small
 /// surface area for the rest of the app:
-/// - `registerShortcuts(settings:areaHandler:fullHandler:reopenFinderSelectionHandler:openScratchpadHandler:)`
+/// - `registerShortcuts(settings:areaHandler:fullHandler:reopenFinderSelectionHandler:openScratchpadHandler:toggleRecordingHandler:)`
 ///    is called once on launch from `AppDelegate`.
 /// - `updateShortcuts(settings:)` is called whenever the user changes shortcut
 ///    preferences in the settings window.
@@ -18,6 +18,7 @@ final class HotKeyService {
         case screenshotFull = 2
         case reopenFinderSelection = 3
         case openScratchpad = 4
+        case toggleRecording = 5
     }
 
     private struct Registration {
@@ -35,6 +36,7 @@ final class HotKeyService {
     private var fullHandler: Handler?
     private var reopenFinderSelectionHandler: Handler?
     private var openScratchpadHandler: Handler?
+    private var toggleRecordingHandler: Handler?
 
     private let registerHotKey: (UInt32, UInt32, EventHotKeyID) -> EventHotKeyRef?
     private let unregisterHotKey: (EventHotKeyRef) -> Void
@@ -66,12 +68,14 @@ final class HotKeyService {
         areaHandler: @escaping Handler,
         fullHandler: @escaping Handler,
         reopenFinderSelectionHandler: @escaping Handler,
-        openScratchpadHandler: @escaping Handler
+        openScratchpadHandler: @escaping Handler,
+        toggleRecordingHandler: @escaping Handler
     ) {
         self.areaHandler = areaHandler
         self.fullHandler = fullHandler
         self.reopenFinderSelectionHandler = reopenFinderSelectionHandler
         self.openScratchpadHandler = openScratchpadHandler
+        self.toggleRecordingHandler = toggleRecordingHandler
 
         applyShortcuts(from: settings)
     }
@@ -82,7 +86,8 @@ final class HotKeyService {
     /// key combinations.
     func updateShortcuts(settings: Settings) {
         guard areaHandler != nil, fullHandler != nil,
-              reopenFinderSelectionHandler != nil, openScratchpadHandler != nil else {
+              reopenFinderSelectionHandler != nil, openScratchpadHandler != nil,
+              toggleRecordingHandler != nil else {
             return
         }
         applyShortcuts(from: settings)
@@ -108,6 +113,7 @@ final class HotKeyService {
         register(.screenshotFull, settings.shortcuts.screenshotFull, fullHandler)
         register(.reopenFinderSelection, settings.shortcuts.reopenFinderSelection, reopenFinderSelectionHandler)
         register(.openScratchpad, settings.shortcuts.openScratchpad, openScratchpadHandler)
+        register(.toggleRecording, settings.shortcuts.toggleRecording, toggleRecordingHandler)
 
         if !failures.isEmpty {
             onRegistrationFailures?(failures)
@@ -136,6 +142,7 @@ final class HotKeyService {
         case .screenshotFull: return "Screenshot Full"
         case .reopenFinderSelection: return "Reopen Finder Selection"
         case .openScratchpad: return "Scratchpad"
+        case .toggleRecording: return "Screen Recording"
         }
     }
 

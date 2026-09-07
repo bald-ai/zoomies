@@ -56,30 +56,34 @@ final class HotKeyServiceTests: XCTestCase {
         var fullCalls = 0
         var reopenCalls = 0
         var scratchpadCalls = 0
+        var recordingCalls = 0
 
         service.registerShortcuts(
             settings: .default,
             areaHandler: { areaCalls += 1 },
             fullHandler: { fullCalls += 1 },
             reopenFinderSelectionHandler: { reopenCalls += 1 },
-            openScratchpadHandler: { scratchpadCalls += 1 }
+            openScratchpadHandler: { scratchpadCalls += 1 },
+            toggleRecordingHandler: { recordingCalls += 1 }
         )
 
-        XCTAssertEqual(registeredIDs.count, 4)
+        XCTAssertEqual(registeredIDs.count, 5)
         service.handleHotKey(with: registeredIDs[0])
         service.handleHotKey(with: registeredIDs[1])
         service.handleHotKey(with: registeredIDs[2])
         service.handleHotKey(with: registeredIDs[3])
+        service.handleHotKey(with: registeredIDs[4])
         XCTAssertEqual(areaCalls, 1)
         XCTAssertEqual(fullCalls, 1)
         XCTAssertEqual(reopenCalls, 1)
         XCTAssertEqual(scratchpadCalls, 1)
+        XCTAssertEqual(recordingCalls, 1)
 
         service.updateShortcuts(settings: .default)
 
-        XCTAssertEqual(unregisteredRefs.count, 4)
-        XCTAssertEqual(registeredIDs.count, 8)
-        service.handleHotKey(with: registeredIDs[4])
+        XCTAssertEqual(unregisteredRefs.count, 5)
+        XCTAssertEqual(registeredIDs.count, 10)
+        service.handleHotKey(with: registeredIDs[5])
         XCTAssertEqual(areaCalls, 2)
     }
 }

@@ -1,5 +1,6 @@
 import AppKit
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: TrayService!
     private var settingsWindowController: SettingsWindowController?
@@ -7,6 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settingsStore = SettingsStore()
     private var hotKeyService: HotKeyService!
     private var screenshotService: ScreenshotService!
+    private var recordingService: ScreenRecordingService!
+    private var videoRenameController: VideoRenameWorkflowController?
     private var clipboardService: ClipboardService!
     private var scratchpadService: ScratchpadService!
     private var backupService: BackupService!
@@ -33,18 +36,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         screenshotSoundPlayer.prewarmCaptureSound()
         scratchpadService = ScratchpadService(clipboardService: clipboardService)
         hotKeyService = HotKeyService()
+        recordingService = ScreenRecordingService()
+        recordingService.onUpdate = { [weak self] in
+            self?.refreshRecordingUI()
+        }
+        recordingService.onRecordingSaved = { [weak self] url in
+            self?.openVideoRename(for: url)
+        }
 
-        statusItemController = TrayService(
-            onOpenScratchpad: { [weak self] in
-                self?.triggerOpenScratchpad()
-            },
-            onShowSettings: { [weak self] in
-                self?.showSettings()
-            },
-            onQuit: {
-                NSApp.terminate(nil)
-            }
-        )
+        statusItemController = TrayService(onShowSettings: { [weak self] in
+            self?.showSettings()
+        })
+        refreshRecordingUI()
 
         registerHotKeys()
         showWelcomeInfo()
@@ -69,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             • Option+Shift+3 → Full-screen capture
             • Option+Shift+2 → Edit or rename an image selected in Finder
             • Option+Shift+1 → Create a scratchpad note
+            • Option+Shift+5 → Start/stop screen recording (macOS 15+)
 
             On your first capture, allow Screen Recording when macOS asks. You can also enable it later in System Settings → Privacy & Security → Screen Recording.
             """
@@ -79,6 +83,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard recordingService.isBusyForUserCommands else {
+            return .terminateNow
+        }
+        // Request stop and let the recording finalize before quitting.
+        // The service bounds the wait so termination never hangs forever.
+        recordingService.stopForAppTermination {
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     private func presentSettingsRepairNoticeIfNeeded() {
@@ -110,14 +126,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                         areaHandler: { [weak self] in self?.triggerAreaScreenshot() },
                                         fullHandler: { [weak self] in self?.triggerFullScreenshot() },
                                         reopenFinderSelectionHandler: { [weak self] in self?.triggerReopenFinderSelection() },
-                                        openScratchpadHandler: { [weak self] in self?.triggerOpenScratchpad() })
+                                        openScratchpadHandler: { [weak self] in self?.triggerOpenScratchpad() },
+                                        toggleRecordingHandler: { [weak self] in self?.toggleRecording() })
+    }
+
+    private func refreshRecordingUI() {
+        statusItemController.updateRecording(state: recordingService.state,
+                                             elapsed: recordingService.elapsed)
+    }
+
+    /// Single entry point for the recording menu command and shortcut.
+    /// A stop request is honored before any busy-state checks so Stop stays
+    /// available while recording; startup is rejected while screenshot,
+    /// note, Finder-reopen, or video-rename work is active or opening.
+    private func toggleRecording() {
+        if settingsWindowController?.isRecordingAnyShortcut == true {
+            return
+        }
+        if recordingService.isStopAvailable {
+            recordingService.stop()
+            return
+        }
+        if isVideoRenameBusy {
+            return
+        }
+        if isScratchpadBusyOrOpening {
+            return
+        }
+        if screenshotService.isBusyForUserCommands {
+            return
+        }
+        if finderSelectionLookup.isLookupInProgress {
+            return
+        }
+        recordingService.start(frameRate: settingsStore.settings.recordingFrameRate)
+    }
+
+    /// Opens the rename panel for a successfully saved recording. The
+    /// controller is retained until the flow finishes, keeping Zoomies busy
+    /// for other operations meanwhile.
+    private func openVideoRename(for url: URL) {
+        guard videoRenameController == nil else { return }
+        let controller = VideoRenameWorkflowController(
+            fileURL: url,
+            settingsStore: settingsStore,
+            clipboardService: clipboardService
+        )
+        controller.onFinish = { [weak self] in
+            self?.videoRenameController = nil
+        }
+        videoRenameController = controller
+        controller.start()
+    }
+
+    private var isVideoRenameBusy: Bool {
+        videoRenameController?.isBusyForUserCommands == true
     }
 
     private func triggerAreaScreenshot() {
         if settingsWindowController?.isRecordingAnyShortcut == true {
             return
         }
+        if isVideoRenameBusy {
+            return
+        }
         if isScratchpadBusyOrOpening {
+            return
+        }
+        if recordingService.isBusyForUserCommands {
             return
         }
         screenshotService.captureArea()
@@ -127,7 +203,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWindowController?.isRecordingAnyShortcut == true {
             return
         }
+        if isVideoRenameBusy {
+            return
+        }
         if isScratchpadBusyOrOpening {
+            return
+        }
+        if recordingService.isBusyForUserCommands {
             return
         }
         screenshotService.captureFullScreen()
@@ -137,7 +219,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWindowController?.isRecordingAnyShortcut == true {
             return
         }
+        if isVideoRenameBusy {
+            return
+        }
         if isScratchpadBusyOrOpening {
+            return
+        }
+        if recordingService.isBusyForUserCommands {
             return
         }
         if screenshotService.isBusyForUserCommands {
@@ -203,6 +291,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             defer { self.userCommandGate.finishScratchpadOpenRequest() }
             if self.settingsWindowController?.isRecordingAnyShortcut == true {
+                return
+            }
+            if self.isVideoRenameBusy {
+                return
+            }
+            if self.recordingService.isBusyForUserCommands {
                 return
             }
             if self.screenshotService.isBusyForUserCommands {

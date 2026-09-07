@@ -26,6 +26,9 @@ struct Settings: Codable {
 
     /// Global screenshot counter for filename generation.
     var screenshotCounter: Int
+
+    /// Screen-recording frame rate. Only 30 and 60 are supported.
+    var recordingFrameRate: Int = 30
 }
 
 extension Settings {
@@ -38,7 +41,8 @@ extension Settings {
         filenameTemplate: .defaultTemplate,
         shortcuts: .default,
         shortcutsCustomized: false,
-        screenshotCounter: 1
+        screenshotCounter: 1,
+        recordingFrameRate: 30
     )
 
     /// Returns a copy normalized to all invariants/constraints.
@@ -68,6 +72,12 @@ extension Settings {
         // Ensure screenshot counter is always >= 1.
         if screenshotCounter < 1 {
             copy.screenshotCounter = 1
+            repairedInvalidFields = true
+        }
+
+        // Only 30 and 60 fps are supported; older or invalid values fall back to 30.
+        if copy.recordingFrameRate != 30 && copy.recordingFrameRate != 60 {
+            copy.recordingFrameRate = 30
             repairedInvalidFields = true
         }
 
@@ -107,6 +117,7 @@ extension Settings {
         case shortcuts
         case shortcutsCustomized
         case screenshotCounter
+        case recordingFrameRate
     }
 
     init(from decoder: Decoder) throws {
@@ -127,6 +138,11 @@ extension Settings {
             ?? false
         self.screenshotCounter = try container.decodeIfPresent(Int.self, forKey: .screenshotCounter)
             ?? Settings.default.screenshotCounter
+        let rawFrameRate = try container.decodeIfPresent(Int.self, forKey: .recordingFrameRate)
+            ?? Settings.default.recordingFrameRate
+        self.recordingFrameRate = (rawFrameRate == 30 || rawFrameRate == 60)
+            ? rawFrameRate
+            : Settings.default.recordingFrameRate
     }
 }
 
@@ -158,9 +174,20 @@ struct Shortcuts: Codable, Equatable {
     var screenshotFull: Shortcut
     var reopenFinderSelection: Shortcut
     var openScratchpad: Shortcut
+    // Defaulted so previously persisted settings and existing call sites
+    // without this field keep working; old files decode to the default.
+    var toggleRecording: Shortcut = Shortcuts.defaultToggleRecording
 }
 
 extension Shortcuts {
+    /// Option + Shift + 5. Chosen because 1-4 are taken by existing
+    /// defaults and the retired Option+Shift+5 scratchpad combo was
+    /// migrated away to Option+Shift+1.
+    static let defaultToggleRecording = Shortcut(
+        keyCode: UInt32(kVK_ANSI_5),
+        modifierFlags: UInt32(optionKey | shiftKey)
+    )
+
     /// Reasonable, non-conflicting defaults.
     /// These can later be changed via the shortcut recorder UI.
     static let `default` = Shortcuts(
@@ -183,7 +210,8 @@ extension Shortcuts {
         openScratchpad: Shortcut(
             keyCode: UInt32(kVK_ANSI_1),
             modifierFlags: UInt32(optionKey | shiftKey)
-        )
+        ),
+        toggleRecording: defaultToggleRecording
     )
 }
 
@@ -204,6 +232,10 @@ extension Shortcuts {
         }
         if !copy.openScratchpad.hasSupportedKeyCode {
             copy.openScratchpad = Shortcuts.default.openScratchpad
+            onRepair()
+        }
+        if !copy.toggleRecording.hasSupportedKeyCode {
+            copy.toggleRecording = Shortcuts.default.toggleRecording
             onRepair()
         }
         return copy
@@ -273,6 +305,7 @@ extension Shortcuts {
         case screenshotFull
         case reopenFinderSelection
         case openScratchpad
+        case toggleRecording
     }
 
     init(from decoder: Decoder) throws {
@@ -285,6 +318,8 @@ extension Shortcuts {
             ?? Shortcuts.default.reopenFinderSelection
         self.openScratchpad = try container.decodeIfPresent(Shortcut.self, forKey: .openScratchpad)
             ?? Shortcuts.default.openScratchpad
+        self.toggleRecording = try container.decodeIfPresent(Shortcut.self, forKey: .toggleRecording)
+            ?? Shortcuts.default.toggleRecording
     }
 }
 

@@ -19,10 +19,12 @@ final class RenamePanelController: NSWindowController {
 
     private var originalBaseName: String = ""
     private var originalExtension: String = ""
+    private var allowsNoteNavigation: Bool = true
 
     convenience init(initialFilename: String,
                      escapeKeyDeletesFile: Bool = true,
-                     showsCopyAndDiscard: Bool = true) {
+                     showsCopyAndDiscard: Bool = true,
+                     allowsNoteNavigation: Bool = true) {
         let contentRect = NSRect(x: 0, y: 0, width: 410, height: 215)
         let panel = FloatingInputPanel(contentRect: contentRect)
         panel.titleVisibility = .hidden
@@ -31,6 +33,7 @@ final class RenamePanelController: NSWindowController {
         self.init(window: panel)
         self.escapeKeyDeletesFile = escapeKeyDeletesFile
         self.showsCopyAndDiscard = showsCopyAndDiscard
+        self.allowsNoteNavigation = allowsNoteNavigation
         configureFilenameMetadata(initialFilename: initialFilename)
         configureUI(initialFilename: initialFilename)
     }
@@ -91,7 +94,9 @@ final class RenamePanelController: NSWindowController {
                     self.onAction?(.close)
                 }
             case .tab:
-                self.onAction?(.goToNote(newName: self.textField.stringValue))
+                if self.allowsNoteNavigation {
+                    self.onAction?(.goToNote(newName: self.textField.stringValue))
+                }
             case .shiftTab:
                 break
             }
@@ -103,7 +108,9 @@ final class RenamePanelController: NSWindowController {
             shortcutParts.append("⌘⌫: Copy+Delete")
         }
         shortcutParts.append("Esc: \(escapeLabel)")
-        shortcutParts.append("Tab: Note")
+        if allowsNoteNavigation {
+            shortcutParts.append("Tab: Note")
+        }
         shortcutLabel.stringValue = shortcutParts.joined(separator: "    ")
         shortcutLabel.font = NSFont.systemFont(ofSize: 11)
         shortcutLabel.textColor = NSColor.secondaryLabelColor

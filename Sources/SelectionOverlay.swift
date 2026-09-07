@@ -230,7 +230,6 @@ private final class SelectionOverlayView: NSView {
             path.lineWidth = 2
             path.stroke()
 
-            drawDimensions(for: rect)
         } else {
             drawInstructions()
         }
@@ -302,40 +301,5 @@ private final class SelectionOverlayView: NSView {
         let point = CGPoint(x: bounds.midX - size.width / 2,
                             y: bounds.midY - size.height / 2)
         (text as NSString).draw(at: point, withAttributes: fullAttributes)
-    }
-
-    private func drawDimensions(for rect: CGRect) {
-        let widthPixels = Int((rect.width * backingScaleFactor).rounded())
-        let heightPixels = Int((rect.height * backingScaleFactor).rounded())
-        guard widthPixels > 0, heightPixels > 0 else {
-            return
-        }
-
-        let text = "\(widthPixels) x \(heightPixels)"
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: NSColor.white
-        ]
-
-        let size = (text as NSString).size(withAttributes: attributes)
-        let padding: CGFloat = 4
-        var origin = CGPoint(x: rect.origin.x + 8,
-                             y: rect.maxY - size.height - 8)
-
-        if origin.x + size.width + 2 * padding > bounds.maxX {
-            origin.x = bounds.maxX - size.width - 2 * padding
-        }
-        if origin.y + size.height + 2 * padding > bounds.maxY {
-            origin.y = bounds.maxY - size.height - 2 * padding
-        }
-
-        let backgroundRect = CGRect(x: origin.x - padding,
-                                    y: origin.y - padding,
-                                    width: size.width + 2 * padding,
-                                    height: size.height + 2 * padding)
-        NSColor.black.withAlphaComponent(0.6).setFill()
-        backgroundRect.fill()
-
-        (text as NSString).draw(at: origin, withAttributes: attributes)
     }
 }

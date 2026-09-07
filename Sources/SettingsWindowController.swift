@@ -8,6 +8,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
     // UI elements we need to read/write after initialization.
     private let maxSizePopUp: NSPopUpButton
+    private let frameRatePopUp: NSPopUpButton
     private let confirmBeforeClosingCheckbox: NSButton
     private let notePrefixCheckbox: NSButton
     private let notePrefixField: NSTextField
@@ -18,22 +19,27 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     private let fullShortcutRecorder: ShortcutRecorderView
     private let reopenShortcutRecorder: ShortcutRecorderView
     private let scratchpadShortcutRecorder: ShortcutRecorderView
+    private let recordingShortcutRecorder: ShortcutRecorderView
     private let duplicateWarningLabel: NSTextField
 
     /// Fixed set of max-width options shown in the dropdown.
     private let maxWidthOptions: [Int] = [0, 800, 1200, 1600, 1920, 2400]
+
+    /// Supported recording frame rates shown in the dropdown.
+    private let frameRateOptions: [Int] = [30, 60]
 
     init(settingsStore: SettingsStore, hotKeyService: HotKeyService) {
         self.settingsStore = settingsStore
         self.hotKeyService = hotKeyService
 
         maxSizePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
+        frameRatePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
         confirmBeforeClosingCheckbox = NSButton(
             checkboxWithTitle: "Confirm before deleting or closing",
             target: nil,
             action: nil
         )
-        notePrefixCheckbox = NSButton(checkboxWithTitle: "Enable Note Prefix", target: nil, action: nil)
+        notePrefixCheckbox = NSButton(checkboxWithTitle: "Note prefix for screenshots", target: nil, action: nil)
         notePrefixField = NSTextField(string: "")
         notePrefixCountLabel = NSTextField(labelWithString: "0/50")
         filenameTemplateEditor = FilenameTemplateEditorView(settingsStore: settingsStore)
@@ -42,9 +48,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         fullShortcutRecorder = ShortcutRecorderView(frame: .zero)
         reopenShortcutRecorder = ShortcutRecorderView(frame: .zero)
         scratchpadShortcutRecorder = ShortcutRecorderView(frame: .zero)
+        recordingShortcutRecorder = ShortcutRecorderView(frame: .zero)
         duplicateWarningLabel = NSTextField(labelWithString: "")
 
-        let contentRect = NSRect(x: 0, y: 0, width: 520, height: 550)
+        let contentRect = NSRect(x: 0, y: 0, width: 660, height: 700)
         let style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
         let window = NSWindow(contentRect: contentRect, styleMask: style, backing: .buffered, defer: false)
         window.center()
@@ -70,6 +77,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         || fullShortcutRecorder.isRecordingShortcut
         || reopenShortcutRecorder.isRecordingShortcut
         || scratchpadShortcutRecorder.isRecordingShortcut
+        || recordingShortcutRecorder.isRecordingShortcut
     }
 
     required init?(coder: NSCoder) {
@@ -80,190 +88,130 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
     private func configureContent() {
         guard let contentView = window?.contentView else { return }
-
         contentView.subviews.forEach { $0.removeFromSuperview() }
+        let surface = MenuSurfaceMaterial.makeFillingView(frame: contentView.bounds)
+        contentView.addSubview(surface)
 
-        let surfaceView = MenuSurfaceMaterial.makeFillingView(frame: contentView.bounds)
-        contentView.addSubview(surfaceView)
+        let tabs = NSTabView()
+        tabs.translatesAutoresizingMaskIntoConstraints = false
+        surface.addSubview(tabs)
 
-        let rootStack = NSStackView()
-        rootStack.orientation = .vertical
-        rootStack.alignment = .leading
-        rootStack.spacing = 12
-        rootStack.translatesAutoresizingMaskIntoConstraints = false
+        func page(_ title: String) -> NSStackView {
+            let item = NSTabViewItem(identifier: title)
+            item.label = title
+            let container = NSView()
+            let stack = NSStackView()
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = 14
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 20),
+                stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+                stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+                stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -16)
+            ])
+            item.view = container
+            tabs.addTabViewItem(item)
+            return stack
+        }
 
-        surfaceView.addSubview(rootStack)
+        func addRow(_ title: String, control: NSView, to stack: NSStackView) {
+            let label = NSTextField(labelWithString: title)
+            label.setContentHuggingPriority(.required, for: .horizontal)
+            let row = NSStackView(views: [label, NSView(), control])
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 12
+            stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
 
-        NSLayoutConstraint.activate([
-            rootStack.topAnchor.constraint(equalTo: surfaceView.safeAreaLayoutGuide.topAnchor, constant: 12),
-            rootStack.leadingAnchor.constraint(equalTo: surfaceView.leadingAnchor, constant: 20),
-            rootStack.trailingAnchor.constraint(lessThanOrEqualTo: surfaceView.trailingAnchor, constant: -20),
-            rootStack.bottomAnchor.constraint(lessThanOrEqualTo: surfaceView.safeAreaLayoutGuide.bottomAnchor, constant: -20)
-        ])
+        func description(_ text: String, in stack: NSStackView) {
+            let label = NSTextField(wrappingLabelWithString: text)
+            label.textColor = .secondaryLabelColor
+            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            stack.addArrangedSubview(label)
+            label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
 
-        // MARK: General section
+        let screenshots = page("Screenshots")
+        let videos = page("Videos")
+        let notes = page("Notes")
 
-        let generalHeader = NSTextField(labelWithString: "General")
-        generalHeader.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
-
-        // Max width row
-        let maxSizeLabel = NSTextField(labelWithString: "Max Width")
-        maxSizeLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        maxSizePopUp.translatesAutoresizingMaskIntoConstraints = false
         configureMaxSizePopUp()
+        addRow("Maximum image width", control: maxSizePopUp, to: screenshots)
 
-        let maxSizeRow = NSStackView(views: [maxSizeLabel, maxSizePopUp])
-        maxSizeRow.orientation = .horizontal
-        maxSizeRow.alignment = .centerY
-        maxSizeRow.spacing = 8
-
-        maxSizeLabel.setContentHuggingPriority(.required, for: .horizontal)
-
-        confirmBeforeClosingCheckbox.translatesAutoresizingMaskIntoConstraints = false
-        confirmBeforeClosingCheckbox.target = self
-        confirmBeforeClosingCheckbox.action = #selector(confirmBeforeClosingToggled(_:))
-        confirmBeforeClosingCheckbox.toolTip = "Ask before Escape or a close button deletes a new screenshot or closes an existing image. When off, proceed immediately."
-        confirmBeforeClosingCheckbox.setAccessibilityIdentifier("settings.confirmBeforeClosing")
-
-        rootStack.addArrangedSubview(generalHeader)
-        rootStack.addArrangedSubview(maxSizeRow)
-        rootStack.addArrangedSubview(confirmBeforeClosingCheckbox)
-        rootStack.addArrangedSubview(makeSeparator())
-
-        // MARK: Note Settings section
-
-        let noteHeader = NSTextField(labelWithString: "Note Settings")
-        noteHeader.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
-
-        notePrefixCheckbox.translatesAutoresizingMaskIntoConstraints = false
         notePrefixCheckbox.target = self
         notePrefixCheckbox.action = #selector(notePrefixToggled(_:))
-
-        let notePrefixToggleRow = NSStackView(views: [notePrefixCheckbox])
-        notePrefixToggleRow.orientation = .horizontal
-        notePrefixToggleRow.alignment = .centerY
-        notePrefixToggleRow.spacing = 8
-
-        let prefixTextLabel = NSTextField(labelWithString: "Prefix Text")
-        prefixTextLabel.setContentHuggingPriority(.required, for: .horizontal)
-
-        notePrefixField.translatesAutoresizingMaskIntoConstraints = false
+        screenshots.addArrangedSubview(notePrefixCheckbox)
+        description("Adds this text before notes attached to screenshots.", in: screenshots)
         notePrefixField.delegate = self
         notePrefixField.target = self
         notePrefixField.action = #selector(notePrefixFieldEdited(_:))
-
-        notePrefixCountLabel.translatesAutoresizingMaskIntoConstraints = false
-        notePrefixCountLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        notePrefixCountLabel.textColor = NSColor.secondaryLabelColor
+        notePrefixCountLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        notePrefixCountLabel.textColor = .secondaryLabelColor
         notePrefixCountLabel.setContentHuggingPriority(.required, for: .horizontal)
+        let prefixControls = NSStackView(views: [notePrefixField, notePrefixCountLabel])
+        prefixControls.spacing = 8
+        prefixControls.widthAnchor.constraint(equalToConstant: 420).isActive = true
+        addRow("Prefix text", control: prefixControls, to: screenshots)
+        screenshots.addArrangedSubview(makeSeparator())
+        screenshots.addArrangedSubview(filenameTemplateEditor)
+        filenameTemplateEditor.widthAnchor.constraint(equalTo: screenshots.widthAnchor).isActive = true
+        screenshots.addArrangedSubview(makeSeparator())
 
-        let notePrefixRow = NSStackView(views: [prefixTextLabel, notePrefixField, notePrefixCountLabel])
-        notePrefixRow.orientation = .horizontal
-        notePrefixRow.alignment = .centerY
-        notePrefixRow.spacing = 8
-
-        rootStack.addArrangedSubview(noteHeader)
-        rootStack.addArrangedSubview(notePrefixToggleRow)
-        rootStack.addArrangedSubview(notePrefixRow)
-        rootStack.addArrangedSubview(makeSeparator())
-
-        // MARK: Filename Template section
-
-        rootStack.addArrangedSubview(filenameTemplateEditor)
-        rootStack.addArrangedSubview(makeSeparator())
-
-        // MARK: Shortcuts section
-
-        let shortcutsHeader = NSTextField(labelWithString: "Shortcuts")
-        shortcutsHeader.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
-
-        // Shortcut rows
-        let areaLabel = NSTextField(labelWithString: "Screenshot Area:")
-        let fullLabel = NSTextField(labelWithString: "Screenshot Full:")
-        let reopenLabel = NSTextField(labelWithString: "Reopen Finder Selection:")
-        let scratchpadLabel = NSTextField(labelWithString: "Scratchpad:")
-
-        [areaLabel, fullLabel, reopenLabel, scratchpadLabel].forEach { label in
-            label.setContentHuggingPriority(.required, for: .horizontal)
-            label.setContentCompressionResistancePriority(.required, for: .horizontal)
-        }
-
-        areaShortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
-        fullShortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
-        reopenShortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
-        scratchpadShortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
-        scratchpadShortcutRecorder.setAccessibilityIdentifier("settings.shortcut.scratchpad")
-        [areaShortcutRecorder, fullShortcutRecorder, reopenShortcutRecorder, scratchpadShortcutRecorder].forEach { recorder in
+        let recorders = [areaShortcutRecorder, fullShortcutRecorder, reopenShortcutRecorder,
+                         scratchpadShortcutRecorder, recordingShortcutRecorder]
+        for recorder in recorders {
+            recorder.translatesAutoresizingMaskIntoConstraints = false
+            recorder.widthAnchor.constraint(equalToConstant: 280).isActive = true
             recorder.setContentHuggingPriority(.required, for: .horizontal)
             recorder.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
+        scratchpadShortcutRecorder.setAccessibilityIdentifier("settings.shortcut.scratchpad")
+        areaShortcutRecorder.onChange = { [weak self] in self?.handleShortcutChange(kind: .area, newValue: $0) }
+        fullShortcutRecorder.onChange = { [weak self] in self?.handleShortcutChange(kind: .full, newValue: $0) }
+        reopenShortcutRecorder.onChange = { [weak self] in self?.handleShortcutChange(kind: .reopenFinderSelection, newValue: $0) }
+        scratchpadShortcutRecorder.onChange = { [weak self] in self?.handleShortcutChange(kind: .scratchpad, newValue: $0) }
+        recordingShortcutRecorder.onChange = { [weak self] in self?.handleShortcutChange(kind: .recording, newValue: $0) }
+        addRow("Capture area", control: areaShortcutRecorder, to: screenshots)
+        addRow("Capture full screen", control: fullShortcutRecorder, to: screenshots)
+        addRow("Reopen Finder image", control: reopenShortcutRecorder, to: screenshots)
 
-        areaShortcutRecorder.onChange = { [weak self] value in
-            self?.handleShortcutChange(kind: .area, newValue: value)
-        }
-        fullShortcutRecorder.onChange = { [weak self] value in
-            self?.handleShortcutChange(kind: .full, newValue: value)
-        }
-        reopenShortcutRecorder.onChange = { [weak self] value in
-            self?.handleShortcutChange(kind: .reopenFinderSelection, newValue: value)
-        }
-        scratchpadShortcutRecorder.onChange = { [weak self] value in
-            self?.handleShortcutChange(kind: .scratchpad, newValue: value)
-        }
+        configureFrameRatePopUp()
+        addRow("Recording frame rate", control: frameRatePopUp, to: videos)
+        addRow("Start / stop recording", control: recordingShortcutRecorder, to: videos)
+        description("Videos use a generated Recording filename. You can rename each video after recording.", in: videos)
 
-        let areaSpacer = NSView()
-        areaSpacer.translatesAutoresizingMaskIntoConstraints = false
-        let areaRow = NSStackView(views: [areaLabel, areaSpacer, areaShortcutRecorder])
-        areaRow.orientation = .horizontal
-        areaRow.alignment = .centerY
-        areaRow.distribution = .fill
-        areaRow.spacing = 14
+        addRow("Create note", control: scratchpadShortcutRecorder, to: notes)
+        description("Standalone notes are saved as Markdown files. You can name each note when creating it.", in: notes)
 
-        let fullSpacer = NSView()
-        fullSpacer.translatesAutoresizingMaskIntoConstraints = false
-        let fullRow = NSStackView(views: [fullLabel, fullSpacer, fullShortcutRecorder])
-        fullRow.orientation = .horizontal
-        fullRow.alignment = .centerY
-        fullRow.distribution = .fill
-        fullRow.spacing = 14
-
-        let reopenSpacer = NSView()
-        reopenSpacer.translatesAutoresizingMaskIntoConstraints = false
-        let reopenRow = NSStackView(views: [reopenLabel, reopenSpacer, reopenShortcutRecorder])
-        reopenRow.orientation = .horizontal
-        reopenRow.alignment = .centerY
-        reopenRow.distribution = .fill
-        reopenRow.spacing = 14
-
-        let scratchpadSpacer = NSView()
-        scratchpadSpacer.translatesAutoresizingMaskIntoConstraints = false
-        let scratchpadRow = NSStackView(views: [scratchpadLabel, scratchpadSpacer, scratchpadShortcutRecorder])
-        scratchpadRow.orientation = .horizontal
-        scratchpadRow.alignment = .centerY
-        scratchpadRow.distribution = .fill
-        scratchpadRow.spacing = 14
-
-        // Duplicate warning label
-        duplicateWarningLabel.textColor = NSColor.systemRed
+        // This preference currently applies to both image and video workflows.
+        confirmBeforeClosingCheckbox.title = "Confirm before deleting or closing screenshots and videos"
+        confirmBeforeClosingCheckbox.target = self
+        confirmBeforeClosingCheckbox.action = #selector(confirmBeforeClosingToggled(_:))
+        confirmBeforeClosingCheckbox.toolTip = "Ask before deleting or closing in screenshot and video workflows."
+        confirmBeforeClosingCheckbox.setAccessibilityIdentifier("settings.confirmBeforeClosing")
+        confirmBeforeClosingCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        surface.addSubview(confirmBeforeClosingCheckbox)
+        duplicateWarningLabel.textColor = .systemRed
         duplicateWarningLabel.isHidden = true
-
-        rootStack.addArrangedSubview(shortcutsHeader)
-        rootStack.addArrangedSubview(areaRow)
-        rootStack.addArrangedSubview(fullRow)
-        rootStack.addArrangedSubview(reopenRow)
-        rootStack.addArrangedSubview(scratchpadRow)
-        rootStack.addArrangedSubview(duplicateWarningLabel)
+        duplicateWarningLabel.translatesAutoresizingMaskIntoConstraints = false
+        surface.addSubview(duplicateWarningLabel)
 
         NSLayoutConstraint.activate([
-            areaRow.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
-            fullRow.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
-            reopenRow.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
-            scratchpadRow.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
-            areaShortcutRecorder.widthAnchor.constraint(equalToConstant: 300),
-            fullShortcutRecorder.widthAnchor.constraint(equalTo: areaShortcutRecorder.widthAnchor),
-            reopenShortcutRecorder.widthAnchor.constraint(equalTo: areaShortcutRecorder.widthAnchor),
-            scratchpadShortcutRecorder.widthAnchor.constraint(equalTo: areaShortcutRecorder.widthAnchor)
+            tabs.topAnchor.constraint(equalTo: surface.safeAreaLayoutGuide.topAnchor, constant: 12),
+            tabs.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 16),
+            tabs.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -16),
+            tabs.bottomAnchor.constraint(equalTo: confirmBeforeClosingCheckbox.topAnchor, constant: -16),
+            confirmBeforeClosingCheckbox.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 24),
+            confirmBeforeClosingCheckbox.trailingAnchor.constraint(lessThanOrEqualTo: surface.trailingAnchor, constant: -24),
+            confirmBeforeClosingCheckbox.bottomAnchor.constraint(equalTo: duplicateWarningLabel.topAnchor, constant: -8),
+            duplicateWarningLabel.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 24),
+            duplicateWarningLabel.trailingAnchor.constraint(lessThanOrEqualTo: surface.trailingAnchor, constant: -24),
+            duplicateWarningLabel.bottomAnchor.constraint(equalTo: surface.safeAreaLayoutGuide.bottomAnchor, constant: -16)
         ])
     }
 
@@ -288,6 +236,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         maxSizePopUp.action = #selector(maxSizeChanged(_:))
     }
 
+    private func configureFrameRatePopUp() {
+        frameRatePopUp.removeAllItems()
+
+        for rate in frameRateOptions {
+            frameRatePopUp.menu?.addItem(withTitle: "\(rate) FPS", action: nil, keyEquivalent: "")
+            if let item = frameRatePopUp.lastItem {
+                item.tag = rate
+            }
+        }
+
+        frameRatePopUp.target = self
+        frameRatePopUp.action = #selector(frameRateChanged(_:))
+    }
+
     private func populateFromSettings() {
         let settings = settingsStore.settings
 
@@ -300,6 +262,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             if indexForOriginal != -1 {
                 maxSizePopUp.selectItem(at: indexForOriginal)
             }
+        }
+
+        // Recording frame rate (unsupported values fall back to 30).
+        let rate = (settings.recordingFrameRate == 60) ? 60 : 30
+        let indexForRate = frameRatePopUp.indexOfItem(withTag: rate)
+        if indexForRate != -1 {
+            frameRatePopUp.selectItem(at: indexForRate)
         }
 
         // Note prefix
@@ -322,6 +291,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         fullShortcutRecorder.recordedShortcut = .init(from: shortcuts.screenshotFull)
         reopenShortcutRecorder.recordedShortcut = .init(from: shortcuts.reopenFinderSelection)
         scratchpadShortcutRecorder.recordedShortcut = .init(from: shortcuts.openScratchpad)
+        recordingShortcutRecorder.recordedShortcut = .init(from: shortcuts.toggleRecording)
     }
 
     // MARK: - Actions
@@ -330,6 +300,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         let width = sender.selectedItem?.tag ?? 0
         settingsStore.update { settings in
             settings.maxWidth = width
+        }
+    }
+
+    @objc private func frameRateChanged(_ sender: NSPopUpButton) {
+        let rate = sender.selectedItem?.tag ?? 30
+        settingsStore.update { settings in
+            settings.recordingFrameRate = rate
         }
     }
 
@@ -367,6 +344,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         case full
         case reopenFinderSelection
         case scratchpad
+        case recording
     }
 
     private func handleShortcutChange(kind: ShortcutKind, newValue: ShortcutRecorderView.RecordedShortcut) {
@@ -385,6 +363,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             shortcuts.reopenFinderSelection = newShortcut
         case .scratchpad:
             shortcuts.openScratchpad = newShortcut
+        case .recording:
+            shortcuts.toggleRecording = newShortcut
         }
 
         if hasDuplicate(shortcuts: shortcuts) {
@@ -413,7 +393,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             shortcuts.screenshotArea,
             shortcuts.screenshotFull,
             shortcuts.reopenFinderSelection,
-            shortcuts.openScratchpad
+            shortcuts.openScratchpad,
+            shortcuts.toggleRecording
         ]
         let set = Set(values)
         return set.count < values.count

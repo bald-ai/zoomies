@@ -3,47 +3,22 @@ import AppKit
 /// Manages the NSStatusItem (menubar icon and menu).
 final class TrayService {
     private let statusItem: NSStatusItem
-    private var menu: NSMenu?
-
-    private let onOpenScratchpad: () -> Void
     private let onShowSettings: () -> Void
-    private let onQuit: () -> Void
 
-    init(
-        onOpenScratchpad: @escaping () -> Void,
-        onShowSettings: @escaping () -> Void,
-        onQuit: @escaping () -> Void
-    ) {
-        self.onOpenScratchpad = onOpenScratchpad
+    init(onShowSettings: @escaping () -> Void) {
         self.onShowSettings = onShowSettings
-        self.onQuit = onQuit
-
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        configureStatusItem()
-        menu = makeMenu()
-    }
-
-    private func configureStatusItem() {
-        if let button = statusItem.button {
-            if #available(macOS 11.0, *) {
-                button.image = NSImage(systemSymbolName: "camera", accessibilityDescription: "Zoomies")
-            } else {
-                button.title = "Z"
-            }
-            button.target = self
-            button.action = #selector(statusItemClicked(_:))
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        }
+        restoreStatusImage()
+        // AppKit anchors the menu to its status item, including across displays.
+        statusItem.menu = makeMenu()
     }
 
     private func makeMenu() -> NSMenu {
         let menu = NSMenu()
         AppTheme.apply(to: menu)
 
-        menu.addItem(NSMenuItem(title: "Open Scratchpad", action: #selector(didSelectOpenScratchpad), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Settings", action: #selector(didSelectSettings), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-
         let quitItem = NSMenuItem(title: "Quit", action: #selector(didSelectQuit), keyEquivalent: "q")
         quitItem.keyEquivalentModifierMask = [.command]
         menu.addItem(quitItem)
@@ -55,27 +30,42 @@ final class TrayService {
         return menu
     }
 
-    // MARK: - Actions
-
-    @objc private func statusItemClicked(_ sender: Any?) {
-        guard let event = NSApp.currentEvent else {
-            onShowSettings()
-            return
-        }
-
-        let showMenu: () -> Void = { [weak self] in
-            guard let self = self, let menu = self.menu, let button = self.statusItem.button else { return }
-            let location = NSPoint(x: 0, y: button.bounds.height + 2)
-            menu.popUp(positioning: nil, at: location, in: button)
-        }
-
-        if event.type == .leftMouseUp || event.type == .rightMouseUp {
-            showMenu()
+    /// Red recording dot and elapsed time on the status button.
+    func updateRecording(state: ScreenRecordingService.State, elapsed: TimeInterval) {
+        guard let button = statusItem.button else { return }
+        switch state {
+        case .idle:
+            button.attributedTitle = NSAttributedString(string: "")
+            button.contentTintColor = nil
+            restoreStatusImage()
+        case .starting:
+            setRecordingTitle("●")
+        case .recording:
+            setRecordingTitle("● \(Self.formatElapsed(elapsed))")
+        case .stopping:
+            setRecordingTitle("●")
         }
     }
 
-    @objc private func didSelectOpenScratchpad() {
-        onOpenScratchpad()
+    private func setRecordingTitle(_ title: String) {
+        guard let button = statusItem.button else { return }
+        button.image = nil
+        button.attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: NSColor.systemRed,
+            .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+        ])
+    }
+
+    private static func formatElapsed(_ elapsed: TimeInterval) -> String {
+        let total = max(0, Int(elapsed))
+        return "\(total / 60):\(String(format: "%02d", total % 60))"
+    }
+
+    private func restoreStatusImage() {
+        guard let button = statusItem.button else { return }
+        if #available(macOS 11.0, *) {
+            button.image = NSImage(systemSymbolName: "camera", accessibilityDescription: "Zoomies")
+        }
     }
 
     @objc private func didSelectSettings() {
@@ -83,6 +73,6 @@ final class TrayService {
     }
 
     @objc private func didSelectQuit() {
-        onQuit()
+        NSApp.terminate(nil)
     }
 }

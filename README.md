@@ -66,6 +66,7 @@ tested.**
 - `Option+Shift+3` -> full-screen capture
 - `Option+Shift+2` -> select an image in Finder, press this to edit/rename it with Zoomies
 - `Option+Shift+1` -> create a scratchpad note
+- `Option+Shift+5` -> start/stop screen recording (requires macOS 15)
 
 The defaults intentionally avoid the standard macOS `Cmd+Shift` screenshot shortcuts.
 
@@ -111,6 +112,26 @@ existing text, press `T` for the Text tool and double-click the text. Arrows,
 pen strokes, rectangles, and ellipses can be moved or deleted, but not reshaped.
 
 Editable objects are remembered only for PNGs saved by this version of Zoomies or later. Older already-flattened screenshots still open as normal images because their arrows/text are already baked into the pixels.
+
+## Screen Recording
+
+`Option+Shift+5` or the menu-bar icon's Start Recording begins a display
+recording. There is no display picker: recording starts on the display under
+the pointer and follows the pointer to another monitor after it stays there
+for half a second. It keeps recording across app and Space changes, includes
+the cursor, excludes Zoomies' own windows, and stops automatically after 60
+seconds.
+
+Video is 30 fps, SDR, H.264 MP4 without audio on a fixed 1920x1080 canvas
+(the full display is fitted without cropping or stretching, with black
+margins where needed). The menu bar shows a recording indicator with elapsed
+time. The finished video is saved beside screenshots with a unique
+`Recording_...` filename and revealed in Finder.
+
+Only one Zoomies operation runs at a time: recording blocks
+screenshots/notes/Finder-reopen, and those workflows block recording startup.
+Screen recording requires macOS 15 or later; on macOS 14 the menu command
+explains it is unavailable while screenshots and notes keep working.
 
 ## Temporary Clipboard Files
 
