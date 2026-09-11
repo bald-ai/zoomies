@@ -53,6 +53,18 @@ final class ScratchpadServiceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
     }
 
+    func testWriteAllowsEmptyAndWhitespaceOnlyText() throws {
+        let desktop = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(desktop) }
+        let writer = ScratchpadNoteWriter(directory: desktop)
+
+        let emptyURL = try writer.write(text: "", baseName: "Empty")
+        XCTAssertEqual(try String(contentsOf: emptyURL, encoding: .utf8), "")
+
+        let whitespaceURL = try writer.write(text: "   \n  ", baseName: "Whitespace")
+        XCTAssertEqual(try String(contentsOf: whitespaceURL, encoding: .utf8), "   \n  ")
+    }
+
     func testOpenPresentsNotePanelFirst() throws {
         let base = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(base) }

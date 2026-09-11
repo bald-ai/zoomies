@@ -127,11 +127,6 @@ final class ScratchpadService {
     // MARK: - Completion
 
     private func saveAndClose(text: String, newName: String, copy: Bool) {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            NSSound.beep()
-            return
-        }
-
         currentBaseName = ScratchpadFilenameLogic.resolveBaseName(userInput: newName, fallback: currentBaseName)
         do {
             let url = try noteWriter.write(text: text, baseName: currentBaseName)
