@@ -27,7 +27,7 @@ struct Settings: Codable {
     /// Global screenshot counter for filename generation.
     var screenshotCounter: Int
 
-    /// Screen-recording frame rate. Only 30 and 60 are supported.
+    /// Screen-recording frame rate. Only 30, 60, and 120 are supported.
     var recordingFrameRate: Int = 30
 }
 
@@ -75,8 +75,8 @@ extension Settings {
             repairedInvalidFields = true
         }
 
-        // Only 30 and 60 fps are supported; older or invalid values fall back to 30.
-        if copy.recordingFrameRate != 30 && copy.recordingFrameRate != 60 {
+        // Only 30, 60, and 120 fps are supported; invalid values fall back to 30.
+        if copy.recordingFrameRate != 30 && copy.recordingFrameRate != 60 && copy.recordingFrameRate != 120 {
             copy.recordingFrameRate = 30
             repairedInvalidFields = true
         }
@@ -140,7 +140,7 @@ extension Settings {
             ?? Settings.default.screenshotCounter
         let rawFrameRate = try container.decodeIfPresent(Int.self, forKey: .recordingFrameRate)
             ?? Settings.default.recordingFrameRate
-        self.recordingFrameRate = (rawFrameRate == 30 || rawFrameRate == 60)
+        self.recordingFrameRate = (rawFrameRate == 30 || rawFrameRate == 60 || rawFrameRate == 120)
             ? rawFrameRate
             : Settings.default.recordingFrameRate
     }

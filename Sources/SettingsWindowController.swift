@@ -3,6 +3,18 @@ import AppKit
 /// Settings window with controls for max size, note prefix, and
 /// global shortcut configuration.
 final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
+    private let settingsTabs = NSTabView()
+
+    private let settingsFieldEditor: NSTextView = {
+        let editor = NSTextView()
+        editor.isFieldEditor = true
+        editor.selectedTextAttributes = [
+            .backgroundColor: NSColor(srgbRed: 0.26, green: 0.34, blue: 0.38, alpha: 1),
+            .foregroundColor: NSColor.white
+        ]
+        return editor
+    }()
+
     private let settingsStore: SettingsStore
     private let hotKeyService: HotKeyService
 
@@ -26,7 +38,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     private let maxWidthOptions: [Int] = [0, 800, 1200, 1600, 1920, 2400]
 
     /// Supported recording frame rates shown in the dropdown.
-    private let frameRateOptions: [Int] = [30, 60]
+    private let frameRateOptions: [Int] = [30, 60, 120]
 
     init(settingsStore: SettingsStore, hotKeyService: HotKeyService) {
         self.settingsStore = settingsStore
@@ -34,12 +46,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
         maxSizePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
         frameRatePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
-        confirmBeforeClosingCheckbox = NSButton(
+        confirmBeforeClosingCheckbox = MutedSettingsCheckbox(
             checkboxWithTitle: "Confirm before deleting or closing",
             target: nil,
             action: nil
         )
-        notePrefixCheckbox = NSButton(checkboxWithTitle: "Note prefix for screenshots", target: nil, action: nil)
+        notePrefixCheckbox = MutedSettingsCheckbox(checkboxWithTitle: "Note prefix for screenshots", target: nil, action: nil)
         notePrefixField = NSTextField(string: "")
         notePrefixCountLabel = NSTextField(labelWithString: "0/50")
         filenameTemplateEditor = FilenameTemplateEditorView(settingsStore: settingsStore)
@@ -59,9 +71,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.backgroundColor = .clear
+        window.isOpaque = false
         window.level = .floating
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         AppTheme.apply(to: window)
+        window.appearance = NSAppearance(named: .darkAqua)
 
         super.init(window: window)
 
@@ -89,10 +103,18 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     private func configureContent() {
         guard let contentView = window?.contentView else { return }
         contentView.subviews.forEach { $0.removeFromSuperview() }
+        // Match the editor’s translucent material.
         let surface = MenuSurfaceMaterial.makeFillingView(frame: contentView.bounds)
         contentView.addSubview(surface)
 
-        let tabs = NSTabView()
+        let tabs = settingsTabs
+        tabs.tabViewType = .noTabsNoBorder
+        let navigation = NSSegmentedControl(labels: ["Screenshots", "Videos", "Notes"], trackingMode: .selectOne,
+                                            target: self, action: #selector(settingsTabChanged(_:)))
+        navigation.selectedSegment = 0
+        navigation.selectedSegmentBezelColor = NSColor(srgbRed: 0.26, green: 0.34, blue: 0.38, alpha: 1)
+        navigation.translatesAutoresizingMaskIntoConstraints = false
+        surface.addSubview(navigation)
         tabs.translatesAutoresizingMaskIntoConstraints = false
         surface.addSubview(tabs)
 
@@ -147,6 +169,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         notePrefixCheckbox.action = #selector(notePrefixToggled(_:))
         screenshots.addArrangedSubview(notePrefixCheckbox)
         description("Adds this text before notes attached to screenshots.", in: screenshots)
+        notePrefixField.focusRingType = .none
         notePrefixField.delegate = self
         notePrefixField.target = self
         notePrefixField.action = #selector(notePrefixFieldEdited(_:))
@@ -202,7 +225,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         surface.addSubview(duplicateWarningLabel)
 
         NSLayoutConstraint.activate([
-            tabs.topAnchor.constraint(equalTo: surface.safeAreaLayoutGuide.topAnchor, constant: 12),
+            navigation.topAnchor.constraint(equalTo: surface.safeAreaLayoutGuide.topAnchor, constant: 12),
+            navigation.centerXAnchor.constraint(equalTo: surface.centerXAnchor),
+            tabs.topAnchor.constraint(equalTo: navigation.bottomAnchor, constant: 12),
             tabs.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 16),
             tabs.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -16),
             tabs.bottomAnchor.constraint(equalTo: confirmBeforeClosingCheckbox.topAnchor, constant: -16),
@@ -213,6 +238,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             duplicateWarningLabel.trailingAnchor.constraint(lessThanOrEqualTo: surface.trailingAnchor, constant: -24),
             duplicateWarningLabel.bottomAnchor.constraint(equalTo: surface.safeAreaLayoutGuide.bottomAnchor, constant: -16)
         ])
+    }
+
+    @objc private func settingsTabChanged(_ sender: NSSegmentedControl) {
+        window?.makeFirstResponder(nil)
+        settingsTabs.selectTabViewItem(at: sender.selectedSegment)
     }
 
     private func configureMaxSizePopUp() {
@@ -265,7 +295,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         }
 
         // Recording frame rate (unsupported values fall back to 30).
-        let rate = (settings.recordingFrameRate == 60) ? 60 : 30
+        let rate = frameRateOptions.contains(settings.recordingFrameRate) ? settings.recordingFrameRate : 30
         let indexForRate = frameRatePopUp.indexOfItem(withTag: rate)
         if indexForRate != -1 {
             frameRatePopUp.selectItem(at: indexForRate)
@@ -424,6 +454,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
     // MARK: - NSWindowDelegate
 
+    func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
+        settingsFieldEditor
+    }
+
     func windowWillClose(_ notification: Notification) {
         // When the settings window is closed, return the app to accessory mode
         // so it behaves like a menubar app again.
@@ -440,5 +474,39 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 private extension ShortcutRecorderView.RecordedShortcut {
     init(from shortcut: Shortcut) {
         self.init(keyCode: shortcut.keyCode, carbonFlags: shortcut.modifierFlags)
+    }
+}
+
+/// Keep standard checkbox interaction and accessibility, with a subdued fill.
+final class MutedSettingsCheckbox: NSButton {
+    override func draw(_ dirtyRect: NSRect) {
+        let box = NSRect(x: 1, y: (bounds.height - 15) / 2, width: 15, height: 15)
+        let path = NSBezierPath(roundedRect: box, xRadius: 4, yRadius: 4)
+        (state == .on ? NSColor(srgbRed: 0.26, green: 0.34, blue: 0.38, alpha: 1) : NSColor(white: 0.2, alpha: 0.7)).setFill()
+        path.fill()
+        NSColor(white: 0.6, alpha: isEnabled ? 0.7 : 0.3).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+        if state == .on {
+            let tick = NSBezierPath()
+            // Express the checkmark from the top edge in either view orientation.
+            func point(_ x: CGFloat, _ yFromTop: CGFloat) -> NSPoint {
+                NSPoint(x: box.minX + x,
+                        y: isFlipped ? box.minY + yFromTop : box.maxY - yFromTop)
+            }
+            tick.move(to: point(3, 7.5))
+            tick.line(to: point(6, 11))
+            tick.line(to: point(12, 4))
+            tick.lineWidth = 1.8
+            tick.lineCapStyle = .round
+            NSColor(white: 0.9, alpha: isEnabled ? 1 : 0.4).setStroke()
+            tick.stroke()
+        }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize),
+            .foregroundColor: isEnabled ? NSColor.labelColor : NSColor.disabledControlTextColor
+        ]
+        let size = (title as NSString).size(withAttributes: attributes)
+        (title as NSString).draw(at: NSPoint(x: 22, y: (bounds.height - size.height) / 2), withAttributes: attributes)
     }
 }

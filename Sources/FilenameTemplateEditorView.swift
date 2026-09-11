@@ -220,7 +220,7 @@ private final class BlockCellView: NSView, NSTextFieldDelegate {
     var onTextChanged: ((String) -> Void)?
     var onFormatChanged: ((String) -> Void)?
 
-    private let enabledCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let enabledCheckbox = MutedSettingsCheckbox(checkboxWithTitle: "", target: nil, action: nil)
     private let kindLabel = NSTextField(labelWithString: "")
     private let editorContainer = NSView()
 
@@ -288,6 +288,7 @@ private final class BlockCellView: NSView, NSTextFieldDelegate {
             let field = NSTextField(string: block.text ?? "")
             field.placeholderString = "Static text"
             field.tag = EditFieldRole.staticText.rawValue
+            field.focusRingType = .none
             field.delegate = self
             field.translatesAutoresizingMaskIntoConstraints = false
             editorContainer.addSubview(field)
@@ -301,6 +302,7 @@ private final class BlockCellView: NSView, NSTextFieldDelegate {
 
         case .date:
             let seg = NSSegmentedControl(labels: ["Year", "Month", "Day"], trackingMode: .selectAny, target: self, action: #selector(dateComponentsChanged(_:)))
+            seg.selectedSegmentBezelColor = NSColor(srgbRed: 0.26, green: 0.34, blue: 0.38, alpha: 1)
             seg.translatesAutoresizingMaskIntoConstraints = false
 
             let components = Self.parseDateComponents(from: block.format)
@@ -320,6 +322,7 @@ private final class BlockCellView: NSView, NSTextFieldDelegate {
             let field = NSTextField(string: block.format ?? "HH.mm.ss")
             field.placeholderString = "HH.mm.ss"
             field.tag = EditFieldRole.format.rawValue
+            field.focusRingType = .none
             field.delegate = self
             field.translatesAutoresizingMaskIntoConstraints = false
             editorContainer.addSubview(field)

@@ -122,7 +122,7 @@ for half a second. It keeps recording across app and Space changes, includes
 the cursor, excludes Zoomies' own windows, and stops automatically after 60
 seconds.
 
-Video is 30 fps, SDR, H.264 MP4 without audio on a fixed 1920x1080 canvas
+Video is 30, 60, or 120 fps (selectable in Settings, default 30), SDR, H.264 MP4 without audio on a fixed 1920x1080 canvas
 (the full display is fitted without cropping or stretching, with black
 margins where needed). The menu bar shows a recording indicator with elapsed
 time. The finished video is saved beside screenshots with a unique

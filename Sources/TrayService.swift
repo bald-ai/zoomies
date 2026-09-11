@@ -30,7 +30,8 @@ final class TrayService {
         return menu
     }
 
-    /// Red recording dot and elapsed time on the status button.
+    /// Red recording dot and elapsed seconds against the recording limit.
+    @MainActor
     func updateRecording(state: ScreenRecordingService.State, elapsed: TimeInterval) {
         guard let button = statusItem.button else { return }
         switch state {
@@ -41,7 +42,9 @@ final class TrayService {
         case .starting:
             setRecordingTitle("●")
         case .recording:
-            setRecordingTitle("● \(Self.formatElapsed(elapsed))")
+            let limit = Int(ScreenRecordingService.maxDuration)
+            let seconds = min(limit, max(0, Int(elapsed)))
+            setRecordingTitle("● \(seconds)/\(limit)s")
         case .stopping:
             setRecordingTitle("●")
         }
@@ -54,11 +57,6 @@ final class TrayService {
             .foregroundColor: NSColor.systemRed,
             .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium)
         ])
-    }
-
-    private static func formatElapsed(_ elapsed: TimeInterval) -> String {
-        let total = max(0, Int(elapsed))
-        return "\(total / 60):\(String(format: "%02d", total % 60))"
     }
 
     private func restoreStatusImage() {

@@ -5,7 +5,7 @@ import ScreenCaptureKit
 
 /// Prototype display recording backed by SCStream + SCRecordingOutput.
 ///
-/// Fixed behavior: 30/60 fps (Settings), SDR, H.264 MP4, no audio,
+/// Fixed behavior: 30/60/120 fps (Settings), SDR, H.264 MP4, no audio,
 /// 1920x1080 canvas that fits the whole display (black margins where
 /// needed), cursor included, Zoomies' own windows excluded, 60-second cap,
 /// monitor following.
@@ -485,9 +485,9 @@ final class ScreenRecordingService: NSObject {
         current.filterUpdateInProgress = false
     }
 
-    /// Only 30 and 60 fps are supported; anything else falls back to 30.
+    /// Only 30, 60, and 120 fps are supported; anything else falls back to 30.
     static func sanitizedFrameRate(_ value: Int) -> Int {
-        (value == 30 || value == 60) ? value : 30
+        (value == 30 || value == 60 || value == 120) ? value : 30
     }
 
     @available(macOS 15, *)

@@ -381,7 +381,7 @@ final class EditorWindowController: NSWindowController {
         stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let penButton = makeToolButton(symbol: "pencil", tool: .pen, toolTip: "Pen (W)")
+        let penButton = makeToolButton(symbol: "pencil.tip", tool: .pen, toolTip: "Pen (W)")
         let lineButton = makeToolButton(symbol: "line.diagonal", tool: .line, toolTip: "Line (D)")
         let arrowButton = makeToolButton(symbol: "arrow.right", tool: .arrow, toolTip: "Arrow (A)")
         let rectButton = makeToolButton(symbol: "square", tool: .rectangle, toolTip: "Rectangle (R, Hold ⇧: Square)")
