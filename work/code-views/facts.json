@@ -1,0 +1,273 @@
+{
+  "snapshot": "2026-09-12",
+  "scope": "Current working copy of Sources/*.swift; excludes tests, assets, build outputs. Lines include comments and blank lines. Commits count appearances in reachable Git history, not edits in the uncommitted working copy.",
+  "files": [
+    {
+      "file": "Sources/AlertPresenter.swift",
+      "lines": 73,
+      "bytes": 2794,
+      "commits": 2
+    },
+    {
+      "file": "Sources/AppDelegate.swift",
+      "lines": 340,
+      "bytes": 13966,
+      "commits": 7
+    },
+    {
+      "file": "Sources/AppMain.swift",
+      "lines": 13,
+      "bytes": 290,
+      "commits": 1
+    },
+    {
+      "file": "Sources/AppTheme.swift",
+      "lines": 19,
+      "bytes": 467,
+      "commits": 1
+    },
+    {
+      "file": "Sources/BackupService.swift",
+      "lines": 88,
+      "bytes": 3769,
+      "commits": 2
+    },
+    {
+      "file": "Sources/BundledResourceLocator.swift",
+      "lines": 90,
+      "bytes": 2921,
+      "commits": 1
+    },
+    {
+      "file": "Sources/ClipboardService.swift",
+      "lines": 142,
+      "bytes": 5819,
+      "commits": 2
+    },
+    {
+      "file": "Sources/CommandAwareInputControls.swift",
+      "lines": 81,
+      "bytes": 2231,
+      "commits": 2
+    },
+    {
+      "file": "Sources/DirectoryPurgeLogic.swift",
+      "lines": 20,
+      "bytes": 665,
+      "commits": 1
+    },
+    {
+      "file": "Sources/EditorCanvasState.swift",
+      "lines": 309,
+      "bytes": 12656,
+      "commits": 3
+    },
+    {
+      "file": "Sources/EditorCanvasView.swift",
+      "lines": 1916,
+      "bytes": 73298,
+      "commits": 6
+    },
+    {
+      "file": "Sources/EditorWindowController.swift",
+      "lines": 1046,
+      "bytes": 42743,
+      "commits": 8
+    },
+    {
+      "file": "Sources/EditorWindowLayoutLogic.swift",
+      "lines": 108,
+      "bytes": 5096,
+      "commits": 1
+    },
+    {
+      "file": "Sources/FilenameTemplateEditorView.swift",
+      "lines": 390,
+      "bytes": 15073,
+      "commits": 4
+    },
+    {
+      "file": "Sources/FinderSelectionService.swift",
+      "lines": 233,
+      "bytes": 8709,
+      "commits": 3
+    },
+    {
+      "file": "Sources/FloatingInputPanel.swift",
+      "lines": 57,
+      "bytes": 2257,
+      "commits": 2
+    },
+    {
+      "file": "Sources/FloatingPanelPositionLogic.swift",
+      "lines": 10,
+      "bytes": 287,
+      "commits": 1
+    },
+    {
+      "file": "Sources/HotKeyService.swift",
+      "lines": 380,
+      "bytes": 13347,
+      "commits": 3
+    },
+    {
+      "file": "Sources/ImageSafety.swift",
+      "lines": 165,
+      "bytes": 6465,
+      "commits": 1
+    },
+    {
+      "file": "Sources/MenuSurfaceMaterial.swift",
+      "lines": 17,
+      "bytes": 522,
+      "commits": 1
+    },
+    {
+      "file": "Sources/NativeAreaCapture.swift",
+      "lines": 63,
+      "bytes": 3125,
+      "commits": 0
+    },
+    {
+      "file": "Sources/NotePanelController.swift",
+      "lines": 293,
+      "bytes": 10953,
+      "commits": 5
+    },
+    {
+      "file": "Sources/PNGMetadata.swift",
+      "lines": 337,
+      "bytes": 14171,
+      "commits": 3
+    },
+    {
+      "file": "Sources/RenamePanelController.swift",
+      "lines": 157,
+      "bytes": 6363,
+      "commits": 5
+    },
+    {
+      "file": "Sources/ScratchpadFilenameLogic.swift",
+      "lines": 31,
+      "bytes": 1466,
+      "commits": 1
+    },
+    {
+      "file": "Sources/ScratchpadService.swift",
+      "lines": 192,
+      "bytes": 6543,
+      "commits": 6
+    },
+    {
+      "file": "Sources/ScreenRecordingService.swift",
+      "lines": 682,
+      "bytes": 27106,
+      "commits": 2
+    },
+    {
+      "file": "Sources/ScreenshotService.swift",
+      "lines": 494,
+      "bytes": 19488,
+      "commits": 3
+    },
+    {
+      "file": "Sources/ScreenshotServiceCoreLogic.swift",
+      "lines": 123,
+      "bytes": 4968,
+      "commits": 2
+    },
+    {
+      "file": "Sources/ScreenshotSoundPlayer.swift",
+      "lines": 62,
+      "bytes": 1703,
+      "commits": 1
+    },
+    {
+      "file": "Sources/ScreenshotWorkflowController.swift",
+      "lines": 1038,
+      "bytes": 40348,
+      "commits": 6
+    },
+    {
+      "file": "Sources/ScreenshotWorkflowCoreLogic.swift",
+      "lines": 107,
+      "bytes": 3622,
+      "commits": 2
+    },
+    {
+      "file": "Sources/SelectionOverlay.swift",
+      "lines": 305,
+      "bytes": 9177,
+      "commits": 4
+    },
+    {
+      "file": "Sources/Settings.swift",
+      "lines": 483,
+      "bytes": 18429,
+      "commits": 8
+    },
+    {
+      "file": "Sources/SettingsStore.swift",
+      "lines": 127,
+      "bytes": 4688,
+      "commits": 5
+    },
+    {
+      "file": "Sources/SettingsWindowController.swift",
+      "lines": 512,
+      "bytes": 22844,
+      "commits": 5
+    },
+    {
+      "file": "Sources/ShortcutRecorderView.swift",
+      "lines": 136,
+      "bytes": 4092,
+      "commits": 1
+    },
+    {
+      "file": "Sources/TrayService.swift",
+      "lines": 74,
+      "bytes": 2571,
+      "commits": 4
+    },
+    {
+      "file": "Sources/UniqueFileURLLogic.swift",
+      "lines": 31,
+      "bytes": 920,
+      "commits": 1
+    },
+    {
+      "file": "Sources/UserCommandGate.swift",
+      "lines": 17,
+      "bytes": 494,
+      "commits": 1
+    },
+    {
+      "file": "Sources/VideoRenameWorkflowController.swift",
+      "lines": 248,
+      "bytes": 9201,
+      "commits": 1
+    },
+    {
+      "file": "Sources/WorkflowImagePersistenceLogic.swift",
+      "lines": 68,
+      "bytes": 3046,
+      "commits": 2
+    },
+    {
+      "file": "Sources/WorkflowNoteRenderer.swift",
+      "lines": 112,
+      "bytes": 4454,
+      "commits": 3
+    },
+    {
+      "file": "Sources/WorkflowReopenMetadataLogic.swift",
+      "lines": 89,
+      "bytes": 3496,
+      "commits": 1
+    }
+  ],
+  "totalLines": 11278,
+  "fileCount": 44,
+  "commitCount": 19
+}

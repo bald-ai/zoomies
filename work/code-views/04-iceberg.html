@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>What is hidden beneath the surface?</title>
+  <style>
+    :root {
+      --bg: #f8f7f3;
+      --surface: #ffffff;
+      --text: #25352f;
+      --secondary: #66736b;
+      --border: #dce2da;
+      --green: #34664e;
+      --orange: #b56838;
+      --blue: #4e6f96;
+      --purple: #796496;
+      --sky: #e8eef4;
+      --water: #d4e0ea;
+      --ice-light: #f4f8fb;
+      --ice-mid: #c5d6e4;
+      --ice-deep: #7a96ad;
+      --under: #eef3f0;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-width: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    }
+
+    .wrap {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 16px 16px 20px;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.35rem;
+      font-weight: 400;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+
+    .question {
+      margin: 0 0 14px;
+      color: var(--secondary);
+      font-size: 0.95rem;
+    }
+
+    .picker {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .picker button {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      border-radius: 14px;
+      padding: 8px 12px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      text-align: left;
+      max-width: 100%;
+    }
+
+    .picker button:hover {
+      border-color: var(--blue);
+    }
+
+    .picker button[aria-pressed="true"] {
+      background: var(--green);
+      border-color: var(--green);
+      color: #fff;
+    }
+
+    .picker button:focus-visible,
+    summary:focus-visible {
+      outline: 2px solid var(--orange);
+      outline-offset: 2px;
+    }
+
+    .picker .role {
+      display: block;
+      font-size: 12px;
+      opacity: 0.85;
+      margin-top: 2px;
+    }
+
+    .picker button[aria-pressed="true"] .role {
+      opacity: 0.9;
+    }
+
+    .stage {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+      gap: 14px;
+      align-items: start;
+    }
+
+    @media (max-width: 700px) {
+      .stage {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 12px 12px 10px;
+      min-width: 0;
+    }
+
+    .geom-note {
+      margin: 0 0 8px;
+      font-size: 12px;
+      color: var(--secondary);
+    }
+
+    .cutaway {
+      position: relative;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--sky);
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+    }
+
+    .air {
+      padding: 10px 12px 8px;
+      background: var(--sky);
+    }
+
+    .waterline {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      height: 22px;
+      background: var(--water);
+      border-top: 1px solid #b7c9d8;
+      border-bottom: 1px solid #b7c9d8;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--blue);
+      font-weight: 600;
+    }
+
+    .waterline::before,
+    .waterline::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: #9eb4c8;
+    }
+
+    .sea {
+      padding: 10px 12px 12px;
+      background: #dfe8ef;
+    }
+
+    .zone-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--secondary);
+      margin: 0 0 6px;
+    }
+
+    .svg-frame {
+      width: 100%;
+      height: auto;
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .ice-panel {
+      display: grid;
+      gap: 0;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: center;
+    }
+
+    .chip {
+      display: inline-block;
+      padding: 5px 9px;
+      border-radius: 12px;
+      background: var(--surface);
+      border: 1px solid var(--ice-mid);
+      font-size: 12.5px;
+      color: var(--text);
+      max-width: 100%;
+    }
+
+    .sea .chip {
+      background: #f7fafc;
+      border-color: var(--ice-deep);
+    }
+
+    .detail {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px 14px 12px;
+      min-width: 0;
+    }
+
+    .detail h2 {
+      margin: 0 0 2px;
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+
+    .detail .job {
+      margin: 0 0 10px;
+      color: var(--secondary);
+      font-size: 0.92rem;
+    }
+
+    .detail h3 {
+      margin: 12px 0 4px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--secondary);
+    }
+
+    .detail p {
+      margin: 0 0 8px;
+      font-size: 14px;
+    }
+
+    .ask {
+      margin-top: 10px;
+      padding: 10px 11px;
+      background: var(--under);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+
+    .ask strong {
+      display: block;
+      font-size: 12px;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--green);
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+
+    .ask p {
+      margin: 0;
+      font-size: 13.5px;
+    }
+
+    details.evidence {
+      margin-top: 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface);
+      padding: 8px 12px;
+    }
+
+    details.evidence summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      padding: 4px 0;
+    }
+
+    details.evidence .body {
+      padding: 4px 0 6px;
+      font-size: 13px;
+      color: var(--secondary);
+    }
+
+    details.evidence code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    .limits {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    @media (max-width: 520px) {
+      .limits {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .limits div {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface);
+      padding: 10px 12px;
+    }
+
+    .limits h3 {
+      margin: 0 0 4px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--secondary);
+      font-weight: 600;
+    }
+
+    .limits p {
+      margin: 0;
+      font-size: 13px;
+    }
+
+    /* Keep the explanations inside the cutaway instead of repeating an empty diagram. */
+    .air,.sea{position:relative;text-align:center;padding:24px 14px}
+    .air::before,.sea::before{content:"";position:absolute;inset:0 8%;background:#f4f8fb;pointer-events:none}
+    .air::before{clip-path:polygon(24% 0,76% 0,100% 100%,0 100%)}
+    .sea::before{clip-path:polygon(12% 0,88% 0,100% 55%,78% 100%,22% 100%,0 55%);background:#edf3f7}
+    .zone-label,.chips{position:relative;z-index:1}
+    .zone-label{font-size:12px;margin-bottom:13px}
+    .chips{flex-direction:column;align-items:center}
+    .chip{font-size:13px;padding:7px 10px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>What is hidden beneath the surface?</h1>
+    <p class="question">When Zoomies asks one piece for a simple job, how much careful work stays out of sight?</p>
+
+    <div class="picker" role="group" aria-label="Choose an example">
+      <button type="button" id="btn-settings" aria-pressed="true" data-id="settings">
+        Preferences keeper
+        <span class="role">Remembers your choices between launches</span>
+      </button>
+      <button type="button" id="btn-png" aria-pressed="false" data-id="png">
+        Secrets in a screenshot
+        <span class="role">Keeps the clean original and your note inside the picture</span>
+      </button>
+      <button type="button" id="btn-workflow" aria-pressed="false" data-id="workflow">
+        After a screenshot
+        <span class="role">Guides rename, note, edit, then save or delete</span>
+      </button>
+    </div>
+
+    <div class="stage">
+      <section class="diagram" aria-labelledby="diagram-title">
+        <p class="geom-note" id="diagram-title">The iceberg shape is drawn for clarity. Tip and underwater size are not a score of quality or depth.</p>
+
+<div class="cutaway ice-panel" aria-live="polite">
+          <div class="air">
+            <p class="zone-label">What the rest of the app asks for</p>
+            <div class="chips" id="above-chips"></div>
+          </div>
+          <div class="waterline" aria-hidden="true">waterline</div>
+          <div class="sea">
+            <p class="zone-label">The work handled inside</p>
+            <div class="chips" id="below-chips"></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="detail" aria-live="polite">
+        <h2 id="detail-title"></h2>
+        <p class="job" id="detail-job"></p>
+
+        <h3>Why this matters</h3>
+        <p id="detail-why"></p>
+
+        <h3>What other parts still notice</h3>
+        <p id="detail-leak"></p>
+
+        <div class="ask">
+          <strong>Ask an agent</strong>
+          <p id="detail-ask"></p>
+        </div>
+      </aside>
+    </div>
+
+    <div class="limits">
+      <div>
+        <h3>Helps you see</h3>
+        <p>Whether a piece of Zoomies can take a short list of everyday jobs while handling messy details itself — and where other screens still have to pay attention.</p>
+      </div>
+      <div>
+        <h3>Does not tell you</h3>
+        <p>Whether a piece is “good” or “deep.” Drawn tip and underwater size are not measured from file size or quality.</p>
+      </div>
+    </div>
+
+    <details class="evidence">
+      <summary>Evidence</summary>
+      <div class="body">
+        <p>Illustrated from the current code (working copy, 2026-09-12). File lengths from <code>work/code-views/facts.json</code> are size context only — not depth or quality.</p>
+        <ul>
+          <li><strong>Preferences keeper</strong> — <code>Sources/SettingsStore.swift</code> (127 lines). Public surface: <code>load()</code>, <code>update</code>, readable <code>settings</code>, <code>didRepairInvalidSettingsOnLastLoad</code>. Inside: Application Support path, legacy <code>~/.screenshot_app_settings.json</code> migrate, JSON decode, normalize/repair, create parent folders, atomic write. Call sites include <code>AppDelegate.swift</code> (<code>load</code> ~21; repair notice ~101), <code>SettingsWindowController.swift</code>, and screens that read <code>settingsStore.settings</code>. Model: <code>Sources/Settings.swift</code>.</li>
+          <li><strong>Secrets in a screenshot</strong> — <code>Sources/PNGMetadata.swift</code> (337 lines). Public: <code>embed</code>, <code>extract</code>, <code>extractEditorState</code>, <code>isPNG</code>, <code>pixelDimensions</code>. Inside: PNG chunk walk, uncompressed <code>iTXt</code> build/parse, strip prior Zoomies keywords, editor-state JSON encode/decode, safety size limits, CRC checksums. Call sites: <code>WorkflowImagePersistenceLogic.swift</code>, <code>WorkflowReopenMetadataLogic.swift</code>, <code>ImageSafety.swift</code>, <code>EditorCanvasState.swift</code>. Keyword string constants are public but unused outside this file.</li>
+          <li><strong>After a screenshot</strong> — <code>Sources/ScreenshotWorkflowController.swift</code> (1038 lines). Public: <code>start()</code>, <code>cancel()</code>, panel/editor handlers, <code>onFinish</code>. <code>cancel()</code> closes rename/note/editor and clears pending editor state; it does <em>not</em> call backup restore. Restore runs on user close paths via <code>restoreOriginalFromBackupIfAvailable()</code> (e.g. <code>closeWorkflowWithoutDeleting</code>, editor <code>closeOnly</code>) when a backup exists. Inside otherwise: panel orchestration, wait for first capture file, rename, backup before overwrite, note burn-in, PNG metadata via helpers, clipboard, delete confirm. Created from <code>ScreenshotService.swift</code> (~167). Helpers: <code>WorkflowImagePersistenceLogic.swift</code>, <code>WorkflowReopenMetadataLogic.swift</code>, <code>WorkflowNoteRenderer.swift</code>, rename/note/editor controllers.</li>
+        </ul>
+        <p>Third example is ScreenshotWorkflowController (not EditorCanvasView). EditorCanvasView is 1916 lines in facts.json if a wider above-water tip is needed later.</p>
+        <p>Visible copy intentionally uses job language; filenames, JSON, iTXt, checksums, atomic writes, callers, and persistence details stay in this Evidence block.</p>
+      </div>
+    </details>
+  </div>
+
+  <script>
+    (function () {
+      var CONCEPT_ID = "iceberg";
+
+      var examples = {
+        settings: {
+          title: "Preferences keeper",
+          job: "Keeps Zoomies preferences so the rest of the app can read and change them.",
+          above: [
+            "Load preferences at launch",
+            "Change a preference and keep it",
+            "Read the current preferences"
+          ],
+          below: [
+            "Find the saved preferences",
+            "Bring preferences forward from an older version",
+            "Use sensible defaults if the saved file cannot be read",
+            "Repair invalid choices",
+            "Save a complete file in one step"
+          ],
+          why: "Other parts mostly ask to load or change preferences. This piece quietly finds the file, upgrades older saves, and writes safely.",
+          leak: "Screens still look up each preference they care about. Launch also checks whether anything was repaired so it can warn once. Worth asking whether every new preference should force more screens to learn storage details.",
+          ask: "If we change where settings are saved, how many other parts would need to know?"
+        },
+        png: {
+          title: "Secrets in a screenshot",
+          job: "Hides the clean original, your note, and editable drawings inside the picture so you can reopen and change Zoomies’ own edits.",
+          above: [
+            "Hide the clean original and note inside the picture",
+            "Bring that hidden info back later",
+            "Confirm it is a PNG and read its size"
+          ],
+          below: [
+            "Pack Zoomies’ extras into the picture format",
+            "Clear older Zoomies extras before rewriting",
+            "Turn drawings into something that can travel with the file",
+            "Reject stored data that is too large or unsafe",
+            "Keep the picture file valid after the extras are added"
+          ],
+          why: "Other parts ask to hide or recover info. They do not pack the picture format themselves — a short ask above a lot of careful work.",
+          leak: "Today, other parts use the hide/recover helpers and do not spell the internal labels. The tip stays short in practice; see Evidence if you want the packing details.",
+          ask: "If we change how Zoomies stores notes inside screenshots, which other steps would still work unchanged?"
+        },
+        workflow: {
+          title: "After a screenshot",
+          job: "Runs the path after a capture exists: rename, optional note, optional editor, then save, copy, or delete.",
+          above: [
+            "Start the after-screenshot steps",
+            "Stop early and close open panels",
+            "Say when the flow is finished"
+          ],
+          below: [
+            "Show rename and note panels without yanking Spaces",
+            "Open the editor and carry drawings back to the note step",
+            "Wait until the capture file is really on disk",
+            "Keep a safety copy before overwrite; restore it when the user closes after edits",
+            "Add the note, tuck extras into the picture, copy, and confirm deletes"
+          ],
+          why: "From the capture side, everyday asks are start, stop early, and finish. Inside, one flow coordinates panels, waiting for the file, safety copies, and final actions.",
+          leak: "Starting still needs several helpers plugged in (preferences, clipboard, backup, and writers). Stopping early closes panels — it does not by itself put a safety copy back. Restore happens on close-after-edit paths when a backup exists. A question to investigate, not a score.",
+          ask: "If we split “after a screenshot” into smaller pieces, which everyday asks should stay one-step for the rest of the app?"
+        }
+      };
+
+      var aboveEl = document.getElementById("above-chips");
+      var belowEl = document.getElementById("below-chips");
+      var buttons = Array.prototype.slice.call(document.querySelectorAll(".picker button"));
+
+      function setChips(container, items) {
+        container.textContent = "";
+        items.forEach(function (text) {
+          var span = document.createElement("span");
+          span.className = "chip";
+          span.textContent = text;
+          container.appendChild(span);
+        });
+      }
+
+      function select(id) {
+        var data = examples[id];
+        if (!data) return;
+
+        buttons.forEach(function (btn) {
+          btn.setAttribute("aria-pressed", btn.getAttribute("data-id") === id ? "true" : "false");
+        });
+
+        setChips(aboveEl, data.above);
+        setChips(belowEl, data.below);
+
+        document.getElementById("detail-title").textContent = data.title;
+        document.getElementById("detail-job").textContent = data.job;
+        document.getElementById("detail-why").textContent = data.why;
+        document.getElementById("detail-leak").textContent = data.leak;
+        document.getElementById("detail-ask").textContent = data.ask;
+
+        reportHeight();
+      }
+
+      buttons.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          select(btn.getAttribute("data-id"));
+        });
+      });
+
+      var heightRaf = null;
+      function reportHeight() {
+        if (heightRaf !== null) cancelAnimationFrame(heightRaf);
+        heightRaf = requestAnimationFrame(function () {
+          heightRaf = null;
+          var height = document.documentElement.scrollHeight;
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+              type: "zoomies-concept-height",
+              id: CONCEPT_ID,
+              height: height
+            }, "*");
+          }
+        });
+      }
+
+      if (typeof ResizeObserver !== "undefined") {
+        var ro = new ResizeObserver(function () { reportHeight(); });
+        ro.observe(document.body);
+      }
+      window.addEventListener("load", reportHeight);
+
+      select("settings");
+    })();
+  </script>
+</body>
+</html>

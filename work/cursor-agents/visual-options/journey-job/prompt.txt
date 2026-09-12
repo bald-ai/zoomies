@@ -1,0 +1,8 @@
+Read work/cursor-agents/visual-options/shared-brief.md in full and follow it.
+
+Your concept id is journey. Title: Follow one screenshot.
+Own ONLY work/code-views/02-journey.html and work/code-views/02-journey-notes.md.
+
+Task: Create a story / storyboard view of what happens when the user captures and saves a screenshot. Real interactive step controls change the highlighted phase and selected plain-language explanation. Trace Sources/AppDelegate.swift, ScreenshotService.swift, ScreenshotWorkflowController.swift, EditorWindowController.swift, WorkflowImagePersistenceLogic.swift, ClipboardService.swift as needed. Show optional note/edit route clearly, no claim every image always goes through editor. Use human actions, output preview drawn with CSS/SVG, handoff arrows on a linear rail or vertical at mobile. Highlight which part owns each step and where the screenshot data moves. This is a manually traced journey, not executed live tracing.
+
+Build the complete interactive HTML and notes now. No need to request approval. Do not delegate. Verify actual project facts. Parent will integrate the file as an iframe in a single self-contained HTML comparison.

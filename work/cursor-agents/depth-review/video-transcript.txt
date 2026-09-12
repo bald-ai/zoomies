@@ -1,0 +1,552 @@
+YouTube transcript
+Video ID: v4F1gFy-hqg
+Language: en
+Captions: auto-generated
+
+[0:07] [music]
+[0:14] >> Hello everyone. Having a good conference
+[0:16] so far? Yeah. Are you having a good
+[0:18] conference so far? Yeah. Good.
+[0:20] Wonderful.
+[0:22] I have a message for you that I hope
+[0:24] will be um a comforting message for
+[0:27] folks who believe that uh
+[0:29] their skill set is no longer worth
+[0:31] anything in this new age, which is I
+[0:33] believe that software fundamentals
+[0:35] matter now more than they actually ever
+[0:37] have.
+[0:39] And
+[0:40] I'm a teacher,
+[0:42] and I've been recently teaching a course
+[0:44] called Clojure Code for Real Engineers.
+[0:47] Nice and provocative. And
+[0:49] in the process of kind of working on
+[0:50] this course, I had to come up with a
+[0:52] curriculum about
+[0:54] AI coding, which is a bit of a nightmare
+[0:57] because things are changing all the
+[0:59] time, right? AI is a whole new paradigm.
+[1:02] We need to chuck out all of the old
+[1:03] rules, surely, so that we can bring in
+[1:05] the new stuff.
+[1:08] And there's
+[1:09] a kind of movement that has come up
+[1:12] around this, which is the specs-to-code
+[1:14] movement. And the specs-to-code movement
+[1:16] says that, "Okay, you can write a
+[1:18] specification about how an application
+[1:19] is supposed to work. Then you can use AI
+[1:21] to turn it into code. If there's a
+[1:23] problem with the application, you then
+[1:26] go back to the spec. You don't really
+[1:27] look at the code. You just change the
+[1:29] spec, you run the compiler again, and
+[1:32] you end up with more code." Raise your
+[1:34] hand if you've heard of that.
+[1:37] Keep your hand raised if you've tried
+[1:38] it.
+[1:39] Okay, I've tried it, too. You can put
+[1:41] your hands down.
+[1:42] And what I noticed was I would run it,
+[1:45] and I would try not to look at the code,
+[1:48] but I would look at the code, and I
+[1:50] realized I would get code out, first of
+[1:51] all, and then I would run it, I would
+[1:53] get worse code. And I did it again, I
+[1:55] got even worse code. I got it again, I
+[1:58] kept running the compiler, kept running
+[1:59] the compiler, and I would just end up
+[2:00] with garbage.
+[2:03] You know, raise your hand if that's
+[2:04] happened to you.
+[2:06] Yes. I don't think this works. The idea
+[2:09] that we can just ignore the code and
+[2:10] just have the code let it manage itself
+[2:13] is just sort of vibe coding by another
+[2:14] name.
+[2:16] And I didn't believe that back then. I
+[2:18] thought, "Okay, how do I fix the
+[2:20] compiler? How do I make it so that it
+[2:22] doesn't produce bad code each time, or
+[2:23] worse code?"
+[2:25] And so I thought, "Okay, I need to
+[2:26] explain to the LLM in English what a
+[2:30] good code base looks like." Let me dig
+[2:32] out one of my old favorite books, which
+[2:34] is a Philosophy of Software Design by
+[2:36] John Osterhout.
+[2:37] Go on Amazon, get it.
+[2:39] Um
+[2:40] and he has a definition for what bad
+[2:43] code looks like.
+[2:45] He calls it complex code. Complexity is
+[2:47] anything related to the structure of a
+[2:48] software system that makes it hard to
+[2:50] understand and modify the system, right?
+[2:53] So a a bad code base is a code base
+[2:55] that's hard to change. If you can't
+[2:58] change a code base without causing bugs,
+[3:00] then it's a bad code base. Good code
+[3:01] bases are easy to change.
+[3:04] So I thought, "Ooh, that was good.
+[3:05] Let's try another book. Let's try The
+[3:06] Pragmatic Programmer."
+[3:08] Go on Amazon, get it.
+[3:10] They have a whole chapter on something
+[3:12] called software entropy. And this is
+[3:14] exactly what I was seeing. Entropy is
+[3:16] the idea that things tend towards um
+[3:19] disaster and uh floating away from each
+[3:21] other and collapse. And this is exactly
+[3:23] how most software systems behave, too,
+[3:25] is that every time you make a change to
+[3:27] a code base, if you're only thinking
+[3:28] about that change and not thinking about
+[3:30] the design of the whole system, your
+[3:32] code base is going to get worse and
+[3:34] worse and worse. And that's what I was
+[3:35] seeing.
+[3:36] Everything inside the specs-to-code idea
+[3:39] that you just run the compiler again and
+[3:40] again was making worse code.
+[3:43] Now, there's an idea that sort of drives
+[3:46] the specs-to-code movement,
+[3:47] which is that code is cheap. Raise your
+[3:50] hand if you've heard that phrase before,
+[3:51] that code is cheap. Yeah.
+[3:55] Well, I don't think this is right.
+[3:57] I think code is not cheap. In fact, bad
+[4:00] code is the most expensive it's ever
+[4:02] been.
+[4:03] Because if you have a code base that's
+[4:04] hard to change, you're not able to take
+[4:07] all of the bounty that AI can offer, cuz
+[4:10] AI in a good code base actually does
+[4:12] really, really well.
+[4:15] And this means good code bases matter
+[4:16] more than ever, which means software
+[4:18] fundamentals matter more than ever.
+[4:20] That's the thesis of this talk.
+[4:22] So let's actually get into practical
+[4:23] stuff.
+[4:25] I'm going to talk about different
+[4:26] failure modes that you may have
+[4:27] experienced, or you may not have
+[4:28] experienced yet with AI, and how you can
+[4:30] avoid them by just going back to old
+[4:32] books and looking at good software
+[4:34] practices. Sound good?
+[4:36] So the first one is that the AI didn't
+[4:38] do what I wanted.
+[4:40] You know, I I thought I had a good idea
+[4:42] in my head, and the AI just did
+[4:43] something totally different, or it did
+[4:45] some uh like specs that I, you know, it
+[4:47] just made something I didn't want. Raise
+[4:49] your hand if you've hit this mode.
+[4:51] Cool. Okay.
+[4:53] Well,
+[4:54] this is what they say in The Pragmatic
+[4:55] Programmer, is that no one knows exactly
+[4:57] what they want. It's that you and the
+[5:00] AI, there is a communication barrier
+[5:02] there, right?
+[5:04] And so when you're talking to the AI,
+[5:05] that's kind of like the AI doing its
+[5:07] requirements gathering. It's basically
+[5:09] working out from you what it is that you
+[5:11] need.
+[5:12] And
+[5:14] I realized that there was another book,
+[5:16] Frederick P. Brooks' The Design of
+[5:17] Design,
+[5:19] and it talks about this idea called the
+[5:20] design concept.
+[5:22] It's that when you have more than one
+[5:23] person designing something together, you
+[5:25] have this idea sort of floating between
+[5:28] you, this ephemeral idea of the thing
+[5:30] that you're building. And that thing
+[5:32] that you're building, or the idea of it,
+[5:34] is called the design concept. It's not
+[5:36] an asset, it's not something you can put
+[5:37] in a markdown file, it is the invisible
+[5:40] sort of
+[5:41] theory of what you're building.
+[5:44] And so I thought, "Okay, that's what's
+[5:46] going on. Me and the AI don't share a
+[5:48] design concept." So I came up with a
+[5:50] skill.
+[5:51] The skill is very, very simple. It's
+[5:53] called Grill Me,
+[5:54] and it looks like this.
+[5:57] "Interview me relentlessly about every
+[5:58] aspect of this plan until we reach a
+[6:01] shared understanding. Walk down each
+[6:03] branch of the design tree, which is
+[6:05] another thing from Frederick P. Brooks,
+[6:07] resolving dependencies between decisions
+[6:09] one by one."
+[6:10] This skill is like uh the repo
+[6:12] containing this skill has like 13,000
+[6:14] stars or something. Like, it just went
+[6:15] nuts, went viral. People love this
+[6:17] thing. It These couple of lines means
+[6:20] the AI asks you like 40 questions, 60
+[6:23] questions. I've had it ask uh people 100
+[6:25] questions before it's satisfied they've
+[6:27] reached a shared understanding. And it
+[6:29] means it turns the AI into a kind of
+[6:32] adversary, where it's just continually
+[6:34] pinging you ideas and trying to reach a
+[6:36] shared understanding.
+[6:38] And that means that the conversation
+[6:39] that you then generate, you can take
+[6:41] that and turn it into a product
+[6:43] requirements document or something. Or
+[6:45] if it's a small change, you can just uh
+[6:48] do
+[6:49] uh turn it directly into issues.
+[6:52] And then your AFK agent will then pick
+[6:53] it up.
+[6:54] And
+[6:55] don't at me on this, but I personally
+[6:57] believe this is better than the default
+[6:59] plan mode in uh the
+[7:02] tool that I use, which is Clojure Code.
+[7:04] Plan mode is extremely eager to create
+[7:07] an asset. It really wants to uh just
+[7:09] create a plan and start working.
+[7:12] Whereas I think it's a lot nicer to
+[7:15] reach a shared design concept first.
+[7:18] So that's tip number one.
+[7:21] Now, failure mode number two is that the
+[7:22] AI is just way too verbose.
+[7:25] It's like you're almost talking at
+[7:27] cross-purposes with the AI. Raise your
+[7:29] hand if you uh feel this. If you've ever
+[7:31] experienced that failure mode. Yeah.
+[7:33] It's kind of like the AI is like talking
+[7:34] just using too many words to try to
+[7:36] communicate what it's doing. It's not
+[7:38] like you're talking uh using the same
+[7:40] language.
+[7:41] And this to me felt very, very familiar,
+[7:44] right? If you've ever been a developer
+[7:46] for a long time, and you've worked with,
+[7:48] let's say, domain experts, someone
+[7:49] building an application, um let's say
+[7:52] the domain expert wants you to build
+[7:53] something on uh I don't know,
+[7:54] microchips. You have no idea what
+[7:55] microchips are.
+[7:57] You need to establish some kind of
+[7:58] shared language, right? Cuz otherwise,
+[8:00] they're going to be using terms you
+[8:01] don't understand. You're going to be
+[8:02] translating that into code that maybe
+[8:04] you don't even understand, and certainly
+[8:06] the domain expert won't.
+[8:07] And so there's this kind of language
+[8:11] gap between you and the domain I went
+[8:14] back to domain-driven design, DDD.
+[8:17] This is something I'm still kind of on
+[8:19] the edge of exploring, but everything
+[8:20] I'm reading about DDD is just music to
+[8:23] my ears. I freaking love it.
+[8:25] And DDD has a concept of a ubiquitous
+[8:27] language.
+[8:30] With a ubiquitous language,
+[8:32] conversations among developers, and
+[8:34] expressions of the code, and
+[8:35] conversations with domain experts are
+[8:37] all derived from the same domain model.
+[8:39] It's essentially a markdown file full of
+[8:41] a list of terms that you and the AI have
+[8:43] in common. And you really focus on those
+[8:46] terms, and you really make sure that
+[8:47] they're aligned with what it actually
+[8:49] means, and you use them all the time in
+[8:51] the code, when you're talking about the
+[8:52] code, when you're talking to domain
+[8:54] experts, or in our case, when you're
+[8:55] talking with AI.
+[8:57] So I made a skill.
+[8:59] This skill is the ubiquitous language
+[9:01] skill. Basically just scans your code
+[9:03] base, looks for terminology, and then um
+[9:07] creates a markdown file. Creates the
+[9:09] ubiquitous language markdown file, a
+[9:11] bunch of markdown tables with all of the
+[9:13] terminology.
+[9:14] And this, then I pass it to the AI,
+[9:17] and I'm able to read it, too. And I
+[9:19] actually have it open all the time when
+[9:21] I'm grilling with the AI and planning
+[9:22] and that. What I noticed by reading the
+[9:24] thinking traces of the AI, it not only
+[9:26] improves the planning, but it allows the
+[9:29] AI to think in a less verbose way, and
+[9:32] actually means that the implementation
+[9:33] is more aligned with what you actually
+[9:36] planned. So this has absolutely been a
+[9:38] powerhouse. It's been unbelievably good.
+[9:41] So that's tip number two. Create a
+[9:42] shared language with the AI.
+[9:45] So okay, let's imagine that you've
+[9:47] aligned with the AI. You know what it is
+[9:49] you're supposed to be building. The AI
+[9:51] has built the right thing,
+[9:53] but it doesn't work.
+[9:55] Raise your hands if that's happened to
+[9:56] you.
+[9:57] Yeah, just doesn't work.
+[9:59] Well, there's an obvious thing that we
+[10:01] can do to make that better, which is we
+[10:03] can use feedback loops. We can use um
+[10:06] static types, you know, if you're not
+[10:07] using TypeScript, uh
+[10:09] that's crazy. Uh if you're not using uh
+[10:12] if you're building a front-end app and
+[10:13] you're not giving it the LLM access to
+[10:15] the browser so it can look around,
+[10:17] absolutely needs that.
+[10:19] And you obviously also need automated
+[10:21] tests.
+[10:23] And one sort of
+[10:26] thing I notice here is that even with
+[10:28] these feedback loops, the LLM doesn't
+[10:30] use them very well. It doesn't kind of
+[10:32] like get the most out of its feedback
+[10:34] loops in the way that a veteran
+[10:35] developer would. And so it does what it
+[10:38] tends to do is just does way too much at
+[10:40] once. It will produce like a huge
+[10:42] amounts of code and then think, "Oh, I
+[10:44] should probably type check that
+[10:45] actually." Or I should uh you know,
+[10:47] maybe check a test on that or maybe do
+[10:48] something like that.
+[10:50] And this in the Pragmatic Programmer
+[10:52] they describe as outrunning your
+[10:53] headlights. It's essentially driving too
+[10:56] fast because
+[10:58] the rate of feedback is your speed
+[11:00] limit.
+[11:02] The rate of feedback is your speed
+[11:03] limit, which means that you should be
+[11:05] testing as you go, taking small
+[11:07] deliberate steps. And the AI by default
+[11:09] is really not very good at that.
+[11:11] So, skill number three is TDD.
+[11:14] You should be using test-driven
+[11:16] development
+[11:17] because TDD forces the LLM to
+[11:21] really take small steps. You create a
+[11:24] test first, you make that test pass, and
+[11:27] then you refactor the code to make it
+[11:29] nicer and consider the design.
+[11:32] The issue here
+[11:33] is that testing is really hard.
+[11:36] Testing has always been hard.
+[11:38] And the reason for that
+[11:41] is there are a ton
+[11:43] of different decisions you need to make
+[11:44] when you write a test.
+[11:46] You need to figure out how big a unit do
+[11:48] you want to test?
+[11:50] You need to figure out what to mock. You
+[11:52] need to figure out what behaviors do you
+[11:54] even want to test in the first place?
+[11:55] And all of these decisions are
+[11:56] dependent. So, if you are testing a
+[11:58] really big unit like an entire uh
+[12:00] massive application, then it might be
+[12:03] quite flaky. You might not want to test
+[12:04] that many behaviors. You know, if you
+[12:06] only test this unit, you need to mock
+[12:08] this unit, you know. It's all
+[12:09] interlinked. And I've been thinking
+[12:11] about this for years, for my entire
+[12:12] development career.
+[12:15] And what we notice is that good
+[12:17] codebases are easy codebases to test.
+[12:20] Right? So, here we're starting to get
+[12:22] back to the idea of code being
+[12:24] important. It's that the better your
+[12:26] codebase is, the better your feedback
+[12:27] loops are because you're able to um
+[12:31] give better feedback to the LLM, it
+[12:33] produces better code.
+[12:35] And so I thought, what does a good
+[12:37] codebase, what does a testable codebase
+[12:38] look like? Again, we go to John
+[12:41] Ousterhout. [clears throat]
+[12:42] He talks about having deep modules in
+[12:45] your codebase. Not shallow modules, not
+[12:47] lots of modules that expose type kind of
+[12:50] um lots of functions.
+[12:52] They should be relatively few large deep
+[12:54] modules with simple interfaces.
+[12:57] Let's compare them quickly.
+[12:59] Deep modules, lots of functionality
+[13:01] hidden behind a simple interface. Hiding
+[13:04] the complexity.
+[13:05] You can look inside the deep module if
+[13:06] you want to, but you don't need to. You
+[13:08] can just use the interface. Shallow
+[13:10] modules, not much functionality, complex
+[13:12] interface.
+[13:13] And
+[13:15] I'll just wait for you to take the
+[13:16] photos.
+[13:18] Shallow modules in a codebase kind of
+[13:19] look like this, where you have a ton of
+[13:22] different tiny little blobs that the AI
+[13:24] has to walk through and navigate. And
+[13:26] this is really hard for the AI to
+[13:29] explore actually.
+[13:30] And so often what you'll see is if you
+[13:32] have a codebase like this, which AI is
+[13:33] really good at creating codebases like
+[13:35] this,
+[13:36] is that you'll have a situation where AI
+[13:38] doesn't understand what your code is
+[13:40] doing. It will attempt to explore the
+[13:42] code, but because it's poorly laid out,
+[13:45] filled with shallow modules, it doesn't
+[13:47] maybe get to the right module in time or
+[13:49] doesn't understand all the dependencies,
+[13:50] all that stuff. It doesn't understand
+[13:52] your code.
+[13:53] And so what does a
+[13:54] codebase full of deep modules look like?
+[13:57] Well, it looks like this.
+[14:00] Where it's the same code, but it's just
+[14:02] structured inside boundaries, where you
+[14:04] have these interfaces on the top.
+[14:08] And these interfaces, you should
+[14:10] probably have a lot of control over them
+[14:12] and design them really well. Otherwise,
+[14:14] you know, AI might mess up the design.
+[14:17] But the implementation, you can kind of
+[14:18] leave that to the AI bit.
+[14:20] So, how do you turn a codebase that
+[14:23] looks like this into a codebase that
+[14:26] looks like that?
+[14:29] Well, I've got a skill for that. Improve
+[14:31] codebase architecture. Turns out this is
+[14:33] not It's it's quite complicated to do
+[14:35] this, but it's a
+[14:36] like a set of steps that you can
+[14:38] reusably do again and again. You just
+[14:40] sort of explore the codebase, look for
+[14:42] opportunities where there's code that's
+[14:44] kind of look um
+[14:45] related, and wrap all of that in a deep
+[14:47] module.
+[14:50] And this is a testable codebase because
+[14:52] the boundaries around this code are so
+[14:54] so simple. You test at the interface,
+[14:56] you verify using that interface,
+[14:59] and you're good to go. And so this is a
+[15:00] codebase that rewards TDD.
+[15:04] But how about failure mode number six?
+[15:06] Which is your Okay, let's say your
+[15:07] feedback loops are working. Let's say
+[15:09] that things are kicking into gear.
+[15:11] You're able to ship more code than you
+[15:12] ever have before, but your brain can't
+[15:14] keep up.
+[15:16] Right? Uh raise your hand if you've felt
+[15:18] more tired than you have ever before in
+[15:20] your development career.
+[15:22] Yeah, me too. It's knackering.
+[15:25] And I think that this is a codebase that
+[15:27] actually makes it harder for your brain
+[15:30] because you, as well as the AI, need to
+[15:32] keep all of that information in your
+[15:33] head.
+[15:34] Whereas this, not only is it simpler
+[15:38] for you to read and understand, it also
+[15:40] means you can kind of treat these
+[15:42] modules, or these deep modules, as gray
+[15:45] boxes.
+[15:47] You can kind of say,
+[15:49] "Okay,
+[15:50] I'm going to just design the interface,
+[15:52] but I'm not going to worry too much or
+[15:53] not review the implementation too much."
+[15:57] You can do this obviously with uh things
+[15:58] that are less critical in your
+[15:59] application. Can't do this with uh you
+[16:01] know, various things like finance or
+[16:03] whatever, but in many many modules in
+[16:05] your app, you don't need to think about
+[16:07] the implementation too much as long as
+[16:09] you have a testable boundary outside the
+[16:11] module, and as long as you understand
+[16:13] its purpose and can design it from the
+[16:14] outside. I have found this has really
+[16:17] saved my brain because I can just go,
+[16:19] "Okay, the AI, I'll let you handle
+[16:21] what's inside the big blob. I'm just
+[16:23] going to test from the outside and
+[16:24] verify it."
+[16:26] So, that's tip number five. Design the
+[16:27] interface, delegate the implementation.
+[16:32] But this means that whenever we're
+[16:34] touching the code, whenever we're
+[16:35] planning stuff, we need to think about
+[16:37] and be aware of the modules in our
+[16:39] application. We need to know that map
+[16:41] really well. It needs to be part of our
+[16:43] ubiquitous language. We need to build it
+[16:45] into our planning skills as well. So, my
+[16:47] write a PRD, inside the PRD I'm specific
+[16:50] about the module changes and the
+[16:52] interfaces inside those modules, how
+[16:54] they're being modified. I'm thinking
+[16:55] about them all the time. And this comes
+[16:57] from Kent Beck.
+[16:58] Invest in the design of the system every
+[17:01] day.
+[17:02] And this is the core of it, right?
+[17:03] Because specs to code, we are not
+[17:06] investing in the design of the system.
+[17:08] We are divesting from it. We're getting
+[17:10] rid of that.
+[17:12] Whereas this, I think, is absolutely
+[17:13] key.
+[17:16] And so
+[17:18] code is not cheap. That's the message I
+[17:19] want you to take away. Code is
+[17:21] important.
+[17:23] And if we think about AI as a really
+[17:25] great on-the-ground programmer,
+[17:27] a kind of tactical programmer, a
+[17:29] sergeant on the ground making the code
+[17:32] changes, you need someone above that.
+[17:35] You need someone thinking on the
+[17:36] strategic level. And that's you.
+[17:39] And that requires software fundamental
+[17:41] skills that we've been using for 20
+[17:43] years, for longer.
+[17:46] Now, if you were interested in any of
+[17:48] the skills I put up here, it's in the
+[17:49] GitHub repo macpocockskills.
+[17:52] And if you're interested in the training
+[17:53] that I do or any free stuff, I'm on
+[17:55] YouTube, I'm on Twitter, but I'm also at
+[17:57] aihero.dev, where I have a newsletter
+[17:59] you can check out.
+[18:01] Thank you so much. I hope that this
+[18:03] gives you confidence in this new AI age
+[18:05] that you can actually make a good
+[18:06] impact.
+[18:07] Thank you.
+[18:09] >> [music]
+[18:10] [applause]
+[18:15] [music]
+[18:21] [music]

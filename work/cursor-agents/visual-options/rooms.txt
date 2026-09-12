@@ -1,0 +1,8 @@
+Read work/cursor-agents/visual-options/shared-brief.md in full and follow it.
+
+Your concept id is rooms. Title: The app as a set of rooms.
+Own ONLY work/code-views/01-rooms.html and work/code-views/01-rooms-notes.md.
+
+Task: Create a calm 2D floorplan / cutaway of 5-7 functional parts: capture, editing, workflow, notes, recording, preferences/shared helpers. It must not resemble a 3D city or bubble network. Clicking a room opens a clear explanation of its job, what it receives/provides, and how much of the source lives there. Assign every source file to exactly one sensible functional group and compute accurate group counts and total line shares from facts.json. You can use equal-area rooms if labelled conceptual layout; if area encodes lines, it must be calculated. Default select editing, using the actual largest files to explain concentration without declaring it bad. Include a clean role-oriented floorplan with doors/shared spine to indicate schematic collaboration, not invented exact call edges.
+
+Build the complete interactive HTML and notes now. No need to request approval. Do not delegate. Verify actual project facts. Parent will integrate the file as an iframe in a single self-contained HTML comparison.

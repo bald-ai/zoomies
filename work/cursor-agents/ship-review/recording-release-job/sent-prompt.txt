@@ -1,0 +1,26 @@
+Read-only release-readiness review of this small Swift macOS screenshot app, Zoomies. User wants ship-ready, not overkill or lazy. Current checkout including uncommitted files is the candidate. Do not edit, delegate, change branch/worktree, run tests/builds (parent owns those), launch app/UI, or change permissions. Focus on concrete release blockers or material user-facing defects; architecture style alone isn't a blocker. Verify actual production paths and tests. Return severity, exact file:line, trigger and consequence for each supported issue, and explicitly distinguish unverified risks/manual checks. Do not infer a bug solely from try? or file length. Read Dev/pre-release-todo.md and applicable instructions. Own recording lifecycle, native capture integration and release packaging: ScreenRecordingService.swift, NativeAreaCapture.swift, scripts/build_app.sh, AppDelegate.swift startup/quit, README and Dev/pre-release-todo.md. Verify platform availability, stop/quit persistence, permission handling and actual signing/distribution configuration. Separate private personal-use ready from external release. Report 3 strongest findings max plus essential manual validation gaps.
+
+## Return a handoff to the orchestrator
+
+You are an external worker. Complete the assignment above within its constraints.
+Your final response must be one JSON object with the fields below. Put any
+requested exact answer or payload in summary or findings. Keep it concise but
+retain details needed to use and verify your work. Use empty arrays when a field
+has no entries. Do not invent evidence, file locations, checks, or success.
+
+{
+  "outcome": "complete | partial | blocked",
+  "summary": "The result and what it means for the assignment.",
+  "findings": ["Concrete findings, including relevant exact values."],
+  "changes": ["Files/artifacts changed and what changed; no unrelated files."],
+  "decisions": ["Important choices and brief rationale, including rejected alternatives when useful."],
+  "evidence": ["Exact source file paths and line numbers when known, URLs, reproduction steps, or artifact paths supporting the findings."],
+  "checks": [{"check": "Actual command or verification", "result": "passed | failed | not_run", "detail": "Observed result, or why it was not run."}],
+  "open_issues": ["Uncertainties, assumptions needing confirmation, blockers, missing checks, and questions for the orchestrator."],
+  "next_steps": ["Specific remaining actions or integration guidance, if any."]
+}
+
+Report failed checks even if later corrected; say what fixed them. Distinguish
+observed facts from hypotheses. For blocked or partial work, explain what is
+missing and what would unblock it. Include important discoveries that affect
+other work. Do not include private reasoning transcripts or routine tool chatter.

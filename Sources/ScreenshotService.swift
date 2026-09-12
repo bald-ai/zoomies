@@ -39,7 +39,6 @@ final class ScreenshotService: NSObject {
     private let desktopDirectory: URL
     private let capturePersistenceQueue = DispatchQueue(label: "Zoomies.CapturePersistence", qos: .userInitiated)
 
-    private var selectionOverlay: SelectionOverlay?
     private var activeWorkflow: ScreenshotWorkflowController?
     private var isCaptureInProgress = false
     @MainActor private var shareableContentPrefetch: ShareableContentPrefetch?
@@ -65,10 +64,6 @@ final class ScreenshotService: NSObject {
         }
 
         super.init()
-
-        let overlay = SelectionOverlay()
-        overlay.delegate = self
-        selectionOverlay = overlay
     }
 
     // MARK: - Public API
@@ -81,19 +76,30 @@ final class ScreenshotService: NSObject {
             return
         }
 
-        if selectionOverlay?.isActive == true {
-            return
-        }
         guard canStartAreaCapture() else {
             return
         }
 
-        showAreaOverlay()
-    }
-
-    private func showAreaOverlay() {
-        selectionOverlay?.beginSelection()
-        prefetchShareableContent(trigger: "overlay")
+        isCaptureInProgress = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let image = try await NativeAreaCapture.capture()
+                try await MainActor.run {
+                    defer { self.isCaptureInProgress = false }
+                    guard let image else { return }
+                    // The pointer remains on the display where selection finished.
+                    let screen = self.screenUnderMouse() ?? NSScreen.main ?? NSScreen.screens.first
+                    guard let displayID = screen?.displayID else { return }
+                    try self.finishCapture(with: image, onDisplayID: displayID)
+                }
+            } catch {
+                await MainActor.run {
+                    self.isCaptureInProgress = false
+                    self.handleCaptureFailure(error)
+                }
+            }
+        }
     }
 
     /// Captures the full contents of the display under the mouse.
@@ -105,9 +111,6 @@ final class ScreenshotService: NSObject {
             return
         }
 
-        if selectionOverlay?.isActive == true {
-            selectionOverlay?.cancelSelection()
-        }
         guard canStartFullScreenCapture() else {
             return
         }
@@ -182,7 +185,7 @@ final class ScreenshotService: NSObject {
     }
 
     var isBusyForUserCommands: Bool {
-        isCaptureInProgress || activeWorkflow != nil || selectionOverlay?.isActive == true
+        isCaptureInProgress || activeWorkflow != nil
     }
 
     /// Saves an arbitrary image to the Desktop using the current settings
@@ -205,9 +208,6 @@ final class ScreenshotService: NSObject {
     }
 
     func canStartAreaCapture() -> Bool {
-        if selectionOverlay?.isActive == true {
-            return false
-        }
         return canStartNewCapture()
     }
 
@@ -440,13 +440,6 @@ final class ScreenshotService: NSObject {
         }
     }
 
-    private func prefetchShareableContent(trigger: String) {
-        Task { [weak self] in
-            guard let self else { return }
-            _ = await self.shareableContentTask(trigger: trigger)
-        }
-    }
-
     private func shareableContentTask(trigger: String) async -> Task<SCShareableContent, Error> {
         await MainActor.run {
             let now = Date()
@@ -490,30 +483,6 @@ final class ScreenshotService: NSObject {
 }
 
 extension ScreenshotService: @unchecked Sendable {}
-
-extension ScreenshotService: SelectionOverlayDelegate {
-    func selectionOverlay(_ overlay: SelectionOverlay,
-                          didFinishWith rectInScreenCoordinates: CGRect?,
-                          onScreen screen: NSScreen) {
-        if !Thread.isMainThread {
-            let screenID = screen.displayID
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let targetScreen = self.screenForDisplayID(screenID) ?? NSScreen.main ?? NSScreen.screens.first
-                guard let targetScreen else { return }
-                self.handleSelection(rect: rectInScreenCoordinates, on: targetScreen)
-            }
-            return
-        }
-
-        handleSelection(rect: rectInScreenCoordinates, on: screen)
-    }
-
-    private func handleSelection(rect: CGRect?, on screen: NSScreen) {
-        guard let rect else { return }
-        captureRegion(in: rect, on: screen)
-    }
-}
 
 private extension NSScreen {
     var displayID: CGDirectDisplayID? {

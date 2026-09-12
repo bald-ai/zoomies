@@ -1,0 +1,65 @@
+{
+  "outcome": "complete",
+  "summary": "Checkout is personal-use shippable with caveats; not external-release ready. Strongest blockers: welcome modal every launch (parked TODO), README/menu recording UX mismatch (no Start/Stop in tray), and ad-hoc-only packaging (no Developer ID/notarization). Recording lifecycle code has stop/quit persistence paths and unit tests for start/stop/save, but quit-while-recording and live capture/permission flows remain manual.",
+  "findings": [
+    "HIGH \u2014 Welcome blocks every launch. Trigger: app launch \u2192 AppDelegate.applicationDidFinishLaunching calls showWelcomeInfo() which always runModal(). Consequence: user must dismiss a blocking alert every start; contradicts Dev/pre-release-todo.md decision (once-only). Exact: Sources/AppDelegate.swift:53,57-81; Dev/pre-release-todo.md:1-8.",
+    "HIGH (external) / MEDIUM (personal) \u2014 Documented menu recording control is absent. Trigger: open menu-bar menu expecting Start/Stop Recording (README). Actual menu is only Settings + Quit (TrayService.makeMenu). Recording start/stop is hotkey-only (AppDelegate.toggleRecording via HotKeyService). README also claims macOS 14 menu explains unavailability; that UI path does not exist (unavailable alert only if start() is invoked). Consequence: discoverability/docs lie; if Option+Shift+5 fails to register, no in-app recording control. Exact: Sources/TrayService.swift:16-30,35-48; README.md:118-133; Sources/AppDelegate.swift:142-163; Sources/ScreenRecordingService.swift:92-98.",
+    "BLOCKER for external release; OK for private personal use \u2014 Packaging is ad-hoc only. scripts/build_app.sh signs with codesign --force --deep --sign - (identity `-`), no Developer ID, notarization, stapling, or hardened-runtime entitlements. Generated Info.plist has NSAppleEventsUsageDescription + LSMinimumSystemVersion 14.0 but no NSScreenCaptureUsageDescription. Consequence: fine for local `./scripts/build_app.sh` personal builds; Gatekeeper/notarized third-party distribution is not configured. Exact: scripts/build_app.sh:133-156."
+  ],
+  "changes": [],
+  "decisions": [
+    "Capped at 3 strongest release-relevant issues; architecture style and try? alone not treated as defects.",
+    "Separated private personal-use (ad-hoc .app OK) from external release (needs real signing/notarization + tray/docs/welcome polish).",
+    "Did not elevate missing NSScreenCaptureUsageDescription to a confirmed runtime blocker without a live TCC/prompt observation; listed under manual gaps.",
+    "Did not treat pre-release TODO #2 dropdown dismissal as a confirmed defect (suspected, not verified).",
+    "Builds/tests/app launch not run per assignment constraints; production paths and test source verified by reading only."
+  ],
+  "evidence": [
+    "Sources/AppDelegate.swift:20-55,57-81,88-98,142-163 \u2014 welcome every launch; quit calls stopForAppTermination; recording toggle is hotkey-driven.",
+    "Dev/pre-release-todo.md:1-8 \u2014 welcome once-only decided, status TODO.",
+    "Sources/TrayService.swift:16-30 \u2014 menu items Settings/Quit only; updateRecording only mutates status title.",
+    "README.md:118-133 \u2014 claims menu-bar Start Recording and macOS 14 menu unavailable messaging.",
+    "Sources/ScreenRecordingService.swift:34-37,92-98,108-144,246-277,311-339 \u2014 macOS 15 gate; stop/finalize/publish; quit sets isTerminating so save skips rename callback.",
+    "Sources/NativeAreaCapture.swift:7-61 \u2014 /usr/sbin/screencapture -i -x; cancel/no-permission nil paths; wired from Sources/ScreenshotService.swift:87.",
+    "scripts/build_app.sh:93-156 \u2014 release swift build, ad-hoc codesign, Info.plist keys.",
+    "Package.swift:6-8 \u2014 platform macOS v14.",
+    "Tests/ZoomiesTests/ScreenRecordingServiceTests.swift \u2014 lifecycle/save tests; no stopForAppTermination coverage.",
+    "Tests/ZoomiesTests/NativeAreaCaptureTests.swift \u2014 cancel/fail/permission-suppress/image-load with stub executables."
+  ],
+  "checks": [
+    {
+      "check": "Read Dev/pre-release-todo.md, README.md, Package.swift, AppDelegate, ScreenRecordingService, NativeAreaCapture, TrayService, ScreenshotService capture path, scripts/build_app.sh, related tests",
+      "result": "passed",
+      "detail": "Source/docs/test files read; production wiring verified statically."
+    },
+    {
+      "check": "swift test / swift build / ./scripts/build_app.sh / launch Zoomies.app",
+      "result": "not_run",
+      "detail": "Assignment forbids parent-owned builds/tests and app/UI launch."
+    },
+    {
+      "check": "Live quit-while-recording Desktop MP4 persistence",
+      "result": "not_run",
+      "detail": "Code path exists (stopForAppTermination + isTerminating); no unit test and no runtime verification."
+    },
+    {
+      "check": "Live Screen Recording TCC / NSScreenCaptureUsageDescription behavior",
+      "result": "not_run",
+      "detail": "No permission UI exercised; Info.plist lacks NSScreenCaptureUsageDescription."
+    }
+  ],
+  "open_issues": [
+    "UNVERIFIED RISK: Quit during recording \u2014 AppDelegate.swift:88-97 + ScreenRecordingService.swift:131-144,271-276 intends to finalize save without rename panel; bounded by finalizeTimeout+2; untested end-to-end.",
+    "UNVERIFIED RISK: Multi-monitor filter update continuity \u2014 ScreenRecordingService.swift:519-521 explicitly notes seamless SCRecordingOutput across updateContentFilter is unverified.",
+    "MANUAL: Area-capture dropdown dismissal after save panel focus \u2014 Dev/pre-release-todo.md:11-26 (suspected, not implemented).",
+    "MANUAL: First-capture permission prompts for NativeAreaCapture (screencapture), full-screen SCScreenshotManager, and SCStream recording on a clean TCC profile.",
+    "MANUAL: Hotkey conflict / registration-failure UX when Option+Shift+5 unavailable (only recovery path besides rebinding in Settings).",
+    "MANUAL: Intel macOS 14+ build (README states untested).",
+    "MANUAL for external: Developer ID sign, notarize, staple, Gatekeeper open on a non-dev Mac."
+  ],
+  "next_steps": [
+    "Personal-use ship: decide whether every-launch welcome is acceptable; if not, implement once-only (pre-release TODO #1) before calling it polished.",
+    "External ship: add tray Start/Stop (or fix README), implement welcome once, then replace ad-hoc signing with Developer ID + notarization pipeline.",
+    "Orchestrator/parent: run unit tests + build_app.sh; manually quit mid-recording and confirm Desktop MP4; exercise area/full/record permissions once on clean TCC."
+  ]
+}

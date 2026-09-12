@@ -1,0 +1,47 @@
+{
+  "outcome": "complete",
+  "summary": "Among ScreenshotWorkflowController, EditorWindowController, and EditorCanvasView, Zoomies shows mixed depth in Ousterhout\u2019s sense: the after-capture workflow is deep from its caller, the canvas\u2019s drawing/export core is deep behind a small API, but the editor stack has a concrete boundary weakness where final-action/keyboard vocabulary and compositing leak across layers. A tidy file-by-job floorplan alone does not establish these boundaries; callers do.",
+  "findings": [
+    "Strength (deep module): ScreenshotService only constructs ScreenshotWorkflowController, sets onFinish, and calls start(). That tiny interface hides rename/note/editor sequencing, backups, note-burn, persistence waits, and reopen-on-failure. Large internals here are useful complexity, not proof of shallowness.",
+    "Strength (deep drawing core + useful helper, not a costly abstraction): EditorCanvasView keeps Item/undo/hit-testing private and exposes mainly setTool/setColor/compositeImage/editableState. EditorCanvasState is a portable snapshot that lets annotations cross the workflow without leaking the fileprivate Item type; EditorWindowController restores the clean base from that state when reopening. Tests encode the \u2018pending composite vs clean base\u2019 contract.",
+    "Boundary weakness (leaky interface, not \u2018large file\u2019): (a) Workflow bypasses EditorWindowController and constructs EditorCanvasView itself to recompose annotations for note-only saves. (b) Parallel FinalAction vs FinalActionCommand enums require manual mapping in the window. (c) Canvas KeyCommand carries window-chrome concerns (zoom, color picker, save/delete/close, backToNote), so the canvas is both a deep renderer and a leaky keyboard router for its parent."
+  ],
+  "changes": [],
+  "decisions": [
+    "Judged depth from caller simplicity and what callers must know, not from line counts or floorplan groupings.",
+    "Treated EditorCanvasState as a small useful helper (hides Item, enables round-trip) and KeyCommand / dual FinalAction enums as the costly/leaky seam.",
+    "Read tests for contracts; did not run them (read-only architectural opinion).",
+    "No edits, no branches/worktrees, no further delegation; existing user changes untouched."
+  ],
+  "evidence": [
+    "Sources/ScreenshotService.swift:167-184 \u2014 caller uses only init + onFinish + start()",
+    "Sources/ScreenshotWorkflowController.swift:1-7,114-123,125-138 \u2014 documented single-screenshot coordinator; public start/cancel",
+    "Sources/ScreenshotWorkflowController.swift:332-391,403-499 \u2014 openEditor wires onComplete/onBackToNote/confirmers; handleEditorCompletion owns disk/clipboard/backup",
+    "Sources/ScreenshotWorkflowController.swift:837-848 \u2014 annotatedBaseImage() instantiates EditorCanvasView(...).compositeImage() directly (workflow\u2192canvas skip)",
+    "Sources/EditorWindowController.swift:26-47,36,141-156,235-241,322-324,700-714,927-942 \u2014 completion API; FinalAction typealias from workflow; state restore; KeyCommand fan-out; finish exports composite+state",
+    "Sources/EditorCanvasView.swift:17-24,28-54,72-80,191-214,295-306,1604-1695,1780-1793 \u2014 deep drawing responsibilities vs KeyCommand/FinalActionCommand leakage; fileprivate Item; export APIs",
+    "Sources/EditorCanvasState.swift:4-70 \u2014 Codable portable items/base PNG (helper across boundary)",
+    "Tests/ZoomiesTests/EditorWindowControllerTests.swift:119-146 \u2014 pending composite + initialState restores clean-base compositing contract"
+  ],
+  "checks": [
+    {
+      "check": "Read-only inspection of Sources/{ScreenshotWorkflowController,EditorWindowController,EditorCanvasView,EditorCanvasState,ScreenshotService}.swift and related tests via Grep/Read",
+      "result": "passed",
+      "detail": "Caller/API relationships and line-cited seams verified in source; no code changes."
+    },
+    {
+      "check": "Execute XCTest suite",
+      "result": "not_run",
+      "detail": "Assignment asked for architectural opinion from code/tests as evidence, not a test run."
+    }
+  ],
+  "open_issues": [
+    "Hypothesis (not scored): extracting a non-NSView compositor for annotatedBaseImage would deepen the workflow/editor boundary; current skip may be pragmatic for a small app.",
+    "handleRenameAction / handleNoteAction / handleEditorCompletion are module-visible (used by tests), so the \u2018true\u2019 production interface is smaller than the type\u2019s full surface.",
+    "Floorplan/line-count artifacts under work/code-views/ were noted as non-proof and not used as evidence of depth."
+  ],
+  "next_steps": [
+    "Orchestrator can treat this as a finished read-only architecture note for a noncoder: deep workflow + deep canvas core, with a concrete leak at keyboard/final-action vocabulary and workflow\u2192canvas compositing.",
+    "If a follow-up is wanted in Agent mode: map a minimal compositor API so ScreenshotWorkflowController never imports EditorCanvasView construction, and/or collapse FinalActionCommand into one shared enum owned above the canvas."
+  ]
+}

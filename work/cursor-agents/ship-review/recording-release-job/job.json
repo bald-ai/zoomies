@@ -1,0 +1,17 @@
+{
+  "status": "completed",
+  "controller_pid": 23695,
+  "project": "/Users/applelevne/Documents/coding-projects/zoomies",
+  "model": "cursor-grok-4.5-high-fast",
+  "mode": "ask",
+  "started_at": 1789228633.0154061,
+  "session_lock": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/ship-review/recording-release-job/session.lock",
+  "resume_job": null,
+  "handoff_required": true,
+  "child_pid": 23696,
+  "process_groups": [
+    23696
+  ],
+  "exit_code": 0,
+  "finished_at": 1789228689.423462
+}

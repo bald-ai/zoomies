@@ -1,0 +1,17 @@
+{
+  "status": "completed",
+  "controller_pid": 20076,
+  "project": "/Users/applelevne/Documents/coding-projects/zoomies",
+  "model": "cursor-grok-4.5-high-fast",
+  "mode": "ask",
+  "started_at": 1789227816.535796,
+  "session_lock": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/depth-review/boundaries-job/session.lock",
+  "resume_job": null,
+  "handoff_required": true,
+  "child_pid": 20077,
+  "process_groups": [
+    20077
+  ],
+  "exit_code": 0,
+  "finished_at": 1789227861.399391
+}

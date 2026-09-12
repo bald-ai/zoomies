@@ -1,0 +1,8 @@
+Read work/cursor-agents/visual-options/shared-brief.md in full and follow it.
+
+Your concept id is iceberg. Title: What is hidden beneath the surface?.
+Own ONLY work/code-views/04-iceberg.html and work/code-views/04-iceberg-notes.md.
+
+Task: Create a visually compelling iceberg/cutaway cross-section explaining deep vs shallow modules to a noncoder, using 3 selectable real examples: SettingsStore, PNGMetadata, EditorCanvasView or ScreenshotWorkflowController. Above surface: caller-facing actions in human language; below: the work hidden inside, based on code reading. Clearly label geometry illustrative and do not quantify depth or quality. A compact interface can hide much work; lots of small files alone is not evidence of bad structure. Inspect source and note specific leaks/caller knowledge if appropriate, but qualify conclusions. Show useful responsibilities, not raw code. Include an example question to ask an agent about selected module.
+
+Build the complete interactive HTML and notes now. No need to request approval. Do not delegate. Verify actual project facts. Parent will integrate the file as an iframe in a single self-contained HTML comparison.

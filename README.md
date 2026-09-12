@@ -124,8 +124,7 @@ seconds.
 
 Video is 30, 60, or 120 fps (selectable in Settings, default 30), SDR, H.264 MP4 without audio on a fixed 1920x1080 canvas
 (the full display is fitted without cropping or stretching, with black
-margins where needed). The menu bar shows a recording indicator with elapsed
-time. The finished video is saved beside screenshots with a unique
+margins where needed). The menu bar shows only the elapsed seconds, from `0` to `60`, in red. The finished video is saved beside screenshots with a unique
 `Recording_...` filename and revealed in Finder.
 
 Only one Zoomies operation runs at a time: recording blocks
@@ -142,7 +141,9 @@ starts.
 
 ## Permissions
 
-The app uses `ScreenCaptureKit` (`SCScreenshotManager`) for all screen capture. macOS will prompt once for Screen Recording permission.
+Area capture uses the built-in macOS screenshot selector. Full-screen capture uses `ScreenCaptureKit` (`SCScreenshotManager`). macOS will prompt for Screen Recording permission when needed.
+
+For area capture, drag to select, press Space to switch to window/menu selection, or press Escape to cancel. The captured image then opens in the usual Zoomies workflow.
 
 - **Screen Recording** (for screenshots via ScreenCaptureKit)
 - **Automation / Finder** (for reopening flow on selected Finder image via `Option+Shift+2`)

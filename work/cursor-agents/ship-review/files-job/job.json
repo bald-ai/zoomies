@@ -1,0 +1,17 @@
+{
+  "status": "stopped",
+  "controller_pid": 23547,
+  "project": "/Users/applelevne/Documents/coding-projects/zoomies",
+  "model": "cursor-grok-4.5-high-fast",
+  "mode": "ask",
+  "started_at": 1789228631.8501298,
+  "session_lock": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/ship-review/files-job/session.lock",
+  "resume_job": null,
+  "handoff_required": true,
+  "child_pid": 23548,
+  "process_groups": [
+    23548
+  ],
+  "exit_code": 143,
+  "finished_at": 1789228690.010083
+}

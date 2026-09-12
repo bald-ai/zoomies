@@ -1,0 +1,49 @@
+{
+  "outcome": "complete",
+  "summary": "Verified production chain AppDelegate \u2192 Capture/Recording/Scratchpad + SettingsStore.load; Capture \u2192 ScreenshotWorkflowController; Workflow \u2192 EditorWindowController; Workflow also builds EditorCanvasView for annotatedBaseImage; WorkflowImagePersistenceLogic/WorkflowReopenMetadataLogic use PNGMetadata; SettingsStore is cross-feature. Corrections for the rooms map: do not sell Shared helpers as one module; do not park UniqueFileURLLogic as Workflow-only; do not imply PNGMetadata/ImageSafety/CoreLogic stay inside one room.",
+  "findings": [
+    "CORRECTION \u2014 Shared helpers: present as distributed tools (clipboard, backup, alerts, purge, theme, small input helpers), not one unified module or real hallway. AppDelegate is launch/orchestrator (loads settings; starts capture, recording, scratchpad; busy-gates features), not a peer utility other rooms call.",
+    "CORRECTION \u2014 UniqueFileURLLogic: currently listed under Workflow in 01-rooms.html, but production callers span ScreenRecordingService, ScreenshotServiceCoreLogic, ScratchpadService, ScreenshotWorkflowCoreLogic, ClipboardService. For a noncoder map, treat it as a shared tool, not Workflow furniture.",
+    "CORRECTION \u2014 PNGMetadata in Editing alone: primary embed/extract production callers are WorkflowImagePersistenceLogic and WorkflowReopenMetadataLogic; ImageSafety/EditorCanvasState also touch it. Editing-room ownership overstates isolation.",
+    "CORRECTION \u2014 Capture/Editing sealed rooms: ScreenshotServiceCoreLogic.pngData/bitmapRepresentation are also called from EditorCanvasView, ScreenshotWorkflowController, WorkflowReopenMetadataLogic, WorkflowImagePersistenceLogic.",
+    "CORRECTION \u2014 Workflow\u2192Editing copy: not only \u201copens the editor\u201d; annotatedBaseImage constructs EditorCanvasView(...).compositeImage() and skips EditorWindowController.",
+    "CAUTION 1: Keep doors/spine schematic. Rooms are inferred file buckets, not package boundaries; cross-room call sites above are the proof.",
+    "CAUTION 2: Do not imply feature rooms run independently. AppDelegate busy-gates screenshot/recording/scratchpad/video-rename; SettingsStore is read/updated across Capture, Editing, Workflow, Recording, Preferences UI."
+  ],
+  "changes": [],
+  "decisions": [
+    "Only corrections + two isolation cautions returned; confirmed edges not listed as fixes.",
+    "Shared helpers must be distributed tools, not a unified module; AppDelegate called out separately as orchestrator.",
+    "No edits, tests, delegation, or branch/worktree changes; existing source left as-is."
+  ],
+  "evidence": [
+    "work/code-views/01-rooms.html:479-499 Shared helpers room; 371 UniqueFileURLLogic under Workflow; 413 PNGMetadata under Editing",
+    "work/cursor-agents/depth-review/services-job/handoff.json; work/cursor-agents/depth-review/boundaries-job/handoff.json",
+    "Sources/AppDelegate.swift:21 settingsStore.load(); 32-39 ScreenshotService/ScratchpadService/ScreenRecordingService; 125-130 hotkeys; 162 recording start; 199/215 capture; 305 scratchpad open; 138-162 busy gates",
+    "Sources/ScreenshotService.swift:167-184 constructs ScreenshotWorkflowController + start()",
+    "Sources/ScreenshotWorkflowController.swift:332-367 openEditor \u2192 EditorWindowController; 839-848 annotatedBaseImage \u2192 EditorCanvasView(...).compositeImage()",
+    "Sources/WorkflowImagePersistenceLogic.swift:31-41 PNGMetadata.embed; Sources/WorkflowReopenMetadataLogic.swift:58-59 extractEditorState/extract",
+    "SettingsStore callers: AppDelegate, ScreenshotService, ScreenshotWorkflowController, EditorWindowController, SettingsWindowController, FilenameTemplateEditorView, VideoRenameWorkflowController",
+    "UniqueFileURLLogic: ScreenRecordingService.swift:331; ScreenshotServiceCoreLogic.swift:81; ScratchpadService.swift:184; ScreenshotWorkflowCoreLogic.swift:47; ClipboardService.swift:130",
+    "ScreenshotServiceCoreLogic outside ScreenshotService: EditorCanvasView.swift:302,1883; ScreenshotWorkflowController.swift:520,590; WorkflowReopenMetadataLogic.swift:25; WorkflowImagePersistenceLogic.swift:26"
+  ],
+  "checks": [
+    {
+      "check": "Read prior depth-review handoffs + 01-rooms.html/notes; grep/read production call sites for AppDelegate, ScreenshotService\u2192workflow, workflow\u2192editor/canvas, PNGMetadata, SettingsStore, UniqueFileURLLogic, ScreenshotServiceCoreLogic",
+      "result": "passed",
+      "detail": "Claimed production relationships confirmed; room-map packaging mismatches identified with file:line evidence."
+    },
+    {
+      "check": "Run tests",
+      "result": "not_run",
+      "detail": "Assignment forbade tests."
+    }
+  ],
+  "open_issues": [
+    "File-to-room reassignment (e.g. move UniqueFileURLLogic, split AppDelegate from Shared) is a parent HTML/copy decision; this handoff only states the correction requirement.",
+    "Whether PNGMetadata stays visually near Editing as \u2018edit-state format\u2019 while copy names Workflow I/O callers is a presentation choice; production callers are Workflow persistence/reopen."
+  ],
+  "next_steps": [
+    "Parent HTML: reword Shared helpers as distributed tools; separate AppDelegate as wiring/orchestrator; fix UniqueFileURLLogic and PNGMetadata/CoreLogic isolation wording; keep spine schematic; add one line on workflow\u2192canvas skip and SettingsStore/busy-gate cross-feature use."
+  ]
+}

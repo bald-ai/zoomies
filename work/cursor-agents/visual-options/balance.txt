@@ -1,0 +1,8 @@
+Read work/cursor-agents/visual-options/shared-brief.md in full and follow it.
+
+Your concept id is balance. Title: Where is the work concentrated?.
+Own ONLY work/code-views/05-balance.html and work/code-views/05-balance-notes.md.
+
+Task: Create a visual evidence-first view of code concentration and recent editing in Zoomies. Prefer readable horizontal stacked ribbons / bookshelf strips / aligned lanes, not bubble chart, 3D city, or spaghetti graph. Use facts.json to show top files translated to human roles plus remaining files, accurately calculated shares of all source lines, and count of commits touching those same files. 19 commits is a small history: label it as history available, not stable long-term health. Selection reveals a plain-language reason to inspect the file and what metrics cannot prove. Could use two aligned views Size of each part and Times edited, and a toggle or selection to compare. Do not invent complexity or bug scores. Explain small helpers can be useful and large editor can be cohesive. Keep it a distinctive fifth direction, useful for priorities rather than technical metrics dashboard.
+
+Build the complete interactive HTML and notes now. No need to request approval. Do not delegate. Verify actual project facts. Parent will integrate the file as an iframe in a single self-contained HTML comparison.

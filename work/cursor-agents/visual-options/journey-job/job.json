@@ -1,0 +1,16 @@
+{
+  "status": "completed",
+  "controller_pid": 9456,
+  "project": "/Users/applelevne/Documents/coding-projects/zoomies",
+  "model": "cursor-grok-4.5-high-fast",
+  "mode": "agent",
+  "started_at": 1789226604.859786,
+  "session_lock": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/visual-options/journey-job/session.lock",
+  "child_pid": 9457,
+  "process_groups": [
+    9457,
+    10812
+  ],
+  "exit_code": 0,
+  "finished_at": 1789226694.9259589
+}

@@ -30,7 +30,7 @@ final class TrayService {
         return menu
     }
 
-    /// Red recording dot and elapsed seconds against the recording limit.
+    /// Compact elapsed seconds, capped at the recording limit.
     @MainActor
     func updateRecording(state: ScreenRecordingService.State, elapsed: TimeInterval) {
         guard let button = statusItem.button else { return }
@@ -40,13 +40,11 @@ final class TrayService {
             button.contentTintColor = nil
             restoreStatusImage()
         case .starting:
-            setRecordingTitle("●")
-        case .recording:
+            setRecordingTitle("0")
+        case .recording, .stopping:
             let limit = Int(ScreenRecordingService.maxDuration)
             let seconds = min(limit, max(0, Int(elapsed)))
-            setRecordingTitle("● \(seconds)/\(limit)s")
-        case .stopping:
-            setRecordingTitle("●")
+            setRecordingTitle(String(seconds))
         }
     }
 

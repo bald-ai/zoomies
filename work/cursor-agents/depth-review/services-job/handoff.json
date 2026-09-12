@@ -1,0 +1,48 @@
+{
+  "outcome": "complete",
+  "summary": "Call-site review (not floorplan/line-count): Zoomies has real deep modules\u2014especially PNGMetadata, and to a large extent ScreenRecordingService and SettingsStore\u2014plus a leaky shared encoding helper around screenshots. Tiny helpers like UniqueFileURLLogic are useful, not costly abstractions.",
+  "findings": [
+    "PNGMetadata is the clearest deep module: callers only call embed/extract/extractEditorState/isPNG; chunk parsing, iTXt assembly, CRC, and Zoomies-chunk stripping stay inside Sources/PNGMetadata.swift. Production callers: WorkflowImagePersistenceLogic (embed) and WorkflowReopenMetadataLogic (extract). Callers still choose *policy* (when to embed prompt+original vs editorState-only; 50MB skip in WorkflowImagePersistenceLogic)\u2014that is layering, not a leak of PNG format.",
+    "ScreenRecordingService and SettingsStore hide useful complexity behind narrow interfaces. AppDelegate/Tray drive recording with start/stop/state/elapsed/callbacks and never touch SCStream/session/finalize. Settings callers use load/settings/update/didRepair; path migration, JSON, normalization, and atomic writes stay private. UniqueFileURLLogic is the contrast case: a small useful helper (unique _2/_3 names), reused by recording/screenshot/clipboard/scratchpad\u2014not a costly abstraction.",
+    "ScreenshotService\u2019s hotkey surface is relatively deep (captureArea/captureFullScreen hide ScreenCaptureKit, save, sound, workflow kickoff), but ScreenshotServiceCoreLogic is a leaky shared kitchen: EditorCanvasView, ScreenshotWorkflowController, WorkflowReopenMetadataLogic, and WorkflowImagePersistenceLogic must call pngData/bitmapRepresentation themselves. beginPostCaptureFlow\u2019s fat overload also forces coordination of initialImage / persistence Task / counter. Large ScreenRecordingService internals alone would not prove depth; depth here is evidenced by the simple caller surface."
+  ],
+  "changes": [],
+  "decisions": [
+    "Judged depth from verified call sites and what callers must know, not file size or work/code-views floorplan grouping.",
+    "Treated UniqueFileURLLogic/DirectoryPurgeLogic-style enums as small useful helpers; treated ScreenshotServiceCoreLogic as a leaky shared encoding surface rather than a deep module boundary.",
+    "Did not assign numeric depth scores; assessment is qualitative with file:line evidence only."
+  ],
+  "evidence": [
+    "Sources/PNGMetadata.swift:25-41 embed(original+prompt[+editorState]); 44-56 embed(editorState); 60-107 extract; 109-138 extractEditorState; private chunk/CRC ~147-336",
+    "Sources/WorkflowImagePersistenceLogic.swift:31-41 PNGMetadata.embed only; 11-14 maxEmbeddedOriginalBytes policy outside PNGMetadata",
+    "Sources/WorkflowReopenMetadataLogic.swift:58-59 extractEditorState + extract; 25 ScreenshotServiceCoreLogic.pngData for fresh capture",
+    "Sources/SettingsStore.swift:50-73 load (legacy path + repair); 96-100 update; 104-126 private persist/loadSettings",
+    "Sources/AppDelegate.swift:21 load; 101 didRepair; 125/162 settings reads; callers never call persist",
+    "Sources/ScreenRecordingService.swift:92-127 start/stop; 39-55 state/elapsed/busy/onUpdate/onRecordingSaved; internals makeSession/finalize/monitor ~195-530",
+    "Sources/AppDelegate.swift:40-45,89-97,134-162,146-147 recording call sites; Sources/TrayService.swift:35-48 state+elapsed only",
+    "Sources/ScreenshotService.swift:71-103 captureArea; 134-185 beginPostCaptureFlow overload with persistence Task; 347-361 wrappers into CoreLogic",
+    "ScreenshotServiceCoreLogic call sites outside ScreenshotService: Sources/EditorCanvasView.swift:302,1883; Sources/ScreenshotWorkflowController.swift:520,590; Sources/WorkflowReopenMetadataLogic.swift:25; Sources/WorkflowImagePersistenceLogic.swift:26",
+    "Sources/UniqueFileURLLogic.swift:3-30; used from ScreenRecordingService.swift:331 and ScreenshotServiceCoreLogic.swift:81"
+  ],
+  "checks": [
+    {
+      "check": "Static read of Sources/* and grep of call sites for SettingsStore, PNGMetadata, ScreenshotService/CoreLogic, ScreenRecordingService, UniqueFileURLLogic",
+      "result": "passed",
+      "detail": "Call sites verified under Sources/; test files noted but not treated as production boundaries."
+    },
+    {
+      "check": "Unit/integration test run",
+      "result": "not_run",
+      "detail": "User requested read-only opinion without tests."
+    }
+  ],
+  "open_issues": [
+    "AppDelegate busy-state orchestration across screenshot/recording/scratchpad/video-rename is cross-feature coordination, not a leak of ScreenRecordingService internals\u2014worth not conflating with module depth.",
+    "SettingsStore does not hide the Settings schema; UI and services still know field names\u2014depth is about persistence/migration, not domain model encapsulation.",
+    "Hypothesis only: further extraction of a single \u2018image encode + metadata\u2019 facade might deepen the screenshot boundary; not verified as net win."
+  ],
+  "next_steps": [
+    "If orchestrating follow-up design: preserve PNGMetadata\u2019s simple embed/extract surface; avoid treating CoreLogic reuse as proof of a clean ScreenshotService boundary.",
+    "No code changes required from this review; existing user work left untouched."
+  ]
+}

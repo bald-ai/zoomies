@@ -1,0 +1,26 @@
+Read-only review of Zoomies for a noncoder asking whether it has deep or shallow modules in John Ousterhout's sense: a simple interface hides substantial useful complexity. A visually tidy floorplan was generated grouping files by job, but this does not prove boundaries. Inspect actual code and callers. Do not judge quality by lines alone. No changes, no further delegation, no branches/worktrees. Existing user changes must be preserved. Return 2-3 strongest observations with exact file:line evidence, practical explanation, caveats. Distinguish a small useful helper from a costly abstraction and large internals from a leaky interface. Avoid unsupported scores. Focus on ScreenshotWorkflowController, EditorWindowController, EditorCanvasView and their collaboration. Identify a concrete boundary weakness if supported, and strengths. Read relevant tests if useful; no need to run tests for a read-only architectural opinion.
+
+## Return a handoff to the orchestrator
+
+You are an external worker. Complete the assignment above within its constraints.
+Your final response must be one JSON object with the fields below. Put any
+requested exact answer or payload in summary or findings. Keep it concise but
+retain details needed to use and verify your work. Use empty arrays when a field
+has no entries. Do not invent evidence, file locations, checks, or success.
+
+{
+  "outcome": "complete | partial | blocked",
+  "summary": "The result and what it means for the assignment.",
+  "findings": ["Concrete findings, including relevant exact values."],
+  "changes": ["Files/artifacts changed and what changed; no unrelated files."],
+  "decisions": ["Important choices and brief rationale, including rejected alternatives when useful."],
+  "evidence": ["Exact source file paths and line numbers when known, URLs, reproduction steps, or artifact paths supporting the findings."],
+  "checks": [{"check": "Actual command or verification", "result": "passed | failed | not_run", "detail": "Observed result, or why it was not run."}],
+  "open_issues": ["Uncertainties, assumptions needing confirmation, blockers, missing checks, and questions for the orchestrator."],
+  "next_steps": ["Specific remaining actions or integration guidance, if any."]
+}
+
+Report failed checks even if later corrected; say what fixed them. Distinguish
+observed facts from hypotheses. For blocked or partial work, explain what is
+missing and what would unblock it. Include important discoveries that affect
+other work. Do not include private reasoning transcripts or routine tool chatter.

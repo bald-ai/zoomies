@@ -1,0 +1,16 @@
+{
+  "status": "completed",
+  "controller_pid": 9879,
+  "project": "/Users/applelevne/Documents/coding-projects/zoomies",
+  "model": "cursor-grok-4.5-high-fast",
+  "mode": "agent",
+  "started_at": 1789226607.181681,
+  "session_lock": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/visual-options/iceberg-job/session.lock",
+  "child_pid": 9880,
+  "process_groups": [
+    9880,
+    12607
+  ],
+  "exit_code": 0,
+  "finished_at": 1789226722.957385
+}

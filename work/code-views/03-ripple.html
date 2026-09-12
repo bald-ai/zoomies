@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What would a change touch?</title>
+<style>
+  :root {
+    --bg: #f8f7f3;
+    --surface: #ffffff;
+    --text: #25352f;
+    --secondary: #66736b;
+    --border: #dce2da;
+    --green: #34664e;
+    --orange: #b56838;
+    --blue: #4e6f96;
+    --purple: #796496;
+    --muted-fill: #eef1ec;
+    --direct-fill: #e4eee8;
+    --check-fill: #f5ebe3;
+    --far-fill: #eceef2;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    min-width: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+
+  .wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 14px 14px 16px;
+  }
+
+  h1 {
+    margin: 0 0 2px;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 1.28rem;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+
+  .question {
+    margin: 0 0 10px;
+    color: var(--secondary);
+    font-size: 14px;
+  }
+
+  .choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-bottom: 10px;
+  }
+
+  .choice {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 12px;
+    padding: 8px 12px;
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    flex: 1 1 180px;
+    max-width: 100%;
+  }
+
+  .choice:hover { border-color: #c5cfc6; }
+
+  .choice:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+  }
+
+  .choice[aria-pressed="true"] {
+    border-color: var(--green);
+    background: var(--direct-fill);
+    box-shadow: inset 0 0 0 1px rgba(52, 102, 78, 0.22);
+  }
+
+  .choice-label {
+    display: block;
+    font-weight: 650;
+    margin-bottom: 1px;
+  }
+
+  .choice-desc {
+    display: block;
+    color: var(--secondary);
+    font-size: 12px;
+  }
+
+  .scope {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--secondary);
+  }
+
+  .diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 12px;
+    min-width: 0;
+  }
+
+  .center-change {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: 0 0 10px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: var(--muted-fill);
+    border: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .center-change strong {
+    font-family: Georgia, "Times New Roman", serif;
+    font-weight: 400;
+    font-size: 15px;
+    color: var(--text);
+  }
+
+  .center-change span {
+    color: var(--secondary);
+  }
+
+  .bands {
+    display: grid;
+    gap: 8px;
+  }
+
+  .band {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 8px 8px 9px;
+    min-width: 0;
+  }
+
+  .band.direct { background: rgba(228, 238, 232, 0.55); }
+  .band.check { background: rgba(245, 235, 227, 0.55); }
+  .band.far { background: rgba(236, 238, 242, 0.65); }
+
+  .band-label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 0 7px 2px;
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.01em;
+    color: var(--secondary);
+    text-transform: uppercase;
+  }
+
+  .band-label .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .band.direct .dot { background: var(--green); }
+  .band.check .dot { background: var(--orange); }
+  .band.far .dot { background: var(--blue); }
+
+  .band.direct .band-label { color: var(--green); }
+  .band.check .band-label { color: var(--orange); }
+  .band.far .band-label { color: var(--blue); }
+
+  .jobs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .job {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 11px;
+    padding: 9px 12px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.25;
+    text-align: left;
+    cursor: pointer;
+    flex: 1 1 140px;
+    min-height: 40px;
+  }
+
+  .job:hover { border-color: #c0cac2; }
+
+  .job:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+  }
+
+  .job[aria-pressed="true"] {
+    border-color: var(--purple);
+    background: #f4f1f7;
+    box-shadow: inset 0 0 0 1px rgba(121, 100, 150, 0.28);
+  }
+
+  .band.direct .job[aria-pressed="true"] {
+    border-color: var(--green);
+    background: #dff0e6;
+    box-shadow: inset 0 0 0 1px rgba(52, 102, 78, 0.28);
+  }
+
+  .band.check .job[aria-pressed="true"] {
+    border-color: var(--orange);
+    background: #f8e8dc;
+    box-shadow: inset 0 0 0 1px rgba(181, 104, 56, 0.28);
+  }
+
+  .band.far .job[aria-pressed="true"] {
+    border-color: var(--blue);
+    background: #e4ebf4;
+    box-shadow: inset 0 0 0 1px rgba(78, 111, 150, 0.28);
+  }
+
+  .detail {
+    margin-top: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 12px 14px;
+    min-height: 88px;
+  }
+
+  .detail-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 8px;
+    margin-bottom: 6px;
+  }
+
+  .detail-name {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 650;
+  }
+
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 650;
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+  }
+
+  .tag.direct {
+    color: var(--green);
+    background: var(--direct-fill);
+    border-color: rgba(52, 102, 78, 0.25);
+  }
+
+  .tag.check {
+    color: var(--orange);
+    background: var(--check-fill);
+    border-color: rgba(181, 104, 56, 0.28);
+  }
+
+  .tag.far {
+    color: var(--blue);
+    background: var(--far-fill);
+    border-color: rgba(78, 111, 150, 0.28);
+  }
+
+  .tag.kind {
+    color: var(--secondary);
+    background: var(--muted-fill);
+    border-color: var(--border);
+    font-weight: 500;
+  }
+
+  .detail-why {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text);
+  }
+
+  details.evidence {
+    margin-top: 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    padding: 8px 12px;
+  }
+
+  details.evidence summary {
+    cursor: pointer;
+    font-weight: 650;
+    font-size: 13px;
+  }
+
+  details.evidence summary:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+  }
+
+  .evidence-body {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--secondary);
+  }
+
+  .evidence-body h3 {
+    margin: 8px 0 3px;
+    font-size: 13px;
+    color: var(--text);
+    font-weight: 650;
+  }
+
+  .evidence-body ul {
+    margin: 0;
+    padding-left: 1.15em;
+  }
+
+  .evidence-body li { margin: 2px 0; }
+
+  .limits {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  @media (max-width: 560px) {
+    .limits { grid-template-columns: 1fr; }
+    .choice { flex-basis: 100%; }
+  }
+
+  .limit-box {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 8px 10px;
+    background: var(--surface);
+  }
+
+  .limit-box strong {
+    display: block;
+    font-size: 13px;
+    margin-bottom: 2px;
+  }
+
+  .limit-box p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--secondary);
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>What would a change touch?</h1>
+    <p class="question">If you changed one concrete thing, which jobs would you inspect first?</p>
+
+    <div class="choices" role="group" aria-label="Example changes">
+      <button type="button" class="choice" data-change="format" aria-pressed="true">
+        <span class="choice-label">Saved picture format &amp; hidden data</span>
+        <span class="choice-desc">How Zoomies writes pictures and keeps edits inside them</span>
+      </button>
+      <button type="button" class="choice" data-change="tool" aria-pressed="false">
+        <span class="choice-label">Add a drawing tool</span>
+        <span class="choice-desc">A new markup tool in the editor</span>
+      </button>
+      <button type="button" class="choice" data-change="shortcut" aria-pressed="false">
+        <span class="choice-label">Screenshot shortcut</span>
+        <span class="choice-desc">Defaults, Settings, and global hotkeys</span>
+      </button>
+    </div>
+
+    <p class="scope">Places to inspect, traced from the code.</p>
+
+    <section class="diagram" aria-label="Change impact bands">
+      <div class="center-change">
+        <strong id="center-title">Saved picture format &amp; hidden data</strong>
+        <span id="center-sub">selected change</span>
+      </div>
+      <div class="bands" id="bands"></div>
+    </section>
+
+    <aside class="detail" aria-live="polite">
+      <div class="detail-top">
+        <h2 class="detail-name" id="detail-name">Save the picture</h2>
+        <span class="tag direct" id="detail-band">Directly involved</span>
+        <span class="tag kind" id="detail-kind">Confirmed direct</span>
+      </div>
+      <p class="detail-why" id="detail-why"></p>
+    </aside>
+
+    <details class="evidence">
+      <summary>Evidence</summary>
+      <div class="evidence-body" id="evidence-body"></div>
+    </details>
+
+    <div class="limits">
+      <div class="limit-box">
+        <strong>Helps you see</strong>
+        <p id="helps-see"></p>
+      </div>
+      <div class="limit-box">
+        <strong>Does not tell you</strong>
+        <p id="does-not"></p>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  var BAND_LABEL = {
+    direct: "Directly involved",
+    check: "Check together",
+    far: "Likely unrelated"
+  };
+
+  var CHANGES = {
+    format: {
+      title: "Saved picture format & hidden data",
+      helps: "Which nearby jobs share writing, hiding, and reopening picture data when that format changes.",
+      doesNot: "Other connections may still matter. This view suggests where to begin checking a change.",
+      jobs: [
+        {
+          id: "fmt-save",
+          band: "direct",
+          kind: "Confirmed direct",
+          name: "Save the picture",
+          why: "This job turns the edited screen into a saved picture file and is where Zoomies decides the on-disk format."
+        },
+        {
+          id: "fmt-hidden",
+          band: "direct",
+          kind: "Confirmed direct",
+          name: "Hidden editing data",
+          why: "Zoomies can store the clean original, the note text, and editable marks inside the saved picture so later reopen can restore them."
+        },
+        {
+          id: "fmt-reopen",
+          band: "direct",
+          kind: "Confirmed direct",
+          name: "Bring edits back",
+          why: "Opening a Zoomies picture again reads that hidden data so notes and marks can return."
+        },
+        {
+          id: "fmt-other",
+          band: "check",
+          kind: "Candidate impact",
+          name: "Other picture-saving jobs",
+          why: "Prepare-a-PNG helpers, clipboard copy, filename preview, and size guards also assume PNG. Worth checking if the product format rule changes."
+        },
+        {
+          id: "fmt-far",
+          band: "far",
+          kind: "Likely unrelated first pass",
+          name: "Shortcuts & other flows",
+          why: "Global capture shortcuts, screen recording, and scratchpad notes do not write this hidden picture data. They may still share “one thing at a time” app rules."
+        }
+      ],
+      evidence: [
+        {
+          heading: "Confirmed direct references",
+          items: [
+            "Sources/WorkflowImagePersistenceLogic.swift — encodedImageData writes representation(using: .png) and calls PNGMetadata.embed (lines 16–53). Job: Save the picture.",
+            "Sources/PNGMetadata.swift — Zoomies-OriginalPNG-v1, Zoomies-Prompt-v1, Zoomies-EditorState-v1 iTXt keywords; embed/extract. Job: Hidden editing data.",
+            "Sources/EditorCanvasState.swift — Codable Item list serialized into editor-state metadata (lines 63–92). Job: Hidden editing data.",
+            "Sources/WorkflowReopenMetadataLogic.swift — PNGMetadata.extract / extractEditorState on reopen (lines 58–80). Job: Bring edits back.",
+            "Sources/ScreenshotWorkflowController.swift — calls WorkflowImagePersistenceLogic.encodedImageData with prompt/editorState (around line 528)."
+          ]
+        },
+        {
+          heading: "Candidate / parallel paths (Other picture-saving jobs)",
+          items: [
+            "Sources/ScreenshotServiceCoreLogic.swift — pngData(from:) used by capture and editor state export. Prepare a PNG.",
+            "Sources/ClipboardService.swift — copyImageAsFile forces PNG-only cache files (lines 107–114).",
+            "Sources/ImageSafety.swift — isSafePNG uses PNGMetadata.isPNG (line 105).",
+            "Sources/FilenameTemplateEditorView.swift — preview label appends .png (line 108)."
+          ]
+        },
+        {
+          heading: "Outer band sources",
+          items: [
+            "Sources/HotKeyService.swift — global shortcut registration; does not encode picture metadata.",
+            "Sources/ScreenRecordingService.swift — MP4 recording, not PNG metadata.",
+            "Sources/ScratchpadService.swift — Markdown notes, not screenshot PNG chunks."
+          ]
+        },
+        {
+          heading: "Method",
+          items: [
+            "Bands are a manual first-pass checklist from reading call sites in Sources, not a compiler dependency graph.",
+            "Snapshot context: work/code-views/facts.json (2026-09-12)."
+          ]
+        }
+      ]
+    },
+
+    tool: {
+      title: "Add a drawing tool",
+      helps: "Which editor jobs define tools, drawing, keys, toolbar, and remembered mark shapes a new tool must join.",
+      doesNot: "Does not estimate effort or guarantee reopen works until the saved-mark model is checked.",
+      jobs: [
+        {
+          id: "tool-draw",
+          band: "direct",
+          kind: "Confirmed direct",
+          name: "Drawing on the canvas",
+          why: "The tool list and mouse drawing live here. A new tool needs a place in that list and in the draw/finish steps."
+        },
+        {
+          id: "tool-ui",
+          band: "direct",
+          kind: "Confirmed direct",
+          name: "Toolbar & letter keys",
+          why: "Each tool has a toolbar button and usually a letter key (W, D, A, R, E, T, S today)."
+        },
+        {
+          id: "tool-remember",
+          band: "direct",
+          kind: "Confirmed direct",
+          name: "Remembered mark shapes",
+          why: "If the tool should reopen later, its marks must fit the saved shape list. Today’s line tool reuses the pen shape."
+        },
+        {
+          id: "tool-roundtrip",
+          band: "check",
+          kind: "Candidate impact",
+          name: "Save & reopen edits",
+          why: "Hidden editing data, the save path, and reopen must understand any new mark kind. Docs that list tool letters may also need a pass."
+        },
+        {
+          id: "tool-far",
+          band: "far",
+          kind: "Likely unrelated first pass",
+          name: "Global shortcuts & settings",
+          why: "Capture hotkeys and Settings shortcut fields are separate from in-editor markup tools. Scratchpad is a different note flow."
+        }
+      ],
+      evidence: [
+        {
+          heading: "Confirmed direct references",
+          items: [
+            "Sources/EditorCanvasView.swift — enum EditorTool (lines 7–15); drawing/commit switches (lines 435–447, 1243–1277). Job: Drawing on the canvas.",
+            "Sources/EditorCanvasView.swift — toolKeyCodeToTool W/D/A/R/E/T/S (lines 1822–1830). Job: Toolbar & letter keys.",
+            "Sources/EditorWindowController.swift — makeToolButton for each tool (lines 384–390). Job: Toolbar & letter keys.",
+            "Sources/EditorCanvasState.swift — Item kinds pen/arrow/rect/ellipse/text/image/erase (lines 63–92); line stores as .pen. Job: Remembered mark shapes."
+          ]
+        },
+        {
+          heading: "Candidate / round-trip (Save & reopen edits)",
+          items: [
+            "Sources/PNGMetadata.swift — Zoomies-EditorState-v1 editor state keyword.",
+            "Sources/WorkflowImagePersistenceLogic.swift — embeds editorState when present.",
+            "Sources/WorkflowReopenMetadataLogic.swift — extractEditorState on reopen.",
+            "Sources/ScreenshotWorkflowController.swift — passes embedEditorState into persistence.",
+            "README.md — Workflow Keybinds table lists editor tool letters (docs outside Sources)."
+          ]
+        },
+        {
+          heading: "Outer band sources",
+          items: [
+            "Sources/HotKeyService.swift — Carbon global hotkeys, not editor letters.",
+            "Sources/SettingsWindowController.swift — capture/recording/note shortcut rows.",
+            "Sources/ScratchpadService.swift — Markdown scratchpad flow."
+          ]
+        },
+        {
+          heading: "Method",
+          items: [
+            "Traced tool declaration, toolbar, keyboard map, and persistence Item enum in Sources.",
+            "A question to investigate: whether a new tool needs its own saved shape kind or can reuse an existing one (as line reuses pen)."
+          ]
+        }
+      ]
+    },
+
+    shortcut: {
+      title: "Screenshot shortcut",
+      helps: "Which jobs own default chords, Settings editing, and global registration for area/full capture.",
+      doesNot: "Does not list every system conflict. Other shortcuts share duplicate checks, so uniqueness rules can still touch them.",
+      jobs: [
+        {
+          id: "sc-defaults",
+          band: "direct",
+          kind: "Confirmed direct",
+          name: "Default chords",
+          why: "Built-in defaults are Option+Shift+4 for area capture and Option+Shift+3 for full screen."
+        },
+        {
+          id: "sc-register",
+          band: "direct",
+          kind: "Confirmed direct",
+          name: "Register hotkeys",
+          why: "This job tells macOS which global key combos belong to Zoomies’ area and full-screen capture."
+        },
+        {
+          id: "sc-settings",
+          band: "direct",
+          kind: "Confirmed direct",
+          name: "Settings shortcut fields",
+          why: "Settings lets someone record a new combo for Capture area and Capture full screen."
+        },
+        {
+          id: "sc-wire",
+          band: "check",
+          kind: "Candidate impact",
+          name: "Startup wiring & capture",
+          why: "App startup connects those hotkeys to the capture actions. Duplicate checks also compare note, Finder-reopen, and recording shortcuts. Failed registration shows a warning."
+        },
+        {
+          id: "sc-far",
+          band: "far",
+          kind: "Likely unrelated first pass",
+          name: "Drawing tools & picture data",
+          why: "In-editor letter tools and hidden picture data do not define these global capture chords. The menu-bar menu is Settings/Quit, not shortcut definitions."
+        }
+      ],
+      evidence: [
+        {
+          heading: "Confirmed direct references",
+          items: [
+            "Sources/Settings.swift — Shortcuts.screenshotArea / screenshotFull; defaults Option+Shift+4 and Option+Shift+3 (lines 172–203). Job: Default chords.",
+            "Sources/HotKeyService.swift — HotKeyKind.screenshotArea/Full; registerShortcuts (lines 16–18, 112–113). Job: Register hotkeys.",
+            "Sources/SettingsWindowController.swift — Capture area / full screen recorders (lines 202–203, 320–321, 389–391). Job: Settings shortcut fields.",
+            "Sources/ShortcutRecorderView.swift — records keyCode + Carbon modifiers via HotKeyService helpers."
+          ]
+        },
+        {
+          heading: "Candidate / shared wiring (Startup wiring & capture)",
+          items: [
+            "Sources/AppDelegate.swift — registerHotKeys → triggerAreaScreenshot / triggerFullScreenshot → ScreenshotService.captureArea / captureFullScreen (lines 125–130, 186–215).",
+            "Sources/SettingsWindowController.swift — hasDuplicate compares all five shortcuts (lines 421–427).",
+            "Sources/SettingsStore.swift — persists Settings including shortcuts.",
+            "Sources/AlertPresenter.swift — used when registration failures are reported.",
+            "Sources/ScreenshotService.swift — captureArea / captureFullScreen entry points."
+          ]
+        },
+        {
+          heading: "Outer band sources",
+          items: [
+            "Sources/EditorCanvasView.swift — local editor letter tools (W/A/R/…), not global Carbon shortcuts.",
+            "Sources/PNGMetadata.swift — picture metadata; does not store shortcut chords.",
+            "Sources/TrayService.swift — menu exposes Settings and Quit."
+          ]
+        },
+        {
+          heading: "Method",
+          items: [
+            "Traced screenshotArea/screenshotFull from defaults → Settings UI → HotKeyService → AppDelegate → ScreenshotService.",
+            "Other shortcuts share duplicate-checking and registration; treat uniqueness-rule changes as check-together."
+          ]
+        }
+      ]
+    }
+  };
+
+  var activeChange = "format";
+  var activeJobId = null;
+
+  var bandsEl = document.getElementById("bands");
+  var evidenceBody = document.getElementById("evidence-body");
+  var detailName = document.getElementById("detail-name");
+  var detailBand = document.getElementById("detail-band");
+  var detailKind = document.getElementById("detail-kind");
+  var detailWhy = document.getElementById("detail-why");
+  var centerTitle = document.getElementById("center-title");
+  var helpsSee = document.getElementById("helps-see");
+  var doesNot = document.getElementById("does-not");
+
+  function setText(el, text) {
+    el.textContent = text;
+  }
+
+  function firstDirectJob(change) {
+    for (var i = 0; i < change.jobs.length; i++) {
+      if (change.jobs[i].band === "direct") return change.jobs[i];
+    }
+    return change.jobs[0];
+  }
+
+  function findJob(change, id) {
+    for (var i = 0; i < change.jobs.length; i++) {
+      if (change.jobs[i].id === id) return change.jobs[i];
+    }
+    return null;
+  }
+
+  function renderEvidence(change) {
+    evidenceBody.textContent = "";
+    change.evidence.forEach(function (section) {
+      var h = document.createElement("h3");
+      setText(h, section.heading);
+      evidenceBody.appendChild(h);
+      var ul = document.createElement("ul");
+      section.items.forEach(function (item) {
+        var li = document.createElement("li");
+        setText(li, item);
+        ul.appendChild(li);
+      });
+      evidenceBody.appendChild(ul);
+    });
+  }
+
+  function renderDetail(job) {
+    setText(detailName, job.name);
+    setText(detailBand, BAND_LABEL[job.band]);
+    detailBand.className = "tag " + job.band;
+    setText(detailKind, job.kind);
+    setText(detailWhy, job.why);
+  }
+
+  function renderBands(change) {
+    bandsEl.textContent = "";
+    var order = ["direct", "check", "far"];
+    order.forEach(function (band) {
+      var jobs = change.jobs.filter(function (j) { return j.band === band; });
+      if (!jobs.length) return;
+
+      var section = document.createElement("div");
+      section.className = "band " + band;
+
+      var label = document.createElement("div");
+      label.className = "band-label";
+      var dot = document.createElement("span");
+      dot.className = "dot";
+      dot.setAttribute("aria-hidden", "true");
+      var labelText = document.createElement("span");
+      setText(labelText, BAND_LABEL[band]);
+      label.appendChild(dot);
+      label.appendChild(labelText);
+
+      var jobsWrap = document.createElement("div");
+      jobsWrap.className = "jobs";
+      jobsWrap.setAttribute("role", "group");
+      jobsWrap.setAttribute("aria-label", BAND_LABEL[band]);
+
+      jobs.forEach(function (job) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "job";
+        btn.setAttribute("data-job-id", job.id);
+        btn.setAttribute("aria-pressed", job.id === activeJobId ? "true" : "false");
+        setText(btn, job.name);
+        btn.addEventListener("click", function () {
+          selectJob(job.id);
+        });
+        jobsWrap.appendChild(btn);
+      });
+
+      section.appendChild(label);
+      section.appendChild(jobsWrap);
+      bandsEl.appendChild(section);
+    });
+  }
+
+  function syncJobButtons() {
+    var buttons = bandsEl.querySelectorAll(".job");
+    for (var i = 0; i < buttons.length; i++) {
+      var btn = buttons[i];
+      btn.setAttribute("aria-pressed", btn.getAttribute("data-job-id") === activeJobId ? "true" : "false");
+    }
+  }
+
+  function selectJob(id) {
+    var change = CHANGES[activeChange];
+    var job = findJob(change, id) || firstDirectJob(change);
+    activeJobId = job.id;
+    renderDetail(job);
+    syncJobButtons();
+    notifyHeight();
+  }
+
+  function selectChange(id) {
+    activeChange = id;
+    var change = CHANGES[id];
+    var first = firstDirectJob(change);
+    activeJobId = first.id;
+
+    var choiceButtons = document.querySelectorAll(".choice");
+    for (var i = 0; i < choiceButtons.length; i++) {
+      var btn = choiceButtons[i];
+      btn.setAttribute("aria-pressed", btn.getAttribute("data-change") === id ? "true" : "false");
+    }
+
+    setText(centerTitle, change.title);
+    setText(helpsSee, change.helps);
+    setText(doesNot, change.doesNot);
+    renderBands(change);
+    renderDetail(first);
+    renderEvidence(change);
+    notifyHeight();
+  }
+
+  var choiceButtons = document.querySelectorAll(".choice");
+  for (var c = 0; c < choiceButtons.length; c++) {
+    choiceButtons[c].addEventListener("click", function (event) {
+      selectChange(event.currentTarget.getAttribute("data-change"));
+    });
+  }
+
+  function notifyHeight() {
+    var height = document.documentElement.scrollHeight;
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({
+        type: "zoomies-concept-height",
+        id: "ripple",
+        height: height
+      }, "*");
+    }
+  }
+
+  var heightRaf = null;
+  function scheduleHeight() {
+    if (heightRaf !== null) cancelAnimationFrame(heightRaf);
+    heightRaf = requestAnimationFrame(function () {
+      heightRaf = null;
+      notifyHeight();
+    });
+  }
+
+  window.addEventListener("load", scheduleHeight);
+  if (typeof ResizeObserver !== "undefined") {
+    var ro = new ResizeObserver(scheduleHeight);
+    ro.observe(document.body);
+  }
+
+  selectChange("format");
+})();
+</script>
+</body>
+</html>

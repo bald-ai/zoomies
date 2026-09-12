@@ -1,0 +1,8 @@
+Read work/cursor-agents/visual-options/shared-brief.md in full and follow it.
+
+Your concept id is ripple. Title: What would a change touch?.
+Own ONLY work/code-views/03-ripple.html and work/code-views/03-ripple-notes.md.
+
+Task: Create an interactive change-impact concept with 3 concrete change choices: changing saved-image format/metadata behavior, adding an editor drawing tool, changing screenshot shortcut behavior. Trace real declarations and references in sources. Use concentric bands or a clean branching tree of affected jobs, with clear labels Directly involved / Check together / Likely unrelated (if using last category avoid asserting no indirect effect). Do not show dense graph. Selection highlights relevant parts and explains why each belongs. Present as manually scoped places to inspect, not a complete predictive dependency analyzer. Provide evidence per selection and labels separating confirmed direct references from candidate impacts. Use no invented totals or risk score.
+
+Build the complete interactive HTML and notes now. No need to request approval. Do not delegate. Verify actual project facts. Parent will integrate the file as an iframe in a single self-contained HTML comparison.
