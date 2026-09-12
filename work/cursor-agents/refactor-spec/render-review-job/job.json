@@ -1,0 +1,17 @@
+{
+  "status": "completed",
+  "controller_pid": 25803,
+  "project": "/Users/applelevne/Documents/coding-projects/zoomies",
+  "model": "cursor-grok-4.5-high-fast",
+  "mode": "ask",
+  "started_at": 1789228973.913347,
+  "session_lock": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/refactor-spec/render-review-job/session.lock",
+  "resume_job": null,
+  "handoff_required": true,
+  "child_pid": 25804,
+  "process_groups": [
+    25804
+  ],
+  "exit_code": 0,
+  "finished_at": 1789229036.556318
+}

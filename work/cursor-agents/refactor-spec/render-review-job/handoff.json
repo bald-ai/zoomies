@@ -1,0 +1,53 @@
+{
+  "outcome": "complete",
+  "summary": "Bounded extraction: shared AppKit offscreen compositor (no NSView/window) owned once and used by editor + workflow; hoist duplicate FinalAction; move generic PNG/bitmap helpers out of ScreenshotServiceCoreLogic. Keep interactive canvas, text commit, and UI chrome in EditorCanvasView. Do not round-trip EditorCanvasState merely to render live items.",
+  "findings": [
+    "Workflow currently builds a throwaway EditorCanvasView only for compositing: annotatedBaseImage \u2192 EditorCanvasView(image:canvasBase, initialState:state).compositeImage() (ScreenshotWorkflowController.swift:839-848). Same base-preference rule as editor init: state.baseImagePNG over pending/caller image (EditorWindowController.swift:142-156).",
+    "True compositing owner today is EditorCanvasView.renderCompositeImage + exportBounds (EditorCanvasView.swift:295-297, 828-893). Interactive draw(_:) adds edge chrome, selection outlines, and in-progress previews (386-458) that must NOT appear in export.",
+    "Pixel contract: bitmap pixels = floor/ceil crop points \u00d7 baseImagePixelScale(); rep.size stays point size of crop; flipped context + Y-flip + translate(-cropOrigin); clear fill then base sourceOver then items. Comment at 840-844 documents prior Retina lockFocus doubling bug. Tests lock 100\u00d780 native resolution and quadrant orientation.",
+    "Coords: flipped top-left; baseImageOrigin defaults to canvasEdgeInset 24; annotations are canvas-space; restore shifts items by (newOrigin \u2212 savedOrigin) when baseImageOrigin present (144-158). v1 nil origin = no shift. exportBounds = union(baseImageBounds, item bounds) then floor/ceil normalize (828-835, 663-668).",
+    "Erase: opaque black fill with .destinationOut (536-541). Order after prior layers is load-bearing. Text: compositeImage/endTextEditingIfNeeded commits live editor before render (295-297, 1542-1545); headless state render has no editor. Paste image items decode PNG once at state\u2192Item (1850-1852); serialize uses pngData only for editableState, not for compose.",
+    "Duplicate enums: ScreenshotWorkflowController.FinalAction (14-19) \u2261 EditorCanvasView.FinalActionCommand (28-34). EditorWindowController typealiases workflow FinalAction and case-maps FinalActionCommand 1:1 (36, 700-714); escape maps only closeOnly vs deleteOnly (61-62, 141).",
+    "Generic PNG/bitmap live in ScreenshotServiceCoreLogic.pngData/bitmapRepresentation (32-77) but are used by canvas state, workflow persistence/reopen, and capture save\u2014not capture-specific. Capture-specific keepers: shouldSuppressCaptureFailureAlert, resizedImageIfNeeded, uniqueScreenshotURL, screenCaptureRect.",
+    "Over-extraction conflicts (broader than benefit): rewriting to pure Foundation/CG; extracting hit-testing/undo/text UI; encoding live Items\u2192EditorCanvasState\u2192decode solely to compose; sharing draw(_:) including chrome; merging note burn (WorkflowNoteRenderer) into compositor."
+  ],
+  "changes": [],
+  "decisions": [
+    "Proposed type: EditorCanvasCompositor (AppKit OK). API: compose(baseImage:baseImageOrigin:items:croppingTo:) mirroring renderCompositeImage; compose(state:fallbackBase:) for workflow after isSafeToRestore, decoding items once, applying same origin shift as canvas init, crop=exportBounds. Optional crop for selection export (renderSelectedRegionImage).",
+    "Share committed-item drawing + export geometry + arrow constants with the view; leave preview/chrome/text editor on the view. Runtime Item model (or package-visible twin) is the compose input\u2014never Codable round-trip for live canvas compose.",
+    "FinalAction: single shared enum (small file or hoist from workflow); canvas KeyCommand.finalAction and window onComplete use it; delete FinalActionCommand. Escape still chooses .closeOnly vs .deleteOnly from escapeKeyDeletesFile.",
+    "PNG/bitmap: move to ImageBitmapConversion (name flexible) with thin ScreenshotServiceCoreLogic wrappers optional only if call-site churn must be staged; prefer direct call-site retarget.",
+    "Rejected: constructing NSView for headless compose; Foundation-only renderer; extracting full EditorCanvasView."
+  ],
+  "evidence": [
+    "Sources/ScreenshotWorkflowController.swift:14-19, 816-848",
+    "Sources/EditorWindowController.swift:36, 61-62, 141-156, 700-714, 236, 912, 938",
+    "Sources/EditorCanvasView.swift:28-34, 94-97, 144-160, 295-306, 386-458, 536-541, 586-617, 654-668, 828-916, 1473-1545, 1780-1798, 1833-1888",
+    "Sources/EditorCanvasState.swift:163-172, 178-218",
+    "Sources/ScreenshotServiceCoreLogic.swift:32-77",
+    "Sources/WorkflowImagePersistenceLogic.swift:26-27; Sources/WorkflowReopenMetadataLogic.swift:25",
+    "Tests/ZoomiesTests/EditorCanvasViewTests.swift:77-101; EditorWindowControllerTests.swift:119-146; ScreenshotWorkflowControllerTests.swift:649-692 (pen at midY=24+40 documents inset coords)"
+  ],
+  "checks": [
+    {
+      "check": "Read-only source inspection of canvas render, workflow annotatedBaseImage, FinalAction dupes, PNG helpers",
+      "result": "passed",
+      "detail": "No source edits, tests, or branch/worktree changes. Dev/editor-workflow-refactor-spec.md not present (parent writes later); existing user mods untouched."
+    },
+    {
+      "check": "Execute XCTest suite / implement extraction",
+      "result": "not_run",
+      "detail": "Assignment forbade test execution and implementation."
+    }
+  ],
+  "open_issues": [
+    "Confirm shared enum filename/module placement vs keeping cases on ScreenshotWorkflowController and typealiasing from canvas (either works; avoid canvas\u2192workflow type dependency if FinalAction stays nested on workflow).",
+    "Whether ScreenshotServiceCoreLogic keeps deprecated forwarding wrappers during stage 1 is a parent/style call only.",
+    "Hypothesis (not re-verified by running tests): compose(state:) with items baked at inset 24 and nil baseImageOrigin must match current note-only pixel test; if state later always stores baseImageOrigin, shift math must stay identical to init."
+  ],
+  "next_steps": [
+    "Parent writes Dev/editor-workflow-refactor-spec.md from this design; keep any existing user edits in that doc.",
+    "Stage order: (1) extract PNG/bitmap helpers + retarget call sites; (2) extract EditorCanvasCompositor and wire EditorCanvasView.compositeImage/renderSelectedRegionImage through it with zero workflow change; (3) annotatedBaseImage \u2192 compositor (drop EditorCanvasView construction); (4) consolidate FinalAction; (5) run existing tests only\u2014no new tests required this effort.",
+    "Minimal later regression gates: testCompositeImagePreservesNativeResolution; testCompositeImagePreservesOrientation; testEditableStateUsesCleanBaseInsteadOfPendingComposite; testNoteOnlySaveOnReopenedAnnotatedFileKeepsAnnotationPixels (+ prompt companion); ScreenshotServiceCoreLogicTests bitmap/png after move; spot-check erase transparency and annotation-beyond-base export growth if touching draw/export paths."
+  ]
+}

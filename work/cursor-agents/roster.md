@@ -19,3 +19,6 @@ Rooms update: parent owns work/zoomies-code-views.html; rooms-update/review-job 
 Rooms update complete: review handoff verified. Parent replaced final page with room-only map; retained detailed source evidence on selection. Browser interaction and responsive checks passed.
 
 Ship readiness: files-job reviews screenshot data integrity; recording-release-job reviews recording and packaging. Both read-only; parent owns builds/tests and validation.
+
+Refactor spec: render-review-job read-only extraction design review. Parent owns Dev/editor-workflow-refactor-spec.md and removes generated HTML. No app implementation or tests this turn.
+Refactor spec complete: render-review-job returned valid handoff, no tool failures. Parent verified source contracts and incorporated coordinate, native-resolution, text, erase, state/encoding separation constraints. Deleted only code-map HTML and its regeneration scripts; preserved unrelated welcome HTML. No source implementation or tests this turn.
