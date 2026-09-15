@@ -12,33 +12,27 @@ final class NotePanelControllerTests: XCTestCase {
         XCTAssertEqual(textView.typingAttributes[.foregroundColor] as? NSColor, .white)
 
         textView.typingAttributes[.foregroundColor] = NSColor.black
-        textView.textStorage?.addAttribute(.foregroundColor,
-                                           value: NSColor.black,
-                                           range: NSRange(location: 0, length: textView.string.count))
-        textView.didChangeText()
-        textView.setSelectedRange(NSRange(location: textView.string.count, length: 0))
+        let coloredText = NSAttributedString(string: " pasted", attributes: [.foregroundColor: NSColor.black])
+        textView.insertText(coloredText, replacementRange: NSRange(location: 5, length: 0))
+        XCTAssertEqual(textView.string, "hello pasted")
 
         XCTAssertEqual(textView.textColor, .white)
         XCTAssertEqual(textView.insertionPointColor, .white)
         XCTAssertEqual(textView.typingAttributes[.foregroundColor] as? NSColor, .white)
 
-        let effectiveColor = textView.textStorage?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        let effectiveColor = textView.textStorage?.attribute(.foregroundColor, at: 6, effectiveRange: nil) as? NSColor
         XCTAssertEqual(effectiveColor, .white)
     }
 
-    func testShortcutLabelAdvertisesShiftEnterNewline() throws {
+    func testShortcutLabelAdvertisesSave() throws {
         let controller = NotePanelController(initialText: "")
         let labels = findLabels(in: controller.window?.contentView).map(\.stringValue)
 
-        XCTAssertTrue(labels.contains { $0.contains("Shift+↩: new line") })
         XCTAssertTrue(labels.contains { $0.contains("Enter: Save") })
     }
 
     func testScratchpadModeUsesNotePanelWithoutScreenshotOnlyActions() throws {
-        let controller = NotePanelController(initialText: "",
-                                             escapeKeyDeletesFile: false,
-                                             showsCopyAndDelete: false,
-                                             showsEditorShortcut: false)
+        let controller = DedicatedNotePanelController(initialText: "")
         let labels = findLabels(in: controller.window?.contentView).map(\.stringValue)
 
         XCTAssertTrue(labels.contains("Note"))
@@ -78,6 +72,42 @@ final class NotePanelControllerTests: XCTestCase {
         }
         let imageNote = NotePanelController(initialText: String(repeating: "x", count: 1100))
         XCTAssertEqual(imageNote.text.count, 1000)
+    }
+
+    func testSeparatePanelsApplyTheirOwnLayoutAndLimits() throws {
+        let screenshot = ScreenshotNotePanelController(initialText: String(repeating: "s", count: 1100))
+        let dedicated = DedicatedNotePanelController(initialText: String(repeating: "d", count: 1100))
+        XCTAssertEqual(screenshot.text.count, 1000)
+        XCTAssertEqual(dedicated.text.count, 1100)
+        for (controller, layout) in [(screenshot as NotePanelController, ScreenshotNotePanelController.layout),
+                                     (dedicated as NotePanelController, DedicatedNotePanelController.layout)] {
+            let textView = try XCTUnwrap(findTextView(in: controller.window?.contentView))
+            let scrollView = try XCTUnwrap(textView.enclosingScrollView)
+            XCTAssertEqual(scrollView.hasVerticalScroller, layout.hasVerticalScroller)
+            XCTAssertEqual(scrollView.autohidesScrollers, layout.autohidesScrollers)
+        }
+    }
+
+    func testDedicatedNoteShowsScrollbarAndScrollsLongText() throws {
+        let controller = DedicatedNotePanelController(initialText: "")
+        let window = try XCTUnwrap(controller.window)
+        defer { controller.close() }
+        window.contentView?.layoutSubtreeIfNeeded()
+        let textView = try XCTUnwrap(findTextView(in: window.contentView))
+        let scrollView = try XCTUnwrap(textView.enclosingScrollView)
+        scrollView.tile()
+        let scroller = try XCTUnwrap(scrollView.verticalScroller)
+        XCTAssertEqual(scrollView.scrollerStyle, .legacy)
+        XCTAssertFalse(scroller.isHidden)
+        XCTAssertGreaterThan(scroller.frame.width, 0)
+
+        controller.text = String(repeating: "Long note line for scrolling.\n", count: 1400)
+        textView.layoutManager?.ensureLayout(for: try XCTUnwrap(textView.textContainer))
+        XCTAssertGreaterThan(textView.frame.height, scrollView.contentSize.height)
+        textView.scrollRangeToVisible(NSRange(location: (textView.string as NSString).length, length: 0))
+        XCTAssertGreaterThan(scrollView.contentView.bounds.minY, 0)
+        textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
+        XCTAssertEqual(scrollView.contentView.bounds.minY, 0, accuracy: 1)
     }
 
     private func findTextView(in view: NSView?) -> NSTextView? {

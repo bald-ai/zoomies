@@ -10,7 +10,7 @@ enum NotePanelAction {
     case goToEditor(text: String)
 }
 
-final class NotePanelController: NSWindowController {
+class NotePanelController: NSWindowController {
     var onAction: ((NotePanelAction) -> Void)?
 
     private let textView = LockedWhiteNoteTextView(frame: .zero, textContainer: nil)
@@ -19,31 +19,37 @@ final class NotePanelController: NSWindowController {
     private var escapeKeyDeletesFile: Bool = true
     private var showsCopyAndDelete: Bool = true
     private var showsEditorShortcut: Bool = true
+    private var showsNewlineShortcut: Bool = false
 
     static let standaloneMaxLength = 100_000
     private var maxLength = 1000
+    private var layout = ScreenshotNotePanelController.layout
 
     var text: String {
         get { String(textView.string.prefix(maxLength)) }
         set { textView.setFixedWhiteString(String(newValue.prefix(maxLength))) }
     }
 
-    convenience init(initialText: String,
+    init(initialText: String,
                      escapeKeyDeletesFile: Bool = true,
                      showsCopyAndDelete: Bool = true,
                      showsEditorShortcut: Bool = true,
-                     maxLength: Int = 1000) {
-        let contentRect = NSRect(x: 0, y: 0, width: 520, height: 280)
+                     showsNewlineShortcut: Bool = false,
+                     maxLength: Int = 1000,
+                     layout: NotePanelLayout = ScreenshotNotePanelController.layout) {
+        let contentRect = NSRect(origin: .zero, size: layout.size)
         let panel = FloatingInputPanel(contentRect: contentRect)
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
 
-        self.init(window: panel)
+        super.init(window: panel)
+        self.layout = layout
         self.maxLength = max(1, maxLength)
         textView.characterLimit = self.maxLength
         self.escapeKeyDeletesFile = escapeKeyDeletesFile
         self.showsCopyAndDelete = showsCopyAndDelete
         self.showsEditorShortcut = showsEditorShortcut
+        self.showsNewlineShortcut = showsNewlineShortcut
         configureUI(initialText: initialText)
     }
 
@@ -90,7 +96,6 @@ final class NotePanelController: NSWindowController {
         textView.keyCommandHandler = { [weak self] (command: KeyCommand) in
             guard let self = self else { return }
             let value = String(self.textView.string.prefix(self.maxLength))
-            self.textView.setFixedWhiteString(value)
             switch command {
             case .enter:
                 self.onAction?(.save(text: value))
@@ -120,8 +125,11 @@ final class NotePanelController: NSWindowController {
 
         let scrollView = NSScrollView()
         scrollView.borderType = .bezelBorder
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
+        scrollView.hasVerticalScroller = layout.hasVerticalScroller
+        scrollView.autohidesScrollers = layout.autohidesScrollers
+        if let scrollerStyle = layout.scrollerStyle {
+            scrollView.scrollerStyle = scrollerStyle
+        }
         scrollView.documentView = textView
 
         [titleLabel, limitLabel, scrollView, shortcutLabel].forEach { view in
@@ -133,7 +141,11 @@ final class NotePanelController: NSWindowController {
         shortcutLabel.textColor = NSColor.secondaryLabelColor
         shortcutLabel.lineBreakMode = .byWordWrapping
         let escapeLabel = escapeKeyDeletesFile ? "Delete" : "Close"
-        var shortcutParts = ["Enter: Save", "Shift+↩: new line", "⌘↩: Copy+Save"]
+        var shortcutParts = ["Enter: Save"]
+        if showsNewlineShortcut {
+            shortcutParts.append("Shift+↩: new line")
+        }
+        shortcutParts.append("⌘↩: Copy+Save")
         if showsCopyAndDelete {
             shortcutParts.append("⌘⌫: Copy+Delete")
         }
@@ -153,12 +165,14 @@ final class NotePanelController: NSWindowController {
             scrollView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
-            scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 60),
+            scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: layout.minimumTextHeight),
 
             shortcutLabel.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: 8),
             shortcutLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
             shortcutLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
-            shortcutLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12)
+            layout.fillsAvailableHeight
+                ? shortcutLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12)
+                : shortcutLabel.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -12)
         ])
 
         window?.initialFirstResponder = textView
@@ -194,7 +208,6 @@ private final class LockedWhiteNoteTextView: NSTextView {
     }
 
     var keyCommandHandler: ((KeyCommand) -> Void)?
-    private var isApplyingFixedTextStyle = false
 
     override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
         if let container {
@@ -214,6 +227,8 @@ private final class LockedWhiteNoteTextView: NSTextView {
         isSelectable = true
         isVerticallyResizable = true
         isHorizontallyResizable = false
+        minSize = .zero
+        maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         autoresizingMask = [.width]
         textContainerInset = NSSize(width: 4, height: 4)
         textContainer?.widthTracksTextView = true
@@ -237,12 +252,15 @@ private final class LockedWhiteNoteTextView: NSTextView {
     }
 
     func configureFixedWhiteText() {
-        enforceFixedTextStyle()
+        textColor = .white
+        insertionPointColor = .white
+        enforceTypingColor()
     }
 
     func setFixedWhiteString(_ value: String) {
         string = value
-        enforceFixedTextStyle()
+        textColor = .white
+        enforceTypingColor()
     }
 
     override func keyDown(with event: NSEvent) {
@@ -255,7 +273,7 @@ private final class LockedWhiteNoteTextView: NSTextView {
 
     override func didChangeText() {
         super.didChangeText()
-        enforceFixedTextStyle()
+        enforceTypingColor()
         onEdited?()
     }
 
@@ -266,37 +284,24 @@ private final class LockedWhiteNoteTextView: NSTextView {
 
     override func becomeFirstResponder() -> Bool {
         let becameFirstResponder = super.becomeFirstResponder()
-        enforceFixedTextStyle()
+        enforceTypingColor()
         return becameFirstResponder
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        enforceFixedTextStyle()
+        enforceTypingColor()
+    }
+
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        enforceTypingColor()
+        let plainText = (insertString as? NSAttributedString)?.string ?? insertString
+        super.insertText(plainText, replacementRange: replacementRange)
     }
 
     override func paste(_ sender: Any?) {
-        super.paste(sender)
-        enforceFixedTextStyle()
-    }
-
-    private func enforceFixedTextStyle() {
-        guard !isApplyingFixedTextStyle else { return }
-        isApplyingFixedTextStyle = true
-        defer { isApplyingFixedTextStyle = false }
-
-        let color = NSColor.white
-        textColor = color
-        insertionPointColor = color
         enforceTypingColor()
-
-        if let textStorage, textStorage.length > 0 {
-            let selected = selectedRange()
-            textStorage.beginEditing()
-            textStorage.addAttribute(.foregroundColor, value: color, range: NSRange(location: 0, length: textStorage.length))
-            textStorage.endEditing()
-            super.setSelectedRange(selected, affinity: .downstream, stillSelecting: false)
-        }
+        super.pasteAsPlainText(sender)
     }
 
     private func enforceTypingColor() {

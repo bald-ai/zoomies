@@ -7,7 +7,7 @@ final class ScratchpadService {
     private let noteWriter: ScratchpadNoteWriter
 
     private var renamePanelController: RenamePanelController?
-    private var notePanelController: NotePanelController?
+    private var notePanelController: DedicatedNotePanelController?
     private var currentBaseName: String = ""
     private var cachedText: String = ""
 
@@ -93,13 +93,7 @@ final class ScratchpadService {
     // MARK: - Note
 
     private func presentNotePanel() {
-        let controller = NotePanelController(
-            initialText: cachedText,
-            escapeKeyDeletesFile: false,
-            showsCopyAndDelete: false,
-            showsEditorShortcut: false,
-            maxLength: NotePanelController.standaloneMaxLength
-        )
+        let controller = DedicatedNotePanelController(initialText: cachedText)
         controller.onAction = { [weak self] action in self?.handleNoteAction(action) }
         notePanelController = controller
         presentedPanel = .note

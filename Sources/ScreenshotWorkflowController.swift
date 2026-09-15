@@ -34,7 +34,7 @@ final class ScreenshotWorkflowController {
     private let initialEditorState: EditorCanvasState?
 
     private var renameController: RenamePanelController?
-    private var noteController: NotePanelController?
+    private var noteController: ScreenshotNotePanelController?
     private var editorController: EditorWindowController?
 
     var pendingNoteText: String = ""
@@ -153,7 +153,7 @@ final class ScreenshotWorkflowController {
 
     private func presentNotePanel(existingText: String = "") {
         let initialText = existingText.isEmpty ? pendingNoteText : existingText
-        let controller = NotePanelController(initialText: initialText,
+        let controller = ScreenshotNotePanelController(initialText: initialText,
                                              escapeKeyDeletesFile: escapeKeyDeletesFile)
         controller.onAction = { [weak self] action in
             self?.handleNoteAction(action)
