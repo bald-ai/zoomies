@@ -1,0 +1,41 @@
+{
+  "status": "completed",
+  "controller_pid": 51195,
+  "project": "/Users/applelevne/Documents/coding-projects/zoomies",
+  "model": "swe-2-max",
+  "mode": "agent",
+  "started_at": 1789232682.988885,
+  "session_lock": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/watcher-interruption-20260912/job/session.lock",
+  "resume_job": null,
+  "handoff_required": true,
+  "controller_started": "Sat Sep 12 19:04:42 2026",
+  "slot_path": "/Users/applelevne/.codex/cursor-agents/slots/0.lock",
+  "owner": "01a0962d-845d-74e2-9a66-0343b0dbcb82",
+  "assignment": "Verify 30-second supervisor check-in and return to waiting",
+  "reads": [
+    "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/watcher-interruption-20260912/assignment.txt"
+  ],
+  "writes": [
+    "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/watcher-interruption-20260912/scratch"
+  ],
+  "worker_id": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/watcher-interruption-20260912/job",
+  "conflict_reason": null,
+  "package_hashes": {
+    "SKILL.md": "efc638583d9da6f87b51a9874740c6fd08d73085e823bc28160dbdbdb35ed48e",
+    "scripts/cursor_worker.py": "b7eceb5a99018be20101c85c6d0ff612fd43850b076a37a372febe1402cc8d22",
+    "scripts/devin_acp.py": "de82ae5d108c9b575796ed2b725549fc6f6fe6845d425f4310b6671f35cc761a",
+    "references/worker_handoff.md": "846296dbefff93e7ee533909917c759def0ae1705fbdcb8eb5762cb27c980818",
+    "references/implementation_review.md": "5081894efbbc02737e5bb151f534aafb706b48d01ed30b93fb62e6b892e9019a"
+  },
+  "backend": "devin",
+  "backend_label": "Devin \u2014 good for clear-spec implementation",
+  "timeout_seconds": 180.0,
+  "conflicts_at_launch": [],
+  "child_pid": 51197,
+  "process_groups": [
+    51197,
+    51461
+  ],
+  "exit_code": 0,
+  "finished_at": 1789232758.2320268
+}

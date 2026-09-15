@@ -1,0 +1,31 @@
+This is a bounded wait-interruption experiment, not app development. Execute exactly one shell command: python3 -c "import time; time.sleep(45); print(947 * 31)". If the command tool returns a background handle, wait for that same command to finish. Report the actual observed integer and finish your turn. Do not inspect app code, edit files, create status markers, install anything, delegate, change branches, or create worktrees. Your scratch write scope is only for controller compatibility; leave it empty. Keep the appended handoff brief. The supervisor may check status while you work; keep this same task running.
+
+
+Declared assignment scopes (paths include descendants):
+{"reads": ["/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/watcher-interruption-20260912/assignment.txt"], "writes": ["/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/watcher-interruption-20260912/scratch"]}
+Only edit declared write scopes. Do not delegate further, change branches, or create worktrees.
+
+## Return a handoff to the orchestrator
+
+You are an external worker. Complete the assignment above within its constraints.
+Your final response must be one JSON object with the fields below. Put any
+requested exact answer or payload in summary or findings. Keep it concise but
+retain details needed to use and verify your work. Use empty arrays when a field
+has no entries. Do not invent evidence, file locations, checks, or success.
+
+{
+  "outcome": "complete | partial | blocked",
+  "summary": "The result and what it means for the assignment.",
+  "findings": ["Concrete findings, including relevant exact values."],
+  "changes": ["Files/artifacts changed and what changed; no unrelated files."],
+  "decisions": ["Important choices and brief rationale, including rejected alternatives when useful."],
+  "evidence": ["Exact source file paths and line numbers when known, URLs, reproduction steps, or artifact paths supporting the findings."],
+  "checks": [{"check": "Actual command or verification", "result": "passed | failed | not_run", "detail": "Observed result, or why it was not run."}],
+  "open_issues": ["Uncertainties, assumptions needing confirmation, blockers, missing checks, and questions for the orchestrator."],
+  "next_steps": ["Specific remaining actions or integration guidance, if any."]
+}
+
+Report failed checks even if later corrected; say what fixed them. Distinguish
+observed facts from hypotheses. For blocked or partial work, explain what is
+missing and what would unblock it. Include important discoveries that affect
+other work. Do not include private reasoning transcripts or routine tool chatter.

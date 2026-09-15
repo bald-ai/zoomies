@@ -14,6 +14,8 @@ BUILD_NUMBER="${DEFAULT_BUILD_NUMBER}"
 BUNDLE_ID="${DEFAULT_BUNDLE_ID}"
 OUTPUT_APP="${REPO_ROOT}/dist/${PRODUCT_NAME}.app"
 SIGN_APP="yes"
+SIGNING_IDENTITY="${ZOOMIES_SIGNING_IDENTITY:-$(git -C "${REPO_ROOT}" config --get zoomies.signingIdentity || true)}"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
 
 usage() {
   cat <<EOF
@@ -24,7 +26,9 @@ Options:
   --build-number <value>  CFBundleVersion (default: ${DEFAULT_BUILD_NUMBER})
   --bundle-id <value>     CFBundleIdentifier (default: ${DEFAULT_BUNDLE_ID})
   --output <path>         Output .app path (default: ${OUTPUT_APP})
-  --no-sign               Skip ad-hoc codesign
+  --signing-identity <id> Signing certificate name or SHA-1 (env: ZOOMIES_SIGNING_IDENTITY,
+                          then git config zoomies.signingIdentity; default: ad-hoc)
+  --no-sign               Skip codesign
   -h, --help              Show this help
 EOF
 }
@@ -66,6 +70,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --output)
       OUTPUT_APP="${2:-}"
+      shift 2
+      ;;
+    --signing-identity)
+      SIGNING_IDENTITY="${2:?Signing identity is required}"
       shift 2
       ;;
     --no-sign)
@@ -151,8 +159,14 @@ cat > "${APP_CONTENTS}/Info.plist" <<EOF
 EOF
 
 if [[ "${SIGN_APP}" == "yes" ]]; then
-  echo "Applying ad-hoc signature..."
-  codesign --force --deep --sign - "${APP_DIR}"
+  if [[ "${SIGNING_IDENTITY}" == "-" ]]; then
+    echo "Applying ad-hoc signature. Permission approvals may not survive rebuilds."
+    echo "Set git config zoomies.signingIdentity to a persistent signing certificate to avoid this."
+  else
+    echo "Signing with ${SIGNING_IDENTITY}..."
+  fi
+  codesign --force --deep --sign "${SIGNING_IDENTITY}" "${APP_DIR}"
+  codesign --verify --deep --strict "${APP_DIR}"
 fi
 
 echo

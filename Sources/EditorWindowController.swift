@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 
 /// Routes command-key equivalents before AppKit's window/menu handling can
 /// consume them. The canvas remains the first responder during normal editing;
@@ -26,20 +27,18 @@ final class EditorWindow: NSWindow {
 /// Window controller for the screenshot editor.
 ///
 /// The editor provides basic annotation tools (pen, arrow, rectangle,
-/// ellipse, text), a small color palette with keyboard access, an undo
+/// ellipse, text, numbered markers), a small color palette with keyboard access, an undo
 /// stack, and zoom controls. When the user finishes (save, copy+save,
 /// copy+delete, delete), the controller calls `onComplete` with the
 /// final image and desired action. The caller (ScreenshotWorkflowController)
 /// is responsible for writing the image to disk, clipboard operations,
 /// and backup/delete semantics.
 final class EditorWindowController: NSWindowController {
-    typealias FinalAction = ScreenshotWorkflowController.FinalAction
-
     /// Called when the user finishes editing.
     /// - Parameters:
     ///   - image: The final composited image, or `nil` for delete-only.
     ///   - action: The requested final action.
-    var onComplete: ((NSImage?, FinalAction, EditorCanvasState?) -> Void)?
+    var onComplete: ((NSImage?, ScreenshotFinalAction, EditorCanvasState?) -> Void)?
     var onBackToNote: (() -> Void)?
     /// Confirmation callbacks for Esc/X paths. Cancelling keeps drawings intact.
     /// The setting gates both callbacks; nil proceeds without a prompt.
@@ -56,11 +55,7 @@ final class EditorWindowController: NSWindowController {
     // Toolbar Cancel (X) and the red window close button mirror Escape:
     // - For editor sessions that own the temp file: delete on cancel.
     // - For Finder-selected originals: close without deleting.
-    private let escapeFinalActionCommand: EditorCanvasView.FinalActionCommand
-
-    private var escapeFinalAction: FinalAction {
-        escapeFinalActionCommand == .closeOnly ? .closeOnly : .deleteOnly
-    }
+    private let escapeFinalAction: ScreenshotFinalAction
 
     private var toolButtons: [EditorTool: NSButton] = [:]
     private var colorPickerButtons: [NSButton] = []
@@ -71,14 +66,45 @@ final class EditorWindowController: NSWindowController {
     private let colorIndicatorButton = NSButton(frame: .zero)
     private let zoomLabel = NSTextField(labelWithString: "100%")
 
-    private let colors: [NSColor] = [
-        NSColor(hex: "#ff3b30"),
-        NSColor(hex: "#007aff"),
-        NSColor(hex: "#34c759"),
-        NSColor(hex: "#000000"),
-        NSColor(hex: "#ffcc00"),
-        NSColor(hex: "#ffffff")
-    ]
+    private var paletteIDs: [String]
+    private var colors: [NSColor]
+    private var paletteObserver: NSObjectProtocol?
+    private var layoutObservation: KeyboardLayoutObservation?
+
+    private func refreshPhysicalShortcutLabels() {
+        let tools: [(EditorTool, Int, String, String)] = [
+            (.pen, kVK_ANSI_W, "Pen", ""), (.line, kVK_ANSI_D, "Line", ""),
+            (.arrow, kVK_ANSI_A, "Arrow", ""), (.rectangle, kVK_ANSI_R, "Rectangle", ", Hold ⇧: Square"),
+            (.ellipse, kVK_ANSI_E, "Ellipse", ", Hold ⇧: Circle"), (.text, kVK_ANSI_T, "Text", ""),
+            (.marker, kVK_ANSI_F, "Numbered marker", ""), (.selection, kVK_ANSI_S, "Selection", "")
+        ]
+        for (tool, code, title, suffix) in tools {
+            guard let button = toolButtons[tool] else { continue }
+            let key = HotKeyService.describeShortcut(keyCode: UInt32(code), carbonFlags: 0)
+            button.toolTip = "\(title) (\(key)\(suffix))"
+            if let index = shortcutHints.firstIndex(where: { $0.view === button }) {
+                shortcutHints[index] = .init(view: button, key: key, label: shortcutHints[index].label)
+            }
+        }
+        let next = HotKeyService.describeShortcut(keyCode: UInt32(kVK_ANSI_Q), carbonFlags: 0)
+        let palette = HotKeyService.describeShortcut(keyCode: UInt32(kVK_ANSI_K), carbonFlags: 0)
+        colorIndicatorButton.toolTip = "Next color: \(next) · Open palette: \(palette) or click"
+        if let index = shortcutHints.firstIndex(where: { $0.view === colorIndicatorButton }) {
+            shortcutHints[index] = .init(view: colorIndicatorButton, key: next, label: "Next color (\(palette) opens palette)")
+        }
+        for (index, button) in colorPickerButtons.enumerated() {
+            for label in button.subviews.compactMap({ $0 as? NSTextField }) {
+                label.stringValue = paletteKeyLabel(at: index)
+            }
+        }
+        shortcutOverlay?.refreshLabels()
+    }
+
+    private func paletteKeyLabel(at index: Int) -> String {
+        let codes = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6]
+        guard codes.indices.contains(index) else { return "\(index + 1)" }
+        return HotKeyService.describeShortcut(keyCode: UInt32(codes[index]), carbonFlags: 0)
+    }
 
     // Match mac_screenshot behavior:
     // - The window opens sized to the image (with caps).
@@ -104,6 +130,8 @@ final class EditorWindowController: NSWindowController {
 
     private var didSendCompletion = false
     private var keyDownMonitor: Any?
+    private(set) var shortcutOverlay: EditorShortcutOverlayController?
+    private var shortcutHints: [EditorShortcutHint] = []
 
     private weak var toolbarBackgroundView: NSView?
     private var toolbarMinimumWidth: CGFloat = 520.0
@@ -138,26 +166,20 @@ final class EditorWindowController: NSWindowController {
          targetScreen: NSScreen? = nil,
          escapeKeyDeletesFile: Bool = true,
          initialState: EditorCanvasState? = nil) {
-        let escapeFinal: EditorCanvasView.FinalActionCommand = escapeKeyDeletesFile ? .deleteOnly : .closeOnly
-        // A pending composite already contains the current annotations. When
-        // editable state is available, restore its clean base image instead and
-        // redraw the annotations exactly once.
-        let canvasImage: NSImage
-        if let initialState, initialState.isSafeToRestore(),
-           let restoredBase = NSImage(data: initialState.baseImagePNG) {
-            canvasImage = restoredBase
-        } else {
-            canvasImage = image
-        }
+        let escapeFinal: ScreenshotFinalAction = escapeKeyDeletesFile ? .deleteOnly : .closeOnly
+        // The canvas validates and restores editable state through EditorDrawing,
+        // using the supplied image as the fallback when restoration is unavailable.
         self.canvasView = EditorCanvasView(
-            image: canvasImage,
+            image: image,
             escapeFinalAction: escapeFinal,
-            initialState: initialState?.isSafeToRestore() == true ? initialState : nil
+            initialState: initialState
         )
         self.settingsStore = settingsStore
+        self.paletteIDs = EditorPalette.normalized(settingsStore.settings.editorColorIDs)
+        self.colors = EditorPalette.colors(for: paletteIDs).map(\.color)
         self.notePreviewRaw = notePreview
         self.targetScreen = targetScreen
-        self.escapeFinalActionCommand = escapeFinal
+        self.escapeFinalAction = escapeFinal
 
         // Provisional size. We'll resize to match the image (native-like) after building UI.
         let contentRect = NSRect(x: 0, y: 0, width: 720, height: 520)
@@ -180,6 +202,13 @@ final class EditorWindowController: NSWindowController {
 
         window.delegate = self
         configureContent()
+        paletteObserver = NotificationCenter.default.addObserver(forName: SettingsStore.didChangeNotification, object: settingsStore, queue: .main) { [weak self] _ in self?.reloadPaletteIfNeeded() }
+        shortcutOverlay = EditorShortcutOverlayController(window: window) { [weak self] in self?.shortcutHints ?? [] }
+
+        refreshPhysicalShortcutLabels()
+        layoutObservation = KeyboardLayoutObservation { [weak self] in
+            self?.refreshPhysicalShortcutLabels()
+        }
 
         // Now that UI exists, choose an initial window size based on the image and current screen.
         sizeWindowToImage()
@@ -191,6 +220,7 @@ final class EditorWindowController: NSWindowController {
     }
 
     deinit {
+        if let paletteObserver { NotificationCenter.default.removeObserver(paletteObserver) }
         removeKeyDownMonitor()
     }
 
@@ -207,8 +237,10 @@ final class EditorWindowController: NSWindowController {
 
     private func installKeyDownMonitor() {
         guard keyDownMonitor == nil else { return }
-        keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
             guard let self, self.window?.isKeyWindow == true else { return event }
+            self.shortcutOverlay?.handle(event)
+            guard event.type == .keyDown else { return event }
             // Inline annotation text uses the standard NSTextView undo manager.
             guard !(self.window?.firstResponder is NSTextView) else { return event }
 
@@ -227,6 +259,7 @@ final class EditorWindowController: NSWindowController {
     }
 
     private func removeKeyDownMonitor() {
+        shortcutOverlay?.cancel()
         guard let keyDownMonitor else { return }
         NSEvent.removeMonitor(keyDownMonitor)
         self.keyDownMonitor = nil
@@ -387,6 +420,7 @@ final class EditorWindowController: NSWindowController {
         let rectButton = makeToolButton(symbol: "square", tool: .rectangle, toolTip: "Rectangle (R, Hold ⇧: Square)")
         let ovalButton = makeToolButton(symbol: "circle", tool: .ellipse, toolTip: "Ellipse (E, Hold ⇧: Circle)")
         let textButton = makeToolButton(symbol: "textformat", tool: .text, toolTip: "Text (T)")
+        let markerButton = makeToolButton(symbol: "1.circle", tool: .marker, toolTip: "Numbered marker (F)")
         let selectionButton = makeToolButton(symbol: "rectangle.dashed", tool: .selection, toolTip: "Selection (S)")
 
         let undoButton = makeActionButton(symbol: "arrow.uturn.left", toolTip: "Undo (Cmd+Z)", action: #selector(undoPressed))
@@ -420,9 +454,29 @@ final class EditorWindowController: NSWindowController {
             colorIndicatorButton.centerYAnchor.constraint(equalTo: colorContainer.centerYAnchor),
         ])
 
+        shortcutHints = [
+            .init(view: penButton, key: "W", label: "Pen"),
+            .init(view: lineButton, key: "D", label: "Line"),
+            .init(view: arrowButton, key: "A", label: "Arrow"),
+            .init(view: rectButton, key: "R", label: "Rectangle"),
+            .init(view: ovalButton, key: "E", label: "Ellipse"),
+            .init(view: textButton, key: "T", label: "Text"),
+            .init(view: markerButton, key: "F", label: "Numbered marker"),
+            .init(view: selectionButton, key: "S", label: "Select"),
+            .init(view: colorIndicatorButton, key: "Q", label: "Next color (K opens palette)"),
+            .init(view: undoButton, key: "⌘Z", label: "Undo"),
+            .init(view: redoButton, key: "⌘⇧Z", label: "Redo"),
+            .init(view: clearButton, key: "⌥⌫", label: "Clear annotations"),
+            .init(view: zoomOutButton, key: "⌘−", label: "Zoom out"),
+            .init(view: zoomLabel, key: "⌘0", label: "Reset zoom"),
+            .init(view: zoomInButton, key: "⌘+", label: "Zoom in"),
+            .init(view: cancelButton, key: "Esc", label: "Cancel"),
+            .init(view: saveButton, key: "↩", label: "Save (⌘↩ to copy and save)")
+        ]
+
         let drawingTools = makeToolbarGroup([
             penButton, lineButton, arrowButton, rectButton, ovalButton,
-            textButton, selectionButton, colorContainer
+            textButton, markerButton, selectionButton, colorContainer
         ])
         let editActions = makeToolbarGroup([undoButton, redoButton, clearButton])
         let zoomControls = makeToolbarGroup([zoomOutButton, zoomLabel, zoomInButton])
@@ -512,10 +566,24 @@ final class EditorWindowController: NSWindowController {
         colorIndicatorButton.translatesAutoresizingMaskIntoConstraints = false
         colorIndicatorButton.widthAnchor.constraint(equalToConstant: 18).isActive = true
         colorIndicatorButton.heightAnchor.constraint(equalToConstant: 18).isActive = true
-        colorIndicatorButton.toolTip = "Colors (K or Q)"
+        colorIndicatorButton.toolTip = "Next color: Q · Open palette: K or click"
         colorIndicatorButton.target = self
         colorIndicatorButton.action = #selector(colorIndicatorPressed)
         colorIndicatorButton.title = ""
+    }
+
+    private func reloadPaletteIfNeeded() {
+        let updated = EditorPalette.normalized(settingsStore.settings.editorColorIDs)
+        guard updated != paletteIDs else { return }
+        let selectedID = paletteIDs[selectedColorIndex]
+        closeColorPicker()
+        paletteIDs = updated
+        colors = EditorPalette.colors(for: updated).map(\.color)
+        selectedColorIndex = updated.firstIndex(of: selectedID) ?? 0
+        colorFocusIndex = selectedColorIndex
+        colorPickerButtons.removeAll()
+        setupColorPicker()
+        selectColor(index: selectedColorIndex)
     }
 
     private func setupColorPicker() {
@@ -550,7 +618,7 @@ final class EditorWindowController: NSWindowController {
             button.action = #selector(colorPickerButtonPressed(_:))
             button.title = ""
 
-            let numberLabel = NSTextField(labelWithString: "\(index + 1)")
+            let numberLabel = NSTextField(labelWithString: paletteKeyLabel(at: index))
             numberLabel.font = NSFont.systemFont(ofSize: 9, weight: .bold)
             numberLabel.textColor = color.isLight ? NSColor.black : NSColor.white
             numberLabel.alignment = .center
@@ -700,18 +768,7 @@ final class EditorWindowController: NSWindowController {
     private func handleKeyCommand(_ command: EditorCanvasView.KeyCommand) {
         switch command {
         case .finalAction(let action):
-            switch action {
-            case .saveOnly:
-                finish(with: .saveOnly)
-            case .copyAndSave:
-                finish(with: .copyAndSave)
-            case .copyAndDelete:
-                finish(with: .copyAndDelete)
-            case .deleteOnly:
-                finish(with: .deleteOnly)
-            case .closeOnly:
-                finish(with: .closeOnly)
-            }
+            finish(with: action)
 
         case .zoomIn:
             setZoom(userZoomFactor * 1.2)
@@ -734,6 +791,9 @@ final class EditorWindowController: NSWindowController {
             window?.orderOut(nil)
         case .selectTool(let tool):
             selectTool(tool)
+        case .cycleColor:
+            selectColor(index: (selectedColorIndex + 1) % colors.count)
+            closeColorPicker()
         case .toggleColorPicker:
             toggleColorPicker()
         case .colorPickerMove(let direction):
@@ -826,8 +886,8 @@ final class EditorWindowController: NSWindowController {
 
         defaultUserZoomFactor = layout.defaultUserZoomFactor
         userZoomFactor = defaultUserZoomFactor
-        canvasView.setInitialTextZoomFactor(defaultUserZoomFactor)
         applyZoom()
+
     }
 
     private func positionWindowOnTargetScreen() {
@@ -924,7 +984,7 @@ final class EditorWindowController: NSWindowController {
 
     // MARK: - Finishing
 
-    private func finish(with action: FinalAction) {
+    private func finish(with action: ScreenshotFinalAction) {
         // Cancelling keeps the editor open with drawings intact: no
         // completion is sent, so the workflow stays alive and the window
         // never closes.
@@ -942,7 +1002,7 @@ final class EditorWindowController: NSWindowController {
         close()
     }
 
-    private func confirmCancellation(for action: FinalAction) -> Bool {
+    private func confirmCancellation(for action: ScreenshotFinalAction) -> Bool {
         guard settingsStore.settings.confirmBeforeClosing else { return true }
         switch action {
         case .deleteOnly:
@@ -1020,7 +1080,7 @@ private final class EditorScrollView: NSScrollView {
     }
 }
 
-private extension NSColor {
+extension NSColor {
     var isLight: Bool {
         guard let rgbColor = usingColorSpace(.deviceRGB) else { return false }
         let red = rgbColor.redComponent

@@ -14,28 +14,33 @@ final class NotePanelController: NSWindowController {
     var onAction: ((NotePanelAction) -> Void)?
 
     private let textView = LockedWhiteNoteTextView(frame: .zero, textContainer: nil)
+    private let limitLabel = NSTextField(labelWithString: "")
     private let shortcutLabel = NSTextField(labelWithString: "")
     private var escapeKeyDeletesFile: Bool = true
     private var showsCopyAndDelete: Bool = true
     private var showsEditorShortcut: Bool = true
 
-    private static let maxLength = 1000
+    static let standaloneMaxLength = 100_000
+    private var maxLength = 1000
 
     var text: String {
-        get { String(textView.string.prefix(Self.maxLength)) }
-        set { textView.setFixedWhiteString(String(newValue.prefix(Self.maxLength))) }
+        get { String(textView.string.prefix(maxLength)) }
+        set { textView.setFixedWhiteString(String(newValue.prefix(maxLength))) }
     }
 
     convenience init(initialText: String,
                      escapeKeyDeletesFile: Bool = true,
                      showsCopyAndDelete: Bool = true,
-                     showsEditorShortcut: Bool = true) {
-        let contentRect = NSRect(x: 0, y: 0, width: 410, height: 120)
+                     showsEditorShortcut: Bool = true,
+                     maxLength: Int = 1000) {
+        let contentRect = NSRect(x: 0, y: 0, width: 520, height: 280)
         let panel = FloatingInputPanel(contentRect: contentRect)
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
 
         self.init(window: panel)
+        self.maxLength = max(1, maxLength)
+        textView.characterLimit = self.maxLength
         self.escapeKeyDeletesFile = escapeKeyDeletesFile
         self.showsCopyAndDelete = showsCopyAndDelete
         self.showsEditorShortcut = showsEditorShortcut
@@ -59,6 +64,20 @@ final class NotePanelController: NSWindowController {
         let titleLabel = NSTextField(labelWithString: "Note")
         titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
 
+        limitLabel.font = NSFont.systemFont(ofSize: 10)
+        limitLabel.textColor = .secondaryLabelColor
+        limitLabel.stringValue = "\(maxLength.formatted())-character limit"
+        limitLabel.isHidden = true
+        textView.onLimitReached = { [weak self] in
+            guard let self else { return }
+            self.limitLabel.stringValue = "\(self.maxLength.formatted())-character limit"
+            self.limitLabel.isHidden = false
+        }
+        textView.onEdited = { [weak self] in
+            guard let self else { return }
+            self.limitLabel.isHidden = self.textView.string.count < self.maxLength
+        }
+
         textView.font = NSFont.systemFont(ofSize: 13)
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isRichText = false
@@ -66,11 +85,11 @@ final class NotePanelController: NSWindowController {
         textView.drawsBackground = true
         textView.backgroundColor = NSColor.textBackgroundColor
         textView.configureFixedWhiteText()
-        textView.setFixedWhiteString(String(initialText.prefix(Self.maxLength)))
+        textView.setFixedWhiteString(String(initialText.prefix(maxLength)))
 
         textView.keyCommandHandler = { [weak self] (command: KeyCommand) in
             guard let self = self else { return }
-            let value = String(self.textView.string.prefix(Self.maxLength))
+            let value = String(self.textView.string.prefix(self.maxLength))
             self.textView.setFixedWhiteString(value)
             switch command {
             case .enter:
@@ -102,9 +121,10 @@ final class NotePanelController: NSWindowController {
         let scrollView = NSScrollView()
         scrollView.borderType = .bezelBorder
         scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
         scrollView.documentView = textView
 
-        [titleLabel, scrollView, shortcutLabel].forEach { view in
+        [titleLabel, limitLabel, scrollView, shortcutLabel].forEach { view in
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
         }
@@ -127,6 +147,8 @@ final class NotePanelController: NSWindowController {
         NSLayoutConstraint.activate([
             titleLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 18),
             titleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
+            limitLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            limitLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
 
             scrollView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
@@ -136,7 +158,7 @@ final class NotePanelController: NSWindowController {
             shortcutLabel.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: 8),
             shortcutLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
             shortcutLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
-            shortcutLabel.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -12)
+            shortcutLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12)
         ])
 
         window?.initialFirstResponder = textView
@@ -147,12 +169,30 @@ final class NotePanelController: NSWindowController {
         window.orderFrontRegardless()
         window.makeKey()
         window.makeFirstResponder(textView)
-        let end = textView.string.count
+        let end = (textView.string as NSString).length
         textView.setSelectedRange(NSRange(location: end, length: 0))
     }
 }
 
 private final class LockedWhiteNoteTextView: NSTextView {
+    var characterLimit = 1000
+    var onLimitReached: (() -> Void)?
+    var onEdited: (() -> Void)?
+
+    override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
+        let current = string as NSString
+        if let replacementString,
+           affectedCharRange.location <= current.length,
+           affectedCharRange.length <= current.length - affectedCharRange.location {
+            let updated = current.replacingCharacters(in: affectedCharRange, with: replacementString)
+            guard updated.count <= characterLimit else {
+                onLimitReached?()
+                return false
+            }
+        }
+        return super.shouldChangeText(in: affectedCharRange, replacementString: replacementString)
+    }
+
     var keyCommandHandler: ((KeyCommand) -> Void)?
     private var isApplyingFixedTextStyle = false
 
@@ -216,6 +256,7 @@ private final class LockedWhiteNoteTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         enforceFixedTextStyle()
+        onEdited?()
     }
 
     override func setSelectedRange(_ charRange: NSRange, affinity: NSSelectionAffinity, stillSelecting flag: Bool) {

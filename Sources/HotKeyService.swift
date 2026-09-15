@@ -260,7 +260,10 @@ final class HotKeyService {
     }
 
     private static func keyName(for keyCode: UInt16) -> String? {
-        return keyCodeToString[keyCode]
+        guard let fallback = keyCodeToString[keyCode] else { return nil }
+        // Function and control keys retain their established readable names.
+        guard fallback.count == 1, keyCode != UInt16(kVK_Delete) else { return fallback }
+        return PhysicalKeyLabel.name(for: keyCode, fallback: fallback)
     }
 
     private static let keyCodeToString: [UInt16: String] = {

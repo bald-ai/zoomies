@@ -11,14 +11,6 @@ final class ScreenshotWorkflowController {
     typealias FileRemover = (_ url: URL) throws -> Void
     typealias DeleteConfirmer = () -> Bool
 
-    enum FinalAction {
-        case saveOnly
-        case copyAndSave
-        case copyAndDelete
-        case deleteOnly
-        case closeOnly
-    }
-
     private var fileURL: URL
     private var initialImage: NSImage?
     private var initialFilePersistence: Task<URL, Error>?
@@ -400,7 +392,7 @@ final class ScreenshotWorkflowController {
         presentNotePanel(existingText: pendingNoteText)
     }
 
-    func handleEditorCompletion(editedImage: NSImage?, action: FinalAction, editorState: EditorCanvasState? = nil) {
+    func handleEditorCompletion(editedImage: NSImage?, action: ScreenshotFinalAction, editorState: EditorCanvasState? = nil) {
         guard !hasFinished, !isFinalActionInProgress else { return }
 
         pendingEditedImage = editedImage
@@ -517,7 +509,7 @@ final class ScreenshotWorkflowController {
     /// note will be burned onto, or nil when the output is not a PNG.
     private func baselinePNGForEmbedding(preNoteImage: NSImage) -> Data? {
         guard fileURL.pathExtension.lowercased() == "png" else { return nil }
-        return ScreenshotServiceCoreLogic.pngData(from: preNoteImage)
+        return ImageEncoding.pngData(from: preNoteImage)
     }
 
     private func encodeAndWriteImage(_ image: NSImage,
@@ -587,7 +579,7 @@ final class ScreenshotWorkflowController {
     private func retryInitialCapturePersistenceIfNeeded() -> Bool {
         guard hasUnpersistedInitialCapture else { return true }
         guard let initialImage,
-              let imageData = ScreenshotServiceCoreLogic.pngData(from: initialImage) else {
+              let imageData = ImageEncoding.pngData(from: initialImage) else {
             presentError(title: "Failed to save image", message: "Could not encode the screenshot.")
             return false
         }
@@ -668,7 +660,7 @@ final class ScreenshotWorkflowController {
 
     // MARK: - Completion
 
-    private func complete(action: FinalAction, note: String?) {
+    private func complete(action: ScreenshotFinalAction, note: String?) {
         guard !hasFinished, !isFinalActionInProgress else { return }
 
         if action == .closeOnly {
@@ -844,12 +836,13 @@ final class ScreenshotWorkflowController {
         }
         // Mirror EditorWindowController: redraw the carried annotations over
         // the state's own clean base exactly once.
-        let canvasBase = NSImage(data: state.baseImagePNG) ?? base
-        return EditorCanvasView(image: canvasBase, initialState: state).compositeImage()
+        let drawing = EditorDrawing(restoring: state, fallbackBaseImage: base)
+        return EditorImageRenderer.compositeImage(of: drawing,
+                                                  croppingTo: EditorImageRenderer.exportBounds(of: drawing))
     }
 
     private func persistImageIfNeeded(_ image: NSImage?,
-                                      for action: FinalAction,
+                                      for action: ScreenshotFinalAction,
                                       baselinePNG: Data?,
                                       prompt: String?,
                                       editorState: EditorCanvasState?) -> Bool {
@@ -863,7 +856,7 @@ final class ScreenshotWorkflowController {
         }
     }
 
-    private func performFinalActionEffects(_ action: FinalAction, copyAndDeleteImage: NSImage?) -> Bool {
+    private func performFinalActionEffects(_ action: ScreenshotFinalAction, copyAndDeleteImage: NSImage?) -> Bool {
         switch action {
         case .saveOnly:
             break
@@ -989,16 +982,18 @@ final class ScreenshotWorkflowController {
         errorPresenter(title, message)
     }
 
-    /// When a confirmation is shown, Return confirms and Escape cancels.
+    /// When a confirmation is shown, Escape confirms and R returns to the workflow.
     static func makeDeleteConfirmationAlert() -> NSAlert {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Delete this screenshot?"
         alert.informativeText = "This permanently deletes the screenshot file. This can't be undone.\n\nYou can disable this confirmation in Settings."
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
-        alert.buttons.first?.keyEquivalent = "\r"
-        alert.buttons.last?.keyEquivalent = "\u{1b}"
+        alert.addButton(withTitle: "Delete (Esc)")
+        alert.addButton(withTitle: "Go Back (R)")
+        alert.buttons.first?.keyEquivalent = "\u{1b}"
+        alert.buttons.first?.keyEquivalentModifierMask = []
+        alert.buttons.last?.keyEquivalent = "r"
+        alert.buttons.last?.keyEquivalentModifierMask = []
         return alert
     }
 
@@ -1012,10 +1007,12 @@ final class ScreenshotWorkflowController {
         alert.alertStyle = .warning
         alert.messageText = "Close this editing session?"
         alert.informativeText = "Unsaved edits will be discarded. The original image will not be deleted.\n\nYou can disable this confirmation in Settings."
-        alert.addButton(withTitle: "Close")
-        alert.addButton(withTitle: "Cancel")
-        alert.buttons.first?.keyEquivalent = "\r"
-        alert.buttons.last?.keyEquivalent = "\u{1b}"
+        alert.addButton(withTitle: "Close (Esc)")
+        alert.addButton(withTitle: "Go Back (R)")
+        alert.buttons.first?.keyEquivalent = "\u{1b}"
+        alert.buttons.first?.keyEquivalentModifierMask = []
+        alert.buttons.last?.keyEquivalent = "r"
+        alert.buttons.last?.keyEquivalentModifierMask = []
         return alert
     }
 

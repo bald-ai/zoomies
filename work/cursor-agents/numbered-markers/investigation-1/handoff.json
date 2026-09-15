@@ -1,0 +1,56 @@
+{
+  "outcome": "complete",
+  "summary": "Baseline + spec review finds numbered markers must plug into the same exhaustive Item/Tool switch mesh as text, reuse frozen open-zoom text sizing (not live magnification or fixed screen pixels), keep next-number as non-serialized session state with careful undo/delete/reopen rules, and treat Cmd+C/V as region raster paste rather than object paste. Old PNG reopen stays compatible if Kind decode stays additive; unknown marker types still fail whole editor-state restore.",
+  "findings": [
+    "Text size scaling (must share): EditorCanvasView.defaultTextFontSize = round(38.4 / max(0.01, textCreationZoomFactor)); textCreationZoomFactor is set once via setInitialTextZoomFactor(defaultUserZoomFactor) at editor open (EditorWindowController ~804), not updated on zoom. fontSize is stored in canvas points and used by EditorImageRenderer.drawText/textBounds and export compositing (baseImagePixelScale), so markers must derive diameter/numeral size from that same CGFloat (or extract a shared helper). Do not size markers in live NSScrollView magnification or fixed screen pixels.",
+    "Multi-digit growth: textBounds uses measured glyph size with mins (60\u00d728) and textPadding (6\u00d74). Markers must grow circle/hit/export bounds with digit count; clipping will fail exportBounds/updateCanvasSizeIfNeeded/hit tests. Safety estimate for text is crude (count*fontSize \u00d7 1.5*fontSize) in EditorCanvasState.Item.estimatedCanvasBounds \u2014 marker estimate must cover filled circle + outline or isSafeToRestore can wrongly reject large/edge markers.",
+    "Event handling: EditorTool currently pen/line/arrow/rectangle/ellipse/text/selection. Add .numberedMarker (or similar) to toolKeyCodeToTool with kVK_ANSI_F (spec: F, not N), toolbar makeToolButton tooltip \"Numbered marker (F)\", and every tool switch in mouseDown/Dragged/Up/draw preview/setTool. Placement should be click-commit (not drag-shape). Double-click edit should mirror text\u2019s beginEditingText path; keep Cmd+Z routed to NSTextView while editing (EditorWindow only intercepts when firstResponder is EditorCanvasView).",
+    "Exhaustive Item switches that break compile/runtime if missed: EditorDrawing.Item; EditorImageRenderer.draw/bounds/shiftedItems; EditorDrawing.Item.stateItem + init(stateItem:); EditorCanvasView.moveItem/hitTest/draw selection; EditorCanvasState.Item Kind encode/decode + isSafeToRestore + estimatedCanvasBounds. Selection uses hitTestEditableItem (reversed) + moveItem + deleteSelectedItemIfNeeded \u2014 markers must be selectable/movable/deletable there.",
+    "Cursor preview: baseline editor has no custom annotation cursor preview (mouseMoved only stores lastMousePoint; NSCursor customization exists in SelectionOverlay, not EditorCanvasView). Spec\u2019s \u201cif practical with existing cursor infrastructure\u201d means skip heavy custom cursor unless a tiny reuse path exists \u2014 avoid inventing a parallel preview system.",
+    "Serialization compatibility: EditorCanvasState.Item.Kind is a closed String enum; unknown type fails JSONDecoder \u2192 PNGMetadata.decodeEditorState returns nil \u2192 reopen loses editability but flattened pixels remain (README already documents this). Old PNGs without markers decode fine if new case is additive. version defaults to 2 with no observed gate. Persist number + color + origin + size (reuse text\u2019s fontSize field or equivalent); do not persist next-placement counter in editor state unless intentionally designed \u2014 reopen rule is continue beyond existing max.",
+    "Copy/paste: Cmd+C/X/V are selection-region operations (selectedRegionPayload / cutSelectedRegion / pasteCopiedSelection \u2192 .image). Markers inside a region become baked pixels in the pasted image, not first-class markers. Object select/move/delete is separate. Extending \u201cpaste behavior\u201d means not breaking region paste/clampedRectToImageBounds and ensuring marker hit-testing doesn\u2019t steal selection-tool region drags incorrectly.",
+    "Undo: items snapshots only (pushUndoSnapshot). nextNumber must be separate session state: delete must not renumber remaining; switching tools must preserve next; undo of last place should behave naturally (typically remove that marker and allow re-place of same number); clearAll clears items but policy for nextNumber is unspecified in baseline; undo/redo calls resetTransientSelectionState and does not know about counters. Text pattern: push undo on place; cancel empty new item removes without second undo push.",
+    "Canvas bounds: updateCanvasSizeIfNeeded and exportBounds union EditorImageRenderer.bounds(for:); ensureDrawableAreaCoversVisibleSize \u2192 shiftCanvasContent \u2192 shiftedItems (must shift marker origin); placement can sit outside baseImageBounds (text does). Incomplete bounds for multi-digit markers will clip export or fail ImageSafety.canAllocateBitmap growth.",
+    "Note footer: baseline NotePanelController footer is shortcut help only; no marker-number UI. Spec\u2019s \u201cexisting note footer references marker numbers\u201d means do not add a separate prompt UI \u2014 users reference marker numerals in note text.",
+    "Docs: README Edit shortcuts omit D/line and have no F; Select docs list object kinds \u2014 must include numbered markers."
+  ],
+  "changes": [],
+  "decisions": [
+    "Read-only scope limited to work/cursor-agents/numbered-markers/baseline and spec.md; live Sources/Tests not inspected.",
+    "Treated \u201cnote footer references marker numbers\u201d as product/UX constraint (no separate prompt UI), not missing baseline code \u2014 no marker-specific footer found.",
+    "Cursor preview called out as optional/low-priority given absent editor cursor infra."
+  ],
+  "evidence": [
+    "work/cursor-agents/numbered-markers/spec.md (accepted UX: F tool, text-like sizing, first-class object, no renumber on delete, continue past max on reopen, no separate prompt UI)",
+    "baseline/Sources/EditorCanvasView.swift:7-15 EditorTool; 88-90,192-195,495-498 textCreationZoomFactor/defaultTextFontSize; 167-186 setTool; 211-245 undo/redo/resetTransient; 247-268 clearAll; 337-364 pasteCopiedSelection; 512-548 shiftCanvasContent; 550-578 moveItem; 661-683 updateCanvasSizeIfNeeded; 687-947 mouse handlers; 951-1006 hit tests; 1060-1243 text edit/delete; 1473-1480 toolKeyCodeToTool",
+    "baseline/Sources/EditorWindowController.swift:1-20 Cmd+Z only when canvas first responder; 370-376 tool buttons; 578-587 selectTool; 802-805 setInitialTextZoomFactor",
+    "baseline/Sources/EditorImageRenderer.swift:10-25 Item/TextItem; 141-147 exportBounds; 175-191 draw; 268-287 textBounds; 305-322 bounds; 387-409 shiftedItems; 419-474 stateItem bridging",
+    "baseline/Sources/EditorCanvasState.swift:63-160 Item Codable Kind; 163 version=2; 246-308 safety + estimatedCanvasBounds",
+    "baseline/Sources/PNGMetadata.swift:109-173 extract/decodeEditorState (decode failure \u2192 nil)",
+    "baseline/Sources/ImageSafety.swift:22,41 maxFontSize 2000",
+    "baseline/README.md:87-114 editor shortcuts / select-tool object list",
+    "baseline/Tests/ZoomiesTests/EditorCanvasViewTests.swift patterns: selection delete, text double-click edit, undo without consuming on click-without-drag, tool keycode"
+  ],
+  "checks": [
+    {
+      "check": "Read-only inspection of numbered-markers/baseline Sources (EditorCanvasView, EditorImageRenderer, EditorCanvasState, PNGMetadata, EditorWindowController, ImageSafety, NotePanelController) + README + relevant tests + spec.md",
+      "result": "passed",
+      "detail": "Completed within declared read scopes; no live Sources/Tests, no edits, no tests executed."
+    },
+    {
+      "check": "swift test",
+      "result": "not_run",
+      "detail": "Ask/investigation only; assignment forbade running implementation verification."
+    }
+  ],
+  "open_issues": [
+    "Exact persisted schema field names / Kind raw value for markers not specified in baseline (implementer choice).",
+    "Whether undo of placement must decrement nextNumber vs recompute from max(existing)+1 needs product confirmation; both can satisfy \u201cnatural\u201d but interact differently after manual number edits creating gaps/duplicates.",
+    "Whether double-click edit is only on marker tool (like text) or also from Select \u2014 baseline text requires Text tool.",
+    "Hypothesis: cursor next-number preview may be deferred without violating \u201cif practical\u201d."
+  ],
+  "next_steps": [
+    "Integration checklist \u2014 functions to extend: EditorTool + toolKeyCodeToTool + EditorWindowController.makeToolButton/selectTool; EditorDrawing.Item + TextItem-like MarkerItem; EditorImageRenderer.draw/bounds/shiftedItems/exportBounds path; EditorCanvasState.Item Kind encode/decode/isSafeToRestore/estimatedCanvasBounds; EditorCanvasView.setTool/mouseDown(click place + double-click edit)/moveItem/hitTest/deleteSelected*/pushUndoSnapshot + nextNumber helpers (max-on-reopen, no renumber on delete, preserve across setTool); editableState/stateItem round-trip; README shortcuts + Select object list.",
+    "Verification cases: (1) marker fontSize/diameter equals text created at same open zoom for zoom factors 1.0 and ~2.0 via setInitialTextZoomFactor; (2) place 1,2,3 then delete 2 \u2192 remaining stay 1,3 and next stays 4; (3) undo last place restores prior items and natural next; (4) switch away/back preserves next; (5) reopen state with markers 1 and 5 \u2192 next place is 6; (6) PNG embed/extract round-trip; (7) old state without marker type still restores; (8) multi-digit (10,100) no clip in draw/bounds/exportBounds/updateCanvasSizeIfNeeded; (9) Select hit/move/Delete; (10) region copy/paste still works and does not require object-level marker paste; (11) F selects tool, tooltip Numbered marker (F); (12) double-click edit positive integer, Escape cancel restores; (13) clear/undo/redo do not renumber survivors."
+  ]
+}

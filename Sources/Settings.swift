@@ -29,6 +29,9 @@ struct Settings: Codable {
 
     /// Screen-recording frame rate. Only 30, 60, and 120 are supported.
     var recordingFrameRate: Int = 30
+
+    /// Ordered active palette, from one to six catalog color IDs.
+    var editorColorIDs: [String] = EditorPalette.defaultIDs
 }
 
 extension Settings {
@@ -81,6 +84,12 @@ extension Settings {
             repairedInvalidFields = true
         }
 
+        let palette = EditorPalette.normalized(copy.editorColorIDs)
+        if palette != copy.editorColorIDs {
+            copy.editorColorIDs = palette
+            repairedInvalidFields = true
+        }
+
         copy.shortcuts = copy.shortcuts.repairingUnsupportedKeyCodes {
             repairedInvalidFields = true
         }
@@ -118,6 +127,7 @@ extension Settings {
         case shortcutsCustomized
         case screenshotCounter
         case recordingFrameRate
+        case editorColorIDs
     }
 
     init(from decoder: Decoder) throws {
@@ -138,6 +148,7 @@ extension Settings {
             ?? false
         self.screenshotCounter = try container.decodeIfPresent(Int.self, forKey: .screenshotCounter)
             ?? Settings.default.screenshotCounter
+        self.editorColorIDs = try container.decodeIfPresent([String].self, forKey: .editorColorIDs) ?? EditorPalette.defaultIDs
         let rawFrameRate = try container.decodeIfPresent(Int.self, forKey: .recordingFrameRate)
             ?? Settings.default.recordingFrameRate
         self.recordingFrameRate = (rawFrameRate == 30 || rawFrameRate == 60 || rawFrameRate == 120)

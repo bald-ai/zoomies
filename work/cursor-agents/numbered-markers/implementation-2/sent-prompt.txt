@@ -1,0 +1,37 @@
+Independent review identified four concrete issues; fix in same checkout preserving all existing work. No delegates/branch/worktree/commit. Scope Sources and Tests.
+1. setTool in EditorCanvasView only ends inline editing when target is neither text nor marker; switching Text to Marker or Marker to Text leaves previous editor first responder. Commit/end editing on actual tool change, preserving usual same-tool behavior. Add regression tests both directions.
+2. Cursor preview stale after undo/redo/clear/delete highest marker. Invalidate cursor rects whenever nextMarkerNumber can change, preferably common mutation/reset paths. Cover with testable invalidation hook/window spy if practical.
+3. Palette controller directly sets canvasView.currentColor while setColor alone invalidates. Make all actual color updates refresh marker preview, preferably currentColor didSet and remove redundant paths. Verify palette shortcut path.
+4. nextMarkerNumber max+1 can overflow when inline editor or restored state contains Int.max. Define a reasonable supported marker number maximum (e.g. 999999) with consistent inline validation and persisted-state safety, and overflow-safe next calculation so no crash even for unexpected state. Normal placement must avoid duplicates; if range exhausted refuse placement gracefully. Do not silently wrap. Add regression tests edge/restored values.
+Also align marker numeral font size with text font size per spec: current diameter==text fontSize but numeral==half diameter. User wording is 'size scales like font of text', so same scaling is sufficient; retain current diameter sizing unless a correctness reason.
+Run targeted tests and full swift test. Report exact results. Parent confirmed current 246 tests pass. Changes since your previous completion: none.
+
+
+Declared assignment scopes (paths include descendants):
+{"reads": ["/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/numbered-markers/spec.md"], "writes": ["/Users/applelevne/Documents/coding-projects/zoomies/README.md", "/Users/applelevne/Documents/coding-projects/zoomies/Sources", "/Users/applelevne/Documents/coding-projects/zoomies/Tests"]}
+Only edit declared write scopes. Do not delegate further, change branches, or create worktrees.
+
+## Return a handoff to the orchestrator
+
+You are an external worker. Complete the assignment above within its constraints.
+Your final response must be one JSON object with the fields below. Put any
+requested exact answer or payload in summary or findings. Keep it concise but
+retain details needed to use and verify your work. Use empty arrays when a field
+has no entries. Do not invent evidence, file locations, checks, or success.
+
+{
+  "outcome": "complete | partial | blocked",
+  "summary": "The result and what it means for the assignment.",
+  "findings": ["Concrete findings, including relevant exact values."],
+  "changes": ["Files/artifacts changed and what changed; no unrelated files."],
+  "decisions": ["Important choices and brief rationale, including rejected alternatives when useful."],
+  "evidence": ["Exact source file paths and line numbers when known, URLs, reproduction steps, or artifact paths supporting the findings."],
+  "checks": [{"check": "Actual command or verification", "result": "passed | failed | not_run", "detail": "Observed result, or why it was not run."}],
+  "open_issues": ["Uncertainties, assumptions needing confirmation, blockers, missing checks, and questions for the orchestrator."],
+  "next_steps": ["Specific remaining actions or integration guidance, if any."]
+}
+
+Report failed checks even if later corrected; say what fixed them. Distinguish
+observed facts from hypotheses. For blocked or partial work, explain what is
+missing and what would unblock it. Include important discoveries that affect
+other work. Do not include private reasoning transcripts or routine tool chatter.

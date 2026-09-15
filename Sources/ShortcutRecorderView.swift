@@ -23,6 +23,16 @@ final class ShortcutRecorderView: NSControl {
     /// Called whenever the user successfully records a new shortcut.
     var onChange: ((RecordedShortcut) -> Void)?
 
+    private var layoutObservation: KeyboardLayoutObservation?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        layoutObservation = window == nil ? nil : KeyboardLayoutObservation { [weak self] in
+            self?.needsDisplay = true
+        }
+        needsDisplay = true
+    }
+
     private var isRecording = false
     
     /// Exposed so other parts of the app can ignore global hotkeys while the

@@ -1,0 +1,58 @@
+{
+  "status": "stopped",
+  "controller_pid": 40952,
+  "project": "/Users/applelevne/Documents/coding-projects/zoomies",
+  "model": "swe-2-max",
+  "mode": "agent",
+  "started_at": 1789433797.316479,
+  "session_lock": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/shortcut-overlay/implementation-1/session.lock",
+  "resume_job": null,
+  "handoff_required": true,
+  "controller_started": "Tue Sep 15 02:56:37 2026",
+  "slot_path": "/Users/applelevne/.codex/cursor-agents/slots/1.lock",
+  "owner": "01a0a0a8-fc25-7b33-9b66-05de449635a0",
+  "assignment": "Implement isolated hold-Command shortcut overlay",
+  "reads": [
+    "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/shortcut-overlay/baseline"
+  ],
+  "writes": [
+    "/Users/applelevne/Documents/coding-projects/zoomies/Sources/EditorShortcutOverlayController.swift",
+    "/Users/applelevne/Documents/coding-projects/zoomies/Tests/ZoomiesTests/EditorShortcutOverlayTests.swift"
+  ],
+  "worker_id": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/shortcut-overlay/implementation-1",
+  "conflict_reason": "Separate new overlay files only; active sizing worker modifies existing sizing/render files and will not touch these new files. Parent integrates controller after it finishes.",
+  "package_hashes": {
+    "SKILL.md": "5d172c2409f7e1c0b2f556d64e97b4107e698a01bf9d085e237276c65956da3e",
+    "scripts/cursor_worker.py": "b7eceb5a99018be20101c85c6d0ff612fd43850b076a37a372febe1402cc8d22",
+    "scripts/devin_acp.py": "de82ae5d108c9b575796ed2b725549fc6f6fe6845d425f4310b6671f35cc761a",
+    "references/worker_handoff.md": "846296dbefff93e7ee533909917c759def0ae1705fbdcb8eb5762cb27c980818",
+    "references/implementation_review.md": "51fc686c42dd2c40c2b732f3455fe9025974fb27c4659532109067c1839a0e2a"
+  },
+  "backend": "devin",
+  "backend_label": "Devin \u2014 good for clear-spec implementation",
+  "timeout_seconds": 3600,
+  "conflicts_at_launch": [
+    {
+      "job": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/numbered-markers/implementation-4",
+      "owner": "01a0a0a8-fc25-7b33-9b66-05de449635a0",
+      "status": "running",
+      "kind": "write/write",
+      "requested_path": "/Users/applelevne/Documents/coding-projects/zoomies/Sources/EditorShortcutOverlayController.swift",
+      "existing_path": "/Users/applelevne/Documents/coding-projects/zoomies/Sources"
+    },
+    {
+      "job": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/numbered-markers/implementation-4",
+      "owner": "01a0a0a8-fc25-7b33-9b66-05de449635a0",
+      "status": "running",
+      "kind": "write/write",
+      "requested_path": "/Users/applelevne/Documents/coding-projects/zoomies/Tests/ZoomiesTests/EditorShortcutOverlayTests.swift",
+      "existing_path": "/Users/applelevne/Documents/coding-projects/zoomies/Tests"
+    }
+  ],
+  "child_pid": 40959,
+  "process_groups": [
+    40959
+  ],
+  "exit_code": -15,
+  "finished_at": 1789434674.688888
+}

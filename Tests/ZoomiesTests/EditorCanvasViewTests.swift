@@ -74,6 +74,40 @@ final class EditorCanvasViewTests: XCTestCase {
                                         pressure: 0))
     }
 
+    func testClickOutsideTextReturnsToPenAndKeepsTypedContent() throws {
+        for typed in ["", "Keep this"] {
+            let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 600, height: 400))
+            canvas.setTool(.text)
+            canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas, location: NSPoint(x: 40, y: 40)))
+            let editor = try XCTUnwrap(canvas.subviews.compactMap { $0 as? NSTextView }.first)
+            editor.string = typed
+            var selectedPen = false
+            canvas.onKeyCommand = { if case .selectTool(.pen) = $0 { selectedPen = true } }
+            let outside = NSPoint(x: 400, y: 300)
+            canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas, location: outside))
+            canvas.mouseUp(with: try mouseEvent(type: .leftMouseUp, canvas: canvas, location: outside))
+            XCTAssertTrue(selectedPen, "Toolbar should return to pen")
+            XCTAssertFalse(canvas.subviews.contains { $0 is NSTextView })
+            let items = try XCTUnwrap(canvas.editableState()).items
+            XCTAssertEqual(items.count, typed.isEmpty ? 0 : 1, "Dismissal must not place another text box or pen stroke")
+            if !typed.isEmpty, case .text(let saved) = items.first { XCTAssertEqual(saved.text, typed) }
+        }
+    }
+
+    func testClickOutsideEmptyTextAfterFocusCommitStillReturnsToPen() throws {
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 600, height: 400))
+        canvas.setTool(.text)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas, location: NSPoint(x: 40, y: 40)))
+        // AppKit can end editing before delivering the canvas mouse event.
+        canvas.textDidEndEditing(Notification(name: NSText.didEndEditingNotification))
+        var selectedPen = false
+        canvas.onKeyCommand = { if case .selectTool(.pen) = $0 { selectedPen = true } }
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas, location: NSPoint(x: 400, y: 300)))
+        XCTAssertTrue(selectedPen)
+        XCTAssertEqual(canvas.editableState()?.items.count, 0)
+        XCTAssertFalse(canvas.subviews.contains { $0 is NSTextView })
+    }
+
     // Core of the fix: passing through the editor must not change pixel dimensions
     // (it used to double them on Retina via NSImage.lockFocus).
     func testCompositeImagePreservesNativeResolution() throws {

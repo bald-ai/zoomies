@@ -1,0 +1,360 @@
+import XCTest
+import AppKit
+import Carbon
+@testable import Zoomies
+
+final class EditorCanvasViewTests: XCTestCase {
+    private struct Probe { let name: String; let x: Int; let y: Int; let color: NSColor }
+
+    /// Builds an image with four distinct quadrant colors using top-left pixel
+    /// indexing (matching NSBitmapImageRep's setColor/colorAt convention).
+    private func quadrantImage(width: Int, height: Int) -> (NSImage, [Probe]) {
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
+                                   pixelsWide: width, pixelsHigh: height,
+                                   bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false,
+                                   colorSpaceName: .deviceRGB,
+                                   bytesPerRow: 0, bitsPerPixel: 0)!
+        let red = NSColor(deviceRed: 1, green: 0, blue: 0, alpha: 1)
+        let green = NSColor(deviceRed: 0, green: 1, blue: 0, alpha: 1)
+        let blue = NSColor(deviceRed: 0, green: 0, blue: 1, alpha: 1)
+        let yellow = NSColor(deviceRed: 1, green: 1, blue: 0, alpha: 1)
+        for y in 0..<height {
+            for x in 0..<width {
+                let c: NSColor
+                if x < width / 2 && y < height / 2 { c = red }
+                else if x >= width / 2 && y < height / 2 { c = green }
+                else if x < width / 2 && y >= height / 2 { c = blue }
+                else { c = yellow }
+                rep.setColor(c, atX: x, y: y)
+            }
+        }
+        let img = NSImage(size: NSSize(width: width, height: height))
+        img.addRepresentation(rep)
+        let probes = [
+            Probe(name: "top-left", x: width / 4, y: height / 4, color: red),
+            Probe(name: "top-right", x: 3 * width / 4, y: height / 4, color: green),
+            Probe(name: "bottom-left", x: width / 4, y: 3 * height / 4, color: blue),
+            Probe(name: "bottom-right", x: 3 * width / 4, y: 3 * height / 4, color: yellow)
+        ]
+        return (img, probes)
+    }
+
+    private func outputRep(_ image: NSImage) throws -> NSBitmapImageRep {
+        try XCTUnwrap(image.representations.compactMap { $0 as? NSBitmapImageRep }.first)
+    }
+
+    private func keyEvent(keyCode: UInt16,
+                          modifierFlags: NSEvent.ModifierFlags = [],
+                          characters: String = "") throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(with: .keyDown,
+                                       location: .zero,
+                                       modifierFlags: modifierFlags,
+                                       timestamp: 0,
+                                       windowNumber: 0,
+                                       context: nil,
+                                       characters: characters,
+                                       charactersIgnoringModifiers: characters.lowercased(),
+                                       isARepeat: false,
+                                       keyCode: keyCode))
+    }
+
+    private func mouseEvent(type: NSEvent.EventType,
+                            canvas: EditorCanvasView,
+                            location: NSPoint,
+                            clickCount: Int = 1) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.mouseEvent(with: type,
+                                        location: canvas.convert(location, to: nil),
+                                        modifierFlags: [],
+                                        timestamp: 0,
+                                        windowNumber: 0,
+                                        context: nil,
+                                        eventNumber: 0,
+                                        clickCount: clickCount,
+                                        pressure: 0))
+    }
+
+    // Core of the fix: passing through the editor must not change pixel dimensions
+    // (it used to double them on Retina via NSImage.lockFocus).
+    func testCompositeImagePreservesNativeResolution() throws {
+        let (image, _) = quadrantImage(width: 100, height: 80)
+        let canvas = EditorCanvasView(image: image)
+
+        let rep = try outputRep(canvas.compositeImage())
+        XCTAssertEqual(rep.pixelsWide, 100)
+        XCTAssertEqual(rep.pixelsHigh, 80)
+    }
+
+    // Guards the flipped-coordinate handling in the offscreen render: corners must
+    // keep their original colors (an upside-down render would swap them).
+    func testCompositeImagePreservesOrientation() throws {
+        let (image, probes) = quadrantImage(width: 100, height: 80)
+        let canvas = EditorCanvasView(image: image)
+
+        let rep = try outputRep(canvas.compositeImage())
+        for probe in probes {
+            let actual = try XCTUnwrap(rep.colorAt(x: probe.x, y: probe.y)?.usingColorSpace(.deviceRGB))
+            let expected = try XCTUnwrap(probe.color.usingColorSpace(.deviceRGB))
+            XCTAssertEqual(actual.redComponent, expected.redComponent, accuracy: 0.1, "\(probe.name) red")
+            XCTAssertEqual(actual.greenComponent, expected.greenComponent, accuracy: 0.1, "\(probe.name) green")
+            XCTAssertEqual(actual.blueComponent, expected.blueComponent, accuracy: 0.1, "\(probe.name) blue")
+        }
+    }
+
+    func testSelectionToolDeletesExistingArrowObject() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .arrow(start: .init(NSPoint(x: 30, y: 30)), end: .init(NSPoint(x: 70, y: 30)),
+                   color: .init(.systemRed), lineWidth: 4)
+        ])
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80),
+                                      initialState: state)
+        canvas.setTool(.selection)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas,
+                                              location: NSPoint(x: 50, y: 30)))
+        canvas.keyDown(with: try keyEvent(keyCode: 51))
+
+        XCTAssertEqual(canvas.editableState()?.items.count, 0)
+    }
+
+    func testTextToolDoubleClickOpensExistingTextForEditing() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .text(.init(text: "Editable text",
+                        origin: .init(NSPoint(x: 30, y: 30)),
+                        color: .init(.systemRed),
+                        fontSize: 20))
+        ])
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80),
+                                      initialState: state)
+        canvas.setTool(.text)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown,
+                                              canvas: canvas,
+                                              location: NSPoint(x: 40, y: 40),
+                                              clickCount: 2))
+
+        XCTAssertTrue(canvas.subviews.contains { $0 is NSTextView })
+    }
+
+    func testEditingExistingTextPreservesItsOriginalColor() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .text(.init(text: "Blue text",
+                        origin: .init(NSPoint(x: 30, y: 30)),
+                        color: .init(.systemBlue),
+                        fontSize: 20))
+        ])
+        let canvas = EditorCanvasView(
+            image: TestSupport.solidImage(width: 100, height: 80),
+            initialState: state
+        )
+        canvas.setColor(.systemRed)
+        canvas.setTool(.text)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown,
+                                              canvas: canvas,
+                                              location: NSPoint(x: 40, y: 40),
+                                              clickCount: 2))
+
+        let editor = try XCTUnwrap(canvas.subviews.compactMap { $0 as? NSTextView }.first)
+        editor.string = "Still blue"
+        editor.keyDown(with: try keyEvent(keyCode: 36, characters: "\r"))
+
+        let savedState = try XCTUnwrap(canvas.editableState())
+        guard case .text(let text) = try XCTUnwrap(savedState.items.first) else {
+            return XCTFail("Expected a text item")
+        }
+        XCTAssertEqual(text.text, "Still blue")
+        XCTAssertEqual(text.color, EditorCanvasState.Color(.systemBlue))
+    }
+
+    func testCapsLockToolShortcutUsesPhysicalKeyCode() throws {
+        let canvas = EditorCanvasView(
+            image: TestSupport.solidImage(width: 100, height: 80)
+        )
+        var selectedTool: EditorTool?
+        canvas.onKeyCommand = { command in
+            if case .selectTool(let tool) = command {
+                selectedTool = tool
+            }
+        }
+
+        canvas.keyDown(
+            with: try keyEvent(
+                keyCode: UInt16(kVK_ANSI_S),
+                modifierFlags: [.capsLock],
+                characters: "S"
+            )
+        )
+
+        XCTAssertEqual(selectedTool, .selection)
+    }
+
+    func testClickingExistingTextWithoutDraggingDoesNotConsumeUndo() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .text(.init(text: "Keep",
+                        origin: .init(NSPoint(x: 30, y: 30)),
+                        color: .init(.systemBlue),
+                        fontSize: 20)),
+            .arrow(start: .init(NSPoint(x: 30, y: 70)),
+                   end: .init(NSPoint(x: 70, y: 70)),
+                   color: .init(.systemRed),
+                   lineWidth: 4)
+        ])
+        let canvas = EditorCanvasView(
+            image: TestSupport.solidImage(width: 100, height: 80),
+            initialState: state
+        )
+
+        canvas.setTool(.selection)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown,
+                                              canvas: canvas,
+                                              location: NSPoint(x: 50, y: 70)))
+        canvas.keyDown(with: try keyEvent(keyCode: 51))
+        XCTAssertEqual(canvas.editableState()?.items.count, 1)
+
+        canvas.setTool(.text)
+        let clickPoint = NSPoint(x: 40, y: 40)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown,
+                                              canvas: canvas,
+                                              location: clickPoint))
+        canvas.mouseUp(with: try mouseEvent(type: .leftMouseUp,
+                                            canvas: canvas,
+                                            location: clickPoint))
+        canvas.undo()
+
+        XCTAssertEqual(canvas.editableState()?.items.count, 2)
+    }
+
+    func testEditableStateKeepsAnnotationsAnchoredToBaseImageAfterRecentering() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .arrow(start: .init(NSPoint(x: 30, y: 30)), end: .init(NSPoint(x: 70, y: 30)),
+                   color: .init(.systemRed), lineWidth: 4)
+        ])
+        let canvas = EditorCanvasView(image: try XCTUnwrap(NSImage(data: basePNG)), initialState: state)
+
+        canvas.ensureDrawableAreaCoversVisibleSize(NSSize(width: 200, height: 160))
+        let restoredState = try XCTUnwrap(canvas.editableState())
+        let restoredCanvas = EditorCanvasView(image: try XCTUnwrap(NSImage(data: restoredState.baseImagePNG)),
+                                              initialState: restoredState)
+
+        XCTAssertTrue(restoredCanvas.selectEditableItem(at: NSPoint(x: 50, y: 30)))
+    }
+
+    func testSwitchingAwayFromSelectionClearsSelectedArea() throws {
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80))
+        canvas.setTool(.selection)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas,
+                                              location: NSPoint(x: 30, y: 30)))
+        canvas.mouseUp(with: try mouseEvent(type: .leftMouseUp, canvas: canvas,
+                                            location: NSPoint(x: 60, y: 50)))
+
+        XCTAssertNotNil(canvas.selectedRegionPayload())
+
+        canvas.setTool(.pen)
+
+        XCTAssertNil(canvas.selectedRegionPayload())
+    }
+
+    func testUndoRedoRoundTripRestoresDeletedArrow() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .arrow(start: .init(NSPoint(x: 30, y: 30)), end: .init(NSPoint(x: 70, y: 30)),
+                   color: .init(.systemRed), lineWidth: 4)
+        ])
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80),
+                                      initialState: state)
+        canvas.setTool(.selection)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas,
+                                              location: NSPoint(x: 50, y: 30)))
+        canvas.keyDown(with: try keyEvent(keyCode: 51))
+        XCTAssertEqual(canvas.editableState()?.items.count, 0)
+
+        canvas.undo()
+        XCTAssertEqual(canvas.editableState()?.items.count, 1)
+
+        canvas.redo()
+        XCTAssertEqual(canvas.editableState()?.items.count, 0)
+
+        canvas.undo()
+        XCTAssertEqual(canvas.editableState()?.items.count, 1)
+    }
+
+    func testNewStrokeClearsRedoStack() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [
+            .arrow(start: .init(NSPoint(x: 30, y: 30)), end: .init(NSPoint(x: 70, y: 30)),
+                   color: .init(.systemRed), lineWidth: 4)
+        ])
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80),
+                                      initialState: state)
+        canvas.setTool(.selection)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas,
+                                              location: NSPoint(x: 50, y: 30)))
+        canvas.keyDown(with: try keyEvent(keyCode: 51))
+        canvas.undo()
+        XCTAssertEqual(canvas.editableState()?.items.count, 1)
+
+        // A new pen stroke must discard the pending redo; redo becomes a no-op.
+        canvas.setTool(.pen)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas,
+                                              location: NSPoint(x: 30, y: 60)))
+        canvas.mouseDragged(with: try mouseEvent(type: .leftMouseDragged, canvas: canvas,
+                                                 location: NSPoint(x: 70, y: 60)))
+        canvas.mouseUp(with: try mouseEvent(type: .leftMouseUp, canvas: canvas,
+                                            location: NSPoint(x: 70, y: 60)))
+        XCTAssertEqual(canvas.editableState()?.items.count, 2)
+
+        canvas.redo()
+        XCTAssertEqual(canvas.editableState()?.items.count, 2)
+    }
+
+    func testCommandShiftZRedoesWhileCommandZUndoes() throws {
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80))
+        var received: [EditorCanvasView.KeyCommand] = []
+        canvas.onKeyCommand = { received.append($0) }
+
+        canvas.keyDown(with: try keyEvent(keyCode: UInt16(kVK_ANSI_Z),
+                                          modifierFlags: [.command],
+                                          characters: "z"))
+        canvas.keyDown(with: try keyEvent(keyCode: UInt16(kVK_ANSI_Z),
+                                          modifierFlags: [.command, .shift],
+                                          characters: "Z"))
+
+        XCTAssertEqual(received.count, 2)
+        guard received.count == 2 else { return }
+        guard case .undo = received[0] else {
+            return XCTFail("Cmd+Z must send .undo")
+        }
+        guard case .redo = received[1] else {
+            return XCTFail("Cmd+Shift+Z must send .redo")
+        }
+    }
+
+    func testPerformKeyEquivalentRoutesCommandZAndCommandShiftZ() throws {
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80))
+        var received: [EditorCanvasView.KeyCommand] = []
+        canvas.onKeyCommand = { received.append($0) }
+
+        XCTAssertTrue(canvas.performKeyEquivalent(
+            with: try keyEvent(keyCode: UInt16(kVK_ANSI_Z),
+                               modifierFlags: [.command],
+                               characters: "z")
+        ))
+        XCTAssertTrue(canvas.performKeyEquivalent(
+            with: try keyEvent(keyCode: UInt16(kVK_ANSI_Z),
+                               modifierFlags: [.command, .shift],
+                               characters: "Z")
+        ))
+
+        XCTAssertEqual(received.count, 2)
+        guard received.count == 2 else { return }
+        guard case .undo = received[0] else {
+            return XCTFail("Window-level Cmd+Z must send .undo")
+        }
+        guard case .redo = received[1] else {
+            return XCTFail("Window-level Cmd+Shift+Z must send .redo")
+        }
+    }
+}

@@ -60,12 +60,20 @@ struct EditorCanvasState: Codable {
         var fontSize: CGFloat
     }
 
+    struct Marker: Codable, Equatable {
+        var number: Int
+        var center: Point
+        var color: Color
+        var diameter: CGFloat
+    }
+
     enum Item: Codable, Equatable {
         case pen(points: [Point], color: Color, lineWidth: CGFloat)
         case arrow(start: Point, end: Point, color: Color, lineWidth: CGFloat)
         case rect(rect: Rect, color: Color, lineWidth: CGFloat)
         case ellipse(rect: Rect, color: Color, lineWidth: CGFloat)
         case text(Text)
+        case marker(Marker)
         case image(pngData: Data, rect: Rect)
         case erase(rect: Rect)
 
@@ -78,6 +86,7 @@ struct EditorCanvasState: Codable {
             case lineWidth
             case rect
             case text
+            case marker
             case pngData
         }
 
@@ -87,6 +96,7 @@ struct EditorCanvasState: Codable {
             case rect
             case ellipse
             case text
+            case marker
             case image
             case erase
         }
@@ -114,6 +124,8 @@ struct EditorCanvasState: Codable {
                                 lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
             case .text:
                 self = .text(try container.decode(Text.self, forKey: .text))
+            case .marker:
+                self = .marker(try container.decode(Marker.self, forKey: .marker))
             case .image:
                 self = .image(pngData: try container.decode(Data.self, forKey: .pngData),
                               rect: try container.decode(Rect.self, forKey: .rect))
@@ -149,6 +161,9 @@ struct EditorCanvasState: Codable {
             case .text(let text):
                 try container.encode(Kind.text, forKey: .type)
                 try container.encode(text, forKey: .text)
+            case .marker(let marker):
+                try container.encode(Kind.marker, forKey: .type)
+                try container.encode(marker, forKey: .marker)
             case .image(let pngData, let rect):
                 try container.encode(Kind.image, forKey: .type)
                 try container.encode(pngData, forKey: .pngData)
@@ -268,6 +283,14 @@ private extension EditorCanvasState.Item {
                 && text.fontSize.isFinite
                 && text.fontSize > 0
                 && text.fontSize <= limits.maxFontSize
+        case .marker(let marker):
+            return marker.number >= 1
+                && marker.number <= EditorDrawing.MarkerItem.maxNumber
+                && marker.center.isSafe(limits: limits)
+                && marker.color.isSafe
+                && marker.diameter.isFinite
+                && marker.diameter > 0
+                && marker.diameter <= limits.maxFontSize
         case .image(let pngData, let rect):
             return pngData.count <= limits.maxEmbeddedImageBytes
                 && ImageSafety.isSafePNG(pngData, limits: limits)
@@ -302,6 +325,16 @@ private extension EditorCanvasState.Item {
             let height = text.fontSize * 1.5
             guard width.isFinite, height.isFinite else { return nil }
             return NSRect(x: text.origin.x, y: text.origin.y, width: max(width, 1), height: max(height, 1))
+        case .marker(let marker):
+            // Generous capsule estimate: digit count widens the marker.
+            let digits = max(1, String(marker.number).count)
+            let width = max(marker.diameter, CGFloat(digits) * marker.diameter * 0.7) + 8
+            let height = marker.diameter + 8
+            guard width.isFinite, height.isFinite else { return nil }
+            return NSRect(x: marker.center.x - width / 2,
+                          y: marker.center.y - height / 2,
+                          width: max(width, 1),
+                          height: max(height, 1))
         case .image(_, let rect), .erase(let rect):
             return rect.nsRect
         }

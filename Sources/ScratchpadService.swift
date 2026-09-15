@@ -97,7 +97,8 @@ final class ScratchpadService {
             initialText: cachedText,
             escapeKeyDeletesFile: false,
             showsCopyAndDelete: false,
-            showsEditorShortcut: false
+            showsEditorShortcut: false,
+            maxLength: NotePanelController.standaloneMaxLength
         )
         controller.onAction = { [weak self] action in self?.handleNoteAction(action) }
         notePanelController = controller

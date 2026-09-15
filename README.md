@@ -84,8 +84,9 @@ the relevant shortcut code and build a new `.app` for you.
 | Rename / Prompt | `Esc` | Delete / close |
 | Flow | `Tab` | Next step |
 | Flow | `Shift+Tab` | Previous step |
-| Edit | `W` / `A` / `R` / `E` / `T` / `S` | Pen / arrow / rectangle / ellipse / text / select |
-| Edit | `K` or `Q` | Open colors |
+| Edit | `W` / `D` / `A` / `R` / `E` / `T` / `F` / `S` | Pen / line / arrow / rectangle / ellipse / text / numbered marker / select |
+| Edit | `Q` | Next color in your palette |
+| Edit | `K` | Open colors |
 | Edit | `1-6` | Pick color |
 | Edit | `Cmd+Z` / `Cmd+Shift+Z` | Undo / redo |
 | Edit | `Option+Backspace` | Clear |
@@ -95,13 +96,27 @@ the relevant shortcut code and build a new `.app` for you.
 | Edit | `Cmd+Enter` | Copy + save |
 | Edit | `Esc` | Cancel |
 
+### Editor shortcut hints
+
+Hold **⌘ alone for 0.5 seconds** to reveal shortcut badges beside the editor’s toolbar controls. A hint above the toolbar invites you to hover over a badge or control to read its action and shortcut in plain text. Release ⌘ to hide them. Another key or modifier dismisses the badges and lets the shortcut work normally.
+
+## Editor Numbered Markers
+
+Press `F` in the editor to use the numbered marker tool.
+
+New editor text and marker diameters grow with image width on a gentle curve: small captures stay readable, while full-screen captures avoid oversized annotations. Sizing is independent of window fit and zoom. Existing annotations retain their saved sizes.
+
+- Click on the image to stamp a numbered circle labeled `1`, then `2`, `3`, and so on. The outline and numeral use the current annotation color and the interior stays transparent so the image shows through; the circle widens instead of clipping for multi-digit numbers.
+- Drag an existing marker to move it or press `Delete` to remove it. Repeated clicks select the marker; number editing is currently disabled. Removing a marker never renumbers the others, and the next number continues past the highest existing marker.
+- Reference the numbers in your note text — the note is saved below the image, so prompts like "fix 1 and 3" travel with the screenshot.
+
 ## Editor Select Tool
 
 Press `S` in the editor to use Select.
 
 Select now has two jobs:
 
-- Click a Zoomies-added object, like text, arrow, pen stroke, rectangle, ellipse, pasted image, or cut/erase region, to select it.
+- Click a Zoomies-added object, like text, numbered marker, arrow, pen stroke, rectangle, ellipse, pasted image, or cut/erase region, to select it.
 - Drag the selected object to move it, or press `Delete` to remove it.
 - Drag on empty screenshot space to select a rectangular image region.
 - With a region selected, use `Cmd+C` to copy it, `Cmd+X` to cut it, and `Cmd+V` to paste it back into the canvas.
@@ -150,10 +165,35 @@ For area capture, drag to select, press Space to switch to window/menu selection
 
 ### Permission after rebuilding the app
 
-If you edit the code and build a new copy of Zoomies, macOS may ask for
-permission again even though Zoomies still appears to be allowed in System
-Settings. The listed permission can belong to the previous app build.
+Ad-hoc signatures identify a particular build, so permission approvals may stop
+matching after the app changes. For local development, reuse a code-signing
+certificate and the same bundle ID and installed app path across rebuilds.
 
-Open **System Settings → Privacy & Security**, select the relevant permission,
-use the **−** button to remove the old Zoomies entry, then use the **+** button
-to add and allow the newly built `Zoomies.app`.
+List available signing identities and save the chosen certificate's SHA-1 in
+this checkout's local Git configuration:
+
+```bash
+security find-identity -v -p codesigning
+git config --local zoomies.signingIdentity YOUR_CERTIFICATE_SHA1
+./scripts/build_app.sh
+```
+
+The build script also accepts `--signing-identity` or `ZOOMIES_SIGNING_IDENTITY`;
+the command-line option takes precedence, followed by the environment variable,
+then Git configuration. A configured certificate that cannot sign causes the
+build to fail instead of silently falling back to ad-hoc signing. Without a
+configured identity, builds retain the ad-hoc default.
+
+Switching from ad-hoc signing to a certificate may require one more approval.
+If the old entry remains unusable, remove that Zoomies entry in **System Settings
+→ Privacy & Security** and add the installed `/Applications/Zoomies.app` again.
+Keep using that installed copy for testing. A local certificate is for development;
+it does not make the app notarized for distribution.
+
+## Editor colors
+
+Press **Q** to cycle to the next color. In **Settings → Colors**, choose 1–6 active colors from 15 options and use the up/down arrows to set their order. The last color wraps back to the first. Changes also apply to an already-open editor. Press **K** or click the color swatch to open the visual picker.
+
+Standalone Markdown notes accept up to 100,000 characters. Image notes keep their 1,000-character limit. Input that would exceed the limit is rejected with a visible limit message, so an oversized paste does not silently lose its ending.
+
+After placing or selecting editor text, click outside it to return to the pen. Typed text is kept; empty text boxes are discarded. The dismissing click does not draw a stroke.

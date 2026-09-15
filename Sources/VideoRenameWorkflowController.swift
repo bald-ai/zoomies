@@ -219,16 +219,18 @@ final class VideoRenameWorkflowController {
         errorPresenter(title, message)
     }
 
-    /// When a confirmation is shown, Return confirms and Escape cancels.
+    /// When a confirmation is shown, Escape confirms and R returns to the workflow.
     static func makeDeleteConfirmationAlert() -> NSAlert {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Delete this recording?"
         alert.informativeText = "This permanently deletes the recording file. This can't be undone.\n\nYou can disable this confirmation in Settings."
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
-        alert.buttons.first?.keyEquivalent = "\r"
-        alert.buttons.last?.keyEquivalent = "\u{1b}"
+        alert.addButton(withTitle: "Delete (Esc)")
+        alert.addButton(withTitle: "Go Back (R)")
+        alert.buttons.first?.keyEquivalent = "\u{1b}"
+        alert.buttons.first?.keyEquivalentModifierMask = []
+        alert.buttons.last?.keyEquivalent = "r"
+        alert.buttons.last?.keyEquivalentModifierMask = []
         return alert
     }
 

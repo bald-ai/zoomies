@@ -1,0 +1,32 @@
+Implement self-contained keyboard shortcut hold overlay for Zoomies AppKit editor, only NEW files Sources/EditorShortcutOverlayController.swift and Tests/ZoomiesTests/EditorShortcutOverlayTests.swift. Parent integrates in EditorWindowController when concurrent sizing worker finishes. Do not edit any other files, delegate, commit, change branches/worktrees. Read stable keyboard/window snapshots in work/cursor-agents/shortcut-overlay/baseline; these contain actual shortcuts incl F markers. User authorized hold Command alone 0.7 seconds -> shortcut panel, release -> hide immediately. Another nonmodifier key or modifier cancels/hides; require full Command release and repress after shortcut before showing; normal shortcuts must pass untouched. Ignore capslock for matching, handle other actual modifiers consistently. Only own editor key window, hide on focus loss/app deactivation/window order out/close; clean observers/timer/monitor on teardown. Avoid hijacking first responder or focus, keep inline text edits intact. Handle local monitor ordering: existing window monitor can consume cmd keys; propose robust integration e.g. EditorWindow.sendEvent forwarding keyDown+flagsChanged BEFORE super or helper event integration guaranteed before consumed events; expose handle(event:) that never consumes event if parent hooks before routing. Short delay cancellable without sleeping. Overlay is compact translucent help inside editor or nonactivating child, fitting small windows, grouped shortcuts verified against baseline. Avoid unreadably large lists/clipping at minimum editor size: adapt columns/scroll container if needed. Dynamic Escape label via init parameter escapeKeyDeletesFile or ScreenshotFinalAction. Show tools, edit/clipboard/undo, zoom, color, final save/copy/delete/back-to-note routes; conditional inline text behavior footnote as needed. No misleading availability claims.
+
+Deliver production implementation isolated in new file(s) above, with clear tiny parent integration instructions (init attach, event forwarding, teardown). Tests meaningful deterministic state machine w fake scheduler or exposed time progression (0.7 delay, cancel by shortcut/modifier, require release rearm, focus loss, teardown) and verify overlay doesn't become key/change first responder if practical. Concurrent worker editing existing Sources/Tests, so don't edit their files, don't launch app; swift test may use shared build lock normally. Own only declared new files. Report all checks. Parent handles integration and final build/install. Use AppKit only, no dependencies. Expected UI hold Command -> lightweight shortcut help titled Editor shortcuts, footer Release Command to close.
+
+Declared assignment scopes (paths include descendants):
+{"reads": ["/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/shortcut-overlay/baseline"], "writes": ["/Users/applelevne/Documents/coding-projects/zoomies/Sources/EditorShortcutOverlayController.swift", "/Users/applelevne/Documents/coding-projects/zoomies/Tests/ZoomiesTests/EditorShortcutOverlayTests.swift"]}
+Only edit declared write scopes. Do not delegate further, change branches, or create worktrees.
+
+## Return a handoff to the orchestrator
+
+You are an external worker. Complete the assignment above within its constraints.
+Your final response must be one JSON object with the fields below. Put any
+requested exact answer or payload in summary or findings. Keep it concise but
+retain details needed to use and verify your work. Use empty arrays when a field
+has no entries. Do not invent evidence, file locations, checks, or success.
+
+{
+  "outcome": "complete | partial | blocked",
+  "summary": "The result and what it means for the assignment.",
+  "findings": ["Concrete findings, including relevant exact values."],
+  "changes": ["Files/artifacts changed and what changed; no unrelated files."],
+  "decisions": ["Important choices and brief rationale, including rejected alternatives when useful."],
+  "evidence": ["Exact source file paths and line numbers when known, URLs, reproduction steps, or artifact paths supporting the findings."],
+  "checks": [{"check": "Actual command or verification", "result": "passed | failed | not_run", "detail": "Observed result, or why it was not run."}],
+  "open_issues": ["Uncertainties, assumptions needing confirmation, blockers, missing checks, and questions for the orchestrator."],
+  "next_steps": ["Specific remaining actions or integration guidance, if any."]
+}
+
+Report failed checks even if later corrected; say what fixed them. Distinguish
+observed facts from hypotheses. For blocked or partial work, explain what is
+missing and what would unblock it. Include important discoveries that affect
+other work. Do not include private reasoning transcripts or routine tool chatter.

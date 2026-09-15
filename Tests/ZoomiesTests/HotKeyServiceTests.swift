@@ -20,7 +20,7 @@ final class HotKeyServiceTests: XCTestCase {
                                                   carbonFlags: UInt32(cmdKey | shiftKey))
         XCTAssertTrue(desc.contains("⌘"))
         XCTAssertTrue(desc.contains("⇧"))
-        XCTAssertTrue(desc.contains("6"))
+        XCTAssertTrue(desc.hasSuffix(PhysicalKeyLabel.name(for: UInt16(kVK_ANSI_6), fallback: "6")))
     }
 
     func testDescribeShortcutDoesNotTrapOnOutOfRangeKeyCode() {

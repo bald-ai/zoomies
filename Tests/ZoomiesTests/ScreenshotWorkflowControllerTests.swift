@@ -730,10 +730,10 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
         let alert = ScreenshotWorkflowController.makeDeleteConfirmationAlert()
 
         XCTAssertEqual(alert.buttons.count, 2)
-        XCTAssertEqual(alert.buttons[0].title, "Delete")
-        XCTAssertEqual(alert.buttons[0].keyEquivalent, "\r", "Enter must confirm the delete.")
-        XCTAssertEqual(alert.buttons[1].title, "Cancel")
-        XCTAssertEqual(alert.buttons[1].keyEquivalent, "\u{1b}", "Esc must keep the file.")
+        XCTAssertEqual(alert.buttons[0].title, "Delete (Esc)")
+        XCTAssertEqual(alert.buttons[0].keyEquivalent, "\u{1b}", "Esc must confirm the delete.")
+        XCTAssertEqual(alert.buttons[1].title, "Go Back (R)")
+        XCTAssertEqual(alert.buttons[1].keyEquivalent, "r", "R must keep the file.")
     }
 
     func testDisabledConfirmationProceedsWithoutShowingAlert() {
@@ -744,11 +744,11 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
         let alert = ScreenshotWorkflowController.makeCloseConfirmationAlert()
 
         XCTAssertEqual(alert.buttons.count, 2)
-        XCTAssertEqual(alert.buttons[0].title, "Close")
-        XCTAssertEqual(alert.buttons[0].keyEquivalent, "\r")
+        XCTAssertEqual(alert.buttons[0].title, "Close (Esc)")
+        XCTAssertEqual(alert.buttons[0].keyEquivalent, "\u{1b}")
         XCTAssertTrue(alert.informativeText.contains("original image will not be deleted"))
-        XCTAssertEqual(alert.buttons[1].title, "Cancel")
-        XCTAssertEqual(alert.buttons[1].keyEquivalent, "\u{1b}", "Esc must keep the file in both modes.")
+        XCTAssertEqual(alert.buttons[1].title, "Go Back (R)")
+        XCTAssertEqual(alert.buttons[1].keyEquivalent, "r", "R must return to editing.")
     }
 
     func testCopyAndSaveFailureWarnsButKeepsSave() throws {

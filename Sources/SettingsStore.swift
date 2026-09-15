@@ -6,6 +6,7 @@ import Foundation
 /// On first launch after upgrading, the old `~/.screenshot_app_settings.json`
 /// file is read and copied to the new location.
 final class SettingsStore {
+    static let didChangeNotification = Notification.Name("ZoomiesSettingsDidChange")
     typealias PersistWriter = (_ data: Data, _ url: URL) throws -> Void
 
     private(set) var settings: Settings
@@ -97,6 +98,7 @@ final class SettingsStore {
         block(&settings)
         settings = settings.normalized()
         save()
+        NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
     }
 
     // MARK: - Private

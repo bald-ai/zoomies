@@ -109,7 +109,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
         let tabs = settingsTabs
         tabs.tabViewType = .noTabsNoBorder
-        let navigation = NSSegmentedControl(labels: ["Screenshots", "Videos", "Notes"], trackingMode: .selectOne,
+        let navigation = NSSegmentedControl(labels: ["Screenshots", "Videos", "Notes", "Colors"], trackingMode: .selectOne,
                                             target: self, action: #selector(settingsTabChanged(_:)))
         navigation.selectedSegment = 0
         navigation.selectedSegmentBezelColor = NSColor(srgbRed: 0.26, green: 0.34, blue: 0.38, alpha: 1)
@@ -161,6 +161,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         let screenshots = page("Screenshots")
         let videos = page("Videos")
         let notes = page("Notes")
+        let colorsPage = page("Colors")
+        let paletteEditor = EditorPaletteSettingsView(settingsStore: settingsStore)
+        colorsPage.addArrangedSubview(paletteEditor)
+        paletteEditor.widthAnchor.constraint(equalTo: colorsPage.widthAnchor).isActive = true
 
         configureMaxSizePopUp()
         addRow("Maximum image width", control: maxSizePopUp, to: screenshots)

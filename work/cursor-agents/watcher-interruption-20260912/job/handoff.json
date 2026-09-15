@@ -1,0 +1,24 @@
+{
+  "outcome": "complete",
+  "summary": "Executed the bounded wait command; it slept ~45s and printed 29357. Observed integer: 29357.",
+  "findings": [
+    "Observed stdout: 29357",
+    "Exit code: 0"
+  ],
+  "changes": [],
+  "decisions": [
+    "Ran exactly the specified command once; when it backgrounded (ID 112089), waited on that same handle via get_output rather than re-running."
+  ],
+  "evidence": [
+    "Background shell 112089 output: '29357', exit code 0"
+  ],
+  "checks": [
+    {
+      "check": "python3 -c \"import time; time.sleep(45); print(947 * 31)\"",
+      "result": "passed",
+      "detail": "Printed 29357 after the 45s sleep; exit code 0."
+    }
+  ],
+  "open_issues": [],
+  "next_steps": []
+}

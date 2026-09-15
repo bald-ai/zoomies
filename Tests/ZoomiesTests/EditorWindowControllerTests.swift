@@ -200,7 +200,7 @@ final class EditorWindowControllerTests: XCTestCase {
             settingsStore: settingsStore,
             escapeKeyDeletesFile: true
         )
-        var receivedAction: ScreenshotWorkflowController.FinalAction?
+        var receivedAction: ScreenshotFinalAction?
         var prompts = 0
         controller.onComplete = { _, action, _ in receivedAction = action }
         controller.onConfirmDelete = { prompts += 1; return true }
@@ -218,7 +218,7 @@ final class EditorWindowControllerTests: XCTestCase {
 
     private func assertRedCloseAction(
         escapeKeyDeletesFile: Bool,
-        verify: (ScreenshotWorkflowController.FinalAction) -> Void
+        verify: (ScreenshotFinalAction) -> Void
     ) throws {
         let directory = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(directory) }
@@ -232,7 +232,7 @@ final class EditorWindowControllerTests: XCTestCase {
             settingsStore: settingsStore,
             escapeKeyDeletesFile: escapeKeyDeletesFile
         )
-        var receivedAction: ScreenshotWorkflowController.FinalAction?
+        var receivedAction: ScreenshotFinalAction?
         controller.onComplete = { _, action, _ in
             receivedAction = action
         }
@@ -260,7 +260,7 @@ final class EditorWindowControllerTests: XCTestCase {
         )
         var receivedImage: NSImage?
         var receivedState: EditorCanvasState?
-        var receivedAction: ScreenshotWorkflowController.FinalAction?
+        var receivedAction: ScreenshotFinalAction?
         controller.onComplete = { image, action, state in
             receivedImage = image
             receivedState = state
@@ -302,6 +302,121 @@ final class EditorWindowControllerTests: XCTestCase {
         XCTAssertEqual(controller.currentEditableState()?.items.count, 0)
         XCTAssertEqual(controller.currentCompositeImage().size.width, 80, accuracy: 1.0)
         XCTAssertEqual(controller.currentCompositeImage().size.height, 40, accuracy: 1.0)
+    }
+
+    // MARK: - Annotation creation scale
+
+    /// Annotation size follows the source image width, independently of fit.
+    func testSmallImageUsesSmallAnnotations() throws {
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(directory) }
+        let controller = EditorWindowController(
+            image: TestSupport.solidImage(width: 100, height: 80),
+            settingsStore: SettingsStore(fileManager: .default,
+                                         fileURL: directory.appendingPathComponent("settings.json"))
+        )
+        defer { controller.dismissWithoutCompletion() }
+
+        let window = try XCTUnwrap(controller.window)
+        let canvas = try XCTUnwrap(findCanvas(in: window.contentView))
+        let magnification = try XCTUnwrap(canvas.enclosingScrollView?.magnification)
+
+        let fontSize = try newTextEditorFontSize(on: canvas)
+        XCTAssertEqual(fontSize, 16, accuracy: 0.01)
+        XCTAssertLessThan(fontSize * magnification, 38.4)
+
+        let diameter = try placeMarkerAndGetDiameter(on: canvas, at: NSPoint(x: 60, y: 40))
+        XCTAssertEqual(diameter, fontSize, accuracy: 0.01,
+                       "marker diameter shares the text font-size calculation")
+        XCTAssertEqual(diameter / canvas.baseImage.size.width, fontSize / canvas.baseImage.size.width, accuracy: 0.001)
+    }
+
+    func testLargeImageUsesProportionalAnnotations() throws {
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(directory) }
+        // 4000×2000 px forces a downscale fit (baseScale << 1) in any window.
+        let rep = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil,
+                                                 pixelsWide: 4000,
+                                                 pixelsHigh: 2000,
+                                                 bitsPerSample: 8,
+                                                 samplesPerPixel: 4,
+                                                 hasAlpha: true,
+                                                 isPlanar: false,
+                                                 colorSpaceName: .deviceRGB,
+                                                 bytesPerRow: 0,
+                                                 bitsPerPixel: 0))
+        let image = NSImage(size: NSSize(width: 4000, height: 2000))
+        image.addRepresentation(rep)
+        let controller = EditorWindowController(
+            image: image,
+            settingsStore: SettingsStore(fileManager: .default,
+                                         fileURL: directory.appendingPathComponent("settings.json"))
+        )
+        defer { controller.dismissWithoutCompletion() }
+
+        let window = try XCTUnwrap(controller.window)
+        let canvas = try XCTUnwrap(findCanvas(in: window.contentView))
+        let magnification = try XCTUnwrap(canvas.enclosingScrollView?.magnification)
+        XCTAssertLessThan(magnification, 0.95, "large capture must be downscaled to fit")
+
+        let fontSize = try newTextEditorFontSize(on: canvas)
+        XCTAssertGreaterThan(fontSize, 38.4,
+                             "downscaled captures need a larger canvas-space size")
+        XCTAssertEqual(fontSize, 40 * pow(4, 0.65), accuracy: 0.01)
+        XCTAssertLessThanOrEqual(fontSize, ImageSafetyLimits.runtime.maxFontSize)
+
+        let diameter = try placeMarkerAndGetDiameter(on: canvas, at: NSPoint(x: 200, y: 160))
+        XCTAssertEqual(diameter, fontSize, accuracy: 0.01)
+        XCTAssertEqual(diameter / canvas.baseImage.size.width, fontSize / canvas.baseImage.size.width, accuracy: 0.001)
+    }
+
+    func testManualZoomDoesNotChangeAnnotationCreationSize() throws {
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(directory) }
+        let controller = EditorWindowController(
+            image: TestSupport.solidImage(width: 100, height: 80),
+            settingsStore: SettingsStore(fileManager: .default,
+                                         fileURL: directory.appendingPathComponent("settings.json"))
+        )
+        defer { controller.dismissWithoutCompletion() }
+
+        let window = try XCTUnwrap(controller.window)
+        let canvas = try XCTUnwrap(findCanvas(in: window.contentView))
+        let magnificationBefore = try XCTUnwrap(canvas.enclosingScrollView?.magnification)
+        let fontSizeBefore = try newTextEditorFontSize(on: canvas)
+
+        // Cmd+= zooms in through the canvas key-command path.
+        canvas.keyDown(with: try keyEvent(keyCode: 24, modifierFlags: [.command], characters: "="))
+        let magnificationAfter = try XCTUnwrap(canvas.enclosingScrollView?.magnification)
+        XCTAssertNotEqual(magnificationBefore, magnificationAfter, accuracy: 0.001,
+                          "zoom command should change live magnification")
+
+        let fontSizeAfter = try newTextEditorFontSize(on: canvas)
+        XCTAssertEqual(fontSizeBefore, fontSizeAfter, accuracy: 0.01,
+                       "manual zoom must not resize subsequently created annotations")
+        let diameterAfter = try placeMarkerAndGetDiameter(on: canvas, at: NSPoint(x: 150, y: 40))
+        XCTAssertEqual(diameterAfter, fontSizeAfter, accuracy: 0.01)
+    }
+
+    private func newTextEditorFontSize(on canvas: EditorCanvasView) throws -> CGFloat {
+        canvas.setTool(.text)
+        canvas.mouseDown(with: mouseEvent(type: .leftMouseDown, canvas: canvas, location: NSPoint(x: 60, y: 40)))
+        let editor = try XCTUnwrap(canvas.subviews.compactMap { $0 as? NSTextView }.first)
+        let size = try XCTUnwrap(editor.font?.pointSize)
+        // Escape cancels the fresh (empty) text edit and removes the item.
+        editor.keyDown(with: try keyEvent(keyCode: 53, modifierFlags: [], characters: ""))
+        return size
+    }
+
+    private func placeMarkerAndGetDiameter(on canvas: EditorCanvasView, at point: NSPoint) throws -> CGFloat {
+        canvas.setTool(.marker)
+        canvas.mouseDown(with: mouseEvent(type: .leftMouseDown, canvas: canvas, location: point))
+        canvas.mouseUp(with: mouseEvent(type: .leftMouseUp, canvas: canvas, location: point))
+        guard case .marker(let marker) = canvas.editableState()?.items.last else {
+            throw NSError(domain: "EditorWindowControllerTests", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "expected a placed marker"])
+        }
+        return marker.diameter
     }
 
     private func color(in image: NSImage, at point: NSPoint) throws -> NSColor {

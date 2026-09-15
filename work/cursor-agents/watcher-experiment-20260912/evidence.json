@@ -1,0 +1,24 @@
+{
+  "duration_seconds": 35.81,
+  "session_id": "catkin-wildflower",
+  "model": "swe-2-max",
+  "completion_source": "Devin ACP session/prompt end_turn; agent_stopped cause complete also observed",
+  "worker_tool_calls": 2,
+  "worker_reported_stats": {
+    "agent_messages": 3.0,
+    "model": "SWE-2 Max",
+    "input_tokens": 11878.0,
+    "output_tokens": 556.0,
+    "cached_input_tokens": 23197.0
+  },
+  "supervisor_wait_calls": 1,
+  "intermediate_supervisor_progress_checks": 0,
+  "scope_files_created": 0,
+  "limitations": [
+    "Live test lasted 35.81 seconds, not an hour.",
+    "Test used the existing ACP controller, not an interactive cmux tab.",
+    "No automatic wake after a finished Codex turn was tested.",
+    "No supervisor per-request token or billing telemetry is available.",
+    "Worker token use is separate from the local watcher; no total-task zero-token claim."
+  ]
+}

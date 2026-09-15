@@ -1,0 +1,40 @@
+{
+  "status": "completed",
+  "controller_pid": 41588,
+  "project": "/Users/applelevne/Documents/coding-projects/zoomies",
+  "model": "swe-2-max",
+  "mode": "agent",
+  "started_at": 1789231625.1252291,
+  "session_lock": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/watcher-experiment-20260912/job/session.lock",
+  "resume_job": null,
+  "handoff_required": true,
+  "controller_started": "Sat Sep 12 18:47:05 2026",
+  "slot_path": "/Users/applelevne/.codex/cursor-agents/slots/0.lock",
+  "owner": "01a0962d-845d-74e2-9a66-0343b0dbcb82",
+  "assignment": "Test native completion without a status marker",
+  "reads": [
+    "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/watcher-experiment-20260912/assignment.txt"
+  ],
+  "writes": [
+    "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/watcher-experiment-20260912/scratch"
+  ],
+  "worker_id": "/Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/watcher-experiment-20260912/job",
+  "conflict_reason": null,
+  "package_hashes": {
+    "SKILL.md": "efc638583d9da6f87b51a9874740c6fd08d73085e823bc28160dbdbdb35ed48e",
+    "scripts/cursor_worker.py": "c5c78c8266937e5158230b7579fab097e1c6b5244f53bc581e3630b5b1be9bdb",
+    "scripts/devin_acp.py": "3fe4d2e7c12a4cc05d00f2ba961b65e7a3d23630b577f72f92034d08e329d2cd",
+    "references/worker_handoff.md": "846296dbefff93e7ee533909917c759def0ae1705fbdcb8eb5762cb27c980818"
+  },
+  "backend": "devin",
+  "backend_label": "Devin \u2014 good for clear-spec implementation",
+  "timeout_seconds": 120.0,
+  "conflicts_at_launch": [],
+  "child_pid": 41590,
+  "process_groups": [
+    41590,
+    41822
+  ],
+  "exit_code": 0,
+  "finished_at": 1789231660.933105
+}
