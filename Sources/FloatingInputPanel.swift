@@ -21,6 +21,10 @@ final class FloatingInputPanel: NSPanel {
         backgroundColor = NSColor.clear
         hasShadow = true
         isReleasedWhenClosed = false
+        contentView?.wantsLayer = true
+        contentView?.layer?.cornerRadius = 12
+        contentView?.layer?.cornerCurve = .continuous
+        contentView?.layer?.masksToBounds = true
         AppTheme.apply(to: self)
     }
 
