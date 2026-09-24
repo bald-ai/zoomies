@@ -105,6 +105,8 @@ enum ImageSafety {
         inspectData(data, limits: limits) == .safe && PNGMetadata.isPNG(data)
     }
 
+    /// Inspects a file without loading it into memory: PNG dimensions come from
+    /// the first 24 bytes, other formats from ImageIO's property lookup.
     static func inspectFile(at url: URL, limits: ImageSafetyLimits = .runtime) -> ImageFileInspection {
         guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size >= 0 else {
             return .notAnImage
@@ -112,10 +114,20 @@ enum ImageSafety {
         if size > limits.maxFileBytes {
             return .tooLarge
         }
-        guard let data = try? Data(contentsOf: url), !data.isEmpty else {
+        guard size > 0, let handle = try? FileHandle(forReadingFrom: url) else {
             return .notAnImage
         }
-        return inspectData(data, limits: limits)
+        let header = try? handle.read(upToCount: 24)
+        try? handle.close()
+        if let header, let dimensions = PNGMetadata.pixelDimensions(ofPNG: header) {
+            return inspection(width: dimensions.width, height: dimensions.height, limits: limits)
+        }
+
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, options) else {
+            return .notAnImage
+        }
+        return inspect(source: source, options: options, limits: limits)
     }
 
     static func boundedFileData(at url: URL, limits: ImageSafetyLimits = .runtime) -> Data? {
@@ -132,22 +144,30 @@ enum ImageSafety {
             return .tooLarge
         }
         if let dimensions = PNGMetadata.pixelDimensions(ofPNG: data) {
-            return isSafePixelSize(width: dimensions.width, height: dimensions.height, limits: limits)
-                ? .safe
-                : .tooLarge
+            return inspection(width: dimensions.width, height: dimensions.height, limits: limits)
         }
 
         let options = [kCGImageSourceShouldCache: false] as CFDictionary
-        guard let source = CGImageSourceCreateWithData(data as CFData, options),
-              CGImageSourceGetCount(source) > 0,
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, options) as? [CFString: Any] else {
+        guard let source = CGImageSourceCreateWithData(data as CFData, options) else {
             return .notAnImage
         }
-        guard let width = cfInt(props[kCGImagePropertyPixelWidth]),
+        return inspect(source: source, options: options, limits: limits)
+    }
+
+    private static func inspect(source: CGImageSource,
+                                options: CFDictionary,
+                                limits: ImageSafetyLimits) -> ImageFileInspection {
+        guard CGImageSourceGetCount(source) > 0,
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, options) as? [CFString: Any],
+              let width = cfInt(props[kCGImagePropertyPixelWidth]),
               let height = cfInt(props[kCGImagePropertyPixelHeight]) else {
             return .notAnImage
         }
-        return isSafePixelSize(width: width, height: height, limits: limits) ? .safe : .tooLarge
+        return inspection(width: width, height: height, limits: limits)
+    }
+
+    private static func inspection(width: Int, height: Int, limits: ImageSafetyLimits) -> ImageFileInspection {
+        isSafePixelSize(width: width, height: height, limits: limits) ? .safe : .tooLarge
     }
 
     static func loadImageIfSafe(_ data: Data, limits: ImageSafetyLimits = .runtime) -> NSImage? {

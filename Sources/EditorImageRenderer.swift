@@ -296,11 +296,52 @@ enum EditorImageRenderer {
     }
 
     static func textBounds(for item: EditorDrawing.TextItem) -> NSRect {
-        let font = NSFont.systemFont(ofSize: item.fontSize, weight: .regular)
-        let size = textContentSize(for: item.text, font: font)
+        let size = annotationTextSize(for: item.text, fontSize: item.fontSize)
         let width = max(size.width + textPadding.width * 2, 60)
         let height = max(size.height + textPadding.height * 2, 28)
         return NSRect(x: item.origin.x, y: item.origin.y, width: width, height: height)
+    }
+
+    // MARK: - Measurement caches
+
+    /// Bounds, dirty-rect checks, and hit tests re-measure the same strings on
+    /// every event, so measurements are memoized. Each cache is tied to one
+    /// fixed font family so its key only needs the size and the string; the
+    /// regular and bold caches can never collide. `NSCache` is thread-safe and
+    /// `countLimit` keeps editing many distinct strings from growing it unbounded.
+    private static func measurementCache() -> NSCache<NSString, NSValue> {
+        let cache = NSCache<NSString, NSValue>()
+        cache.countLimit = 512
+        return cache
+    }
+
+    /// Text item sizes, always measured with `systemFont(ofSize:weight: .regular)`.
+    private static let annotationTextSizeCache = measurementCache()
+    /// Marker label sizes, always measured with `markerFont(forDiameter:)` (bold).
+    private static let markerLabelSizeCache = measurementCache()
+
+    private static func measurementKey(_ size: CGFloat, _ text: String) -> NSString {
+        "\(size)\u{0}\(text)" as NSString
+    }
+
+    private static func annotationTextSize(for text: String, fontSize: CGFloat) -> NSSize {
+        let key = measurementKey(fontSize, text)
+        if let cached = annotationTextSizeCache.object(forKey: key) {
+            return cached.sizeValue
+        }
+        let size = textContentSize(for: text, font: NSFont.systemFont(ofSize: fontSize, weight: .regular))
+        annotationTextSizeCache.setObject(NSValue(size: size), forKey: key)
+        return size
+    }
+
+    private static func markerLabelSize(number: Int, diameter: CGFloat) -> NSSize {
+        let key = measurementKey(diameter, String(number))
+        if let cached = markerLabelSizeCache.object(forKey: key) {
+            return cached.sizeValue
+        }
+        let size = (String(number) as NSString).size(withAttributes: [.font: markerFont(forDiameter: diameter)])
+        markerLabelSizeCache.setObject(NSValue(size: size), forKey: key)
+        return size
     }
 
     static func textContentSize(for text: String, font: NSFont) -> NSSize {
@@ -333,8 +374,7 @@ enum EditorImageRenderer {
         guard diameter > 0, item.number > 0 else {
             return NSRect(x: item.center.x, y: item.center.y, width: 0, height: 0)
         }
-        let label = String(item.number) as NSString
-        let textSize = label.size(withAttributes: [.font: markerFont(forDiameter: diameter)])
+        let textSize = markerLabelSize(number: item.number, diameter: diameter)
         let width = max(diameter, ceil(textSize.width) + diameter * 0.4)
         return NSRect(x: item.center.x - width / 2,
                       y: item.center.y - diameter / 2,
@@ -374,7 +414,7 @@ enum EditorImageRenderer {
             .foregroundColor: content
         ]
         let label = String(item.number) as NSString
-        let textSize = label.size(withAttributes: attributes)
+        let textSize = markerLabelSize(number: item.number, diameter: item.diameter)
         let textRect = NSRect(x: rect.midX - textSize.width / 2,
                               y: rect.midY - textSize.height / 2,
                               width: textSize.width,

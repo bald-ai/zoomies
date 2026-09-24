@@ -391,4 +391,22 @@ final class EditorCanvasViewTests: XCTestCase {
             return XCTFail("Window-level Cmd+Shift+Z must send .redo")
         }
     }
+
+    func testEditableStateReusesRestoredBaseImageBytes() throws {
+        let basePNG = try TestSupport.noiseImagePNGData(width: 90, height: 60)
+        let state = EditorCanvasState(baseImagePNG: basePNG, items: [])
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 90, height: 60), initialState: state)
+
+        XCTAssertEqual(canvas.editableState()?.baseImagePNG, basePNG,
+                       "A restored base keeps its original bytes instead of being re-encoded")
+        XCTAssertEqual(canvas.editableState()?.baseImagePNG, basePNG)
+    }
+
+    func testEditableStateEncodesFreshBaseImageOnceAndStaysStable() throws {
+        let image = TestSupport.solidImage(width: 90, height: 60)
+        let canvas = EditorCanvasView(image: image)
+        let first = try XCTUnwrap(canvas.editableState()?.baseImagePNG)
+        XCTAssertEqual(first, ImageEncoding.pngData(from: image))
+        XCTAssertEqual(canvas.editableState()?.baseImagePNG, first)
+    }
 }

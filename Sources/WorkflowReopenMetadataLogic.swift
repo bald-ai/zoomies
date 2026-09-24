@@ -18,15 +18,11 @@ enum WorkflowReopenMetadataLogic {
     static func resolve(fileURL: URL,
                         initialImage: NSImage?,
                         limits: ImageSafetyLimits = .runtime) -> WorkflowReopenMetadata {
-        // Fresh capture: the in-memory image is already the clean original.
-        // Snapshot it as PNG so it can be embedded as the round-trip baseline.
-        if let initialImage {
-            return WorkflowReopenMetadata(
-                cleanOriginalPNG: ImageEncoding.pngData(from: initialImage),
-                image: nil,
-                prompt: nil,
-                editorState: nil
-            )
+        // Fresh capture: the in-memory image is already the clean original and
+        // there is nothing to recover. The caller encodes it on demand, so the
+        // capture's PNG encode stays off the path to the rename panel.
+        if initialImage != nil {
+            return WorkflowReopenMetadata()
         }
 
         switch ImageSafety.inspectFile(at: fileURL, limits: limits) {

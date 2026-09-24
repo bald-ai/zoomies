@@ -30,7 +30,13 @@ final class ScreenshotWorkflowController {
     /// PNG is reopened. For a fresh capture this is the in-memory image; for a
     /// reopened Zoomies PNG it is the original recovered from embedded metadata,
     /// so repeated re-edits never bake a note on top of an already-burned image.
-    private let cleanOriginalPNG: Data?
+    /// Encoded on first use: fresh captures only need it when a note is burned.
+    private lazy var cleanOriginalPNG: Data? =
+        recoveredCleanOriginalPNG ?? freshCaptureImage.flatMap(ImageEncoding.pngData(from:))
+    private let recoveredCleanOriginalPNG: Data?
+    /// The capture as taken, retained so `cleanOriginalPNG` can be encoded
+    /// lazily even after `initialImage` is released on persistence.
+    private let freshCaptureImage: NSImage?
     private let initialEditorState: EditorCanvasState?
 
     private var renameController: RenamePanelController?
@@ -91,7 +97,8 @@ final class ScreenshotWorkflowController {
         }
 
         let reopen = WorkflowReopenMetadataLogic.resolve(fileURL: fileURL, initialImage: initialImage)
-        self.cleanOriginalPNG = reopen.cleanOriginalPNG
+        self.recoveredCleanOriginalPNG = reopen.cleanOriginalPNG
+        self.freshCaptureImage = initialImage
         self.initialEditorState = reopen.editorState
         // Swap the burned-on-disk image for the recovered clean original and
         // pre-fill the prompt the user previously typed.

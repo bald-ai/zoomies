@@ -133,6 +133,27 @@ final class ClipboardServiceTests: XCTestCase {
         XCTAssertEqual(cached.count, 1)
     }
 
+    func testCopyImageAsFileWritesPNGAtNativePixelSize() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let cache = root.appendingPathComponent("clipboard", isDirectory: true)
+        let service = ClipboardService(fileManager: .default, cacheDirectory: cache, pasteboardWriter: { _ in true })
+
+        // Editor composites are bitmap-backed at the capture's pixel density.
+        let rep = try XCTUnwrap(NSBitmapImageRep(data: try TestSupport.noiseImagePNGData(width: 120, height: 80)))
+        rep.size = NSSize(width: 60, height: 40)
+        let image = NSImage(size: rep.size)
+        image.addRepresentation(rep)
+
+        let url = try XCTUnwrap(service.copyImageAsFile(image, fileName: "shot.jpg"))
+        XCTAssertEqual(url.pathExtension, "png")
+        let data = try Data(contentsOf: url)
+        XCTAssertTrue(PNGMetadata.isPNG(data))
+        let dims = try XCTUnwrap(PNGMetadata.pixelDimensions(ofPNG: data))
+        XCTAssertEqual(dims.width, 120)
+        XCTAssertEqual(dims.height, 80)
+    }
+
     func testCopyFileWithCacheMissingSourceReturnsFalse() throws {
         let root = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(root) }

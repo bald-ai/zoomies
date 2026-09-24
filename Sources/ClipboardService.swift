@@ -108,9 +108,7 @@ final class ClipboardService {
         let pngFileName = (fileName as NSString).deletingPathExtension + ".png"
         let cachedURL = uniqueCachedURL(for: pngFileName)
 
-        guard let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let data = bitmap.representation(using: .png, properties: [:]) else {
+        guard let data = ImageEncoding.pngData(from: image) else {
             return nil
         }
 

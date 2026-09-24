@@ -65,6 +65,8 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     var isColorPickerOpen: Bool = false
     /// Test/debug hook fired whenever the marker cursor preview is invalidated.
     var onMarkerCursorInvalidation: (() -> Void)?
+    /// Test/debug hook fired with each partial (gesture-only) invalidation rect.
+    var onPartialInvalidation: ((NSRect) -> Void)?
     private let escapeFinalAction: ScreenshotFinalAction
 
     // MARK: - Internal model
@@ -75,11 +77,19 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     private let maxUndoLevels = 30
     private let annotationStrokeWidth: CGFloat = 4.0
     private var baseImageOrigin: NSPoint = .zero
+    /// PNG encoding of `baseImage`, reused by every `editableState()` call.
+    /// Valid only while nothing mutates `baseImage` after init (no
+    /// `lockFocus`, `addRepresentation`, or size changes); `let` alone does not
+    /// make an `NSImage` immutable.
+    private var baseImagePNGCache: Data?
 
     // In-progress drawing state
     private var currentPoints: [NSPoint] = [] // for pen
     private var dragStartPoint: NSPoint?
     private var dragCurrentPoint: NSPoint?
+    /// Shift state from the latest mouse/modifier event. Preview and commit both
+    /// read this instead of the global modifier state so they always agree.
+    private var constrainShapes = false
 
     // Text editing/dragging
     private var editingTextIndex: Int?
@@ -140,6 +150,11 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         }
         self.baseImage = restored?.baseImage ?? image
         self.items = restored?.items ?? []
+        // Reuse the state's bytes only when they actually became the base
+        // image; restoring falls back to `image` if they fail to decode.
+        if let restored, restored.baseImage !== image {
+            self.baseImagePNGCache = initialState?.baseImagePNG
+        }
         let frameSize = NSSize(width: baseImage.size.width + EditorDrawing.canvasEdgeInset * 2,
                                height: baseImage.size.height + EditorDrawing.canvasEdgeInset * 2)
         let frame = NSRect(origin: .zero, size: frameSize)
@@ -324,7 +339,10 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
 
     func editableState() -> EditorCanvasState? {
         endTextEditingIfNeeded()
-        guard let basePNG = ImageEncoding.pngData(from: baseImage) else { return nil }
+        if baseImagePNGCache == nil {
+            baseImagePNGCache = ImageEncoding.pngData(from: baseImage)
+        }
+        guard let basePNG = baseImagePNGCache else { return nil }
         return EditorCanvasState(baseImagePNG: basePNG,
                                  baseImageOrigin: EditorCanvasState.Point(baseImageOrigin),
                                  items: items.compactMap { $0.stateItem })
@@ -411,66 +429,59 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
-        if baseImageBounds.intersects(dirtyRect) {
+        // Every visibility check below uses the full painted extent (strokes,
+        // outlines, shadow, antialiasing) so partial redraws never skip a
+        // decoration that reaches into the dirty rect.
+        if baseImagePaintedBounds.intersects(dirtyRect) {
             drawBaseImageEdgeSeparation(in: baseImageBounds)
             baseImage.draw(in: baseImageBounds, from: .zero, operation: .sourceOver, fraction: 1.0, respectFlipped: true, hints: nil)
         }
 
         for item in items {
-            guard let bounds = EditorImageRenderer.bounds(for: item) else { continue }
+            guard let bounds = paintedBounds(for: item) else { continue }
             if bounds.intersects(dirtyRect) {
                 EditorImageRenderer.draw(item: item)
             }
         }
 
-        if let selectionRect, selectionRect.intersects(dirtyRect) {
+        if let selectionRect, selectionOutlinePaintedRect(selectionRect).intersects(dirtyRect) {
             drawSelectionOutline(selectionRect)
         }
 
         if let selectedImageIndex,
            case let .image(_, rect) = items[selectedImageIndex],
-           rect.intersects(dirtyRect) {
+           itemSelectionOutlinePaintedRect(rect).intersects(dirtyRect) {
             drawImageSelectionOutline(rect)
         }
 
         if let selectedItemIndex,
            selectedItemIndex < items.count,
-           let rect = EditorImageRenderer.bounds(for: items[selectedItemIndex])?.insetBy(dx: -3, dy: -3),
-           rect.intersects(dirtyRect) {
+           let rect = itemSelectionOutlineBase(for: items[selectedItemIndex]),
+           itemSelectionOutlinePaintedRect(rect).intersects(dirtyRect) {
             drawItemSelectionOutline(rect)
         }
 
         if let index = selectedTextIndex, textEditor == nil {
             if case let .text(textItem) = items[index] {
-                let rect = EditorImageRenderer.textBounds(for: textItem).insetBy(dx: -2, dy: -2)
-                if rect.intersects(dirtyRect) {
-                    let path = NSBezierPath(rect: rect)
-                    let dash: [CGFloat] = [4, 3]
-                    path.setLineDash(dash, count: dash.count, phase: 0)
-                    NSColor.white.withAlphaComponent(0.8).setStroke()
-                    path.lineWidth = 1
-                    path.stroke()
+                let rect = textSelectionOutlineRect(for: textItem)
+                if outlinePaintedRect(rect, lineWidth: 1).intersects(dirtyRect) {
+                    drawDashedSelectionOutline(rect)
                 }
             }
         }
 
         if let index = selectedMarkerIndex, textEditor == nil, index < items.count {
             if case let .marker(markerItem) = items[index] {
-                let rect = EditorImageRenderer.markerBounds(for: markerItem).insetBy(dx: -2, dy: -2)
-                if rect.intersects(dirtyRect) {
-                    let path = NSBezierPath(rect: rect)
-                    let dash: [CGFloat] = [4, 3]
-                    path.setLineDash(dash, count: dash.count, phase: 0)
-                    NSColor.white.withAlphaComponent(0.8).setStroke()
-                    path.lineWidth = 1
-                    path.stroke()
+                let rect = markerSelectionOutlineRect(for: markerItem)
+                if outlinePaintedRect(rect, lineWidth: 1).intersects(dirtyRect) {
+                    drawDashedSelectionOutline(rect)
                 }
             }
         }
 
         // In-progress shapes
         if let start = dragStartPoint, let current = dragCurrentPoint {
-            let shiftHeld = NSEvent.modifierFlags.contains(.shift)
+            let shiftHeld = constrainShapes
             switch currentTool {
             case .pen:
                 EditorImageRenderer.drawPen(points: currentPoints, color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
@@ -499,6 +510,9 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         }
     }
 
+    private static let baseImageShadowBlur: CGFloat = 3
+    private static let baseImageShadowOffset: CGFloat = 1
+
     /// Keep screenshot edges visible against both light and dark native backgrounds.
     private func drawBaseImageEdgeSeparation(in rect: NSRect) {
         guard rect.width >= 1, rect.height >= 1 else { return }
@@ -507,8 +521,8 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         NSGraphicsContext.saveGraphicsState()
         let shadow = NSShadow()
         shadow.shadowColor = NSColor.black.withAlphaComponent(0.12)
-        shadow.shadowBlurRadius = 3
-        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.shadowBlurRadius = Self.baseImageShadowBlur
+        shadow.shadowOffset = NSSize(width: 0, height: -Self.baseImageShadowOffset)
         shadow.set()
 
         let path = NSBezierPath(rect: borderRect)
@@ -548,6 +562,139 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         NSColor.systemOrange.withAlphaComponent(0.95).setStroke()
         path.lineWidth = 2
         path.stroke()
+    }
+
+    /// Dashed outline around a selected text item or marker.
+    private func drawDashedSelectionOutline(_ rect: NSRect) {
+        let path = NSBezierPath(rect: rect)
+        let dash: [CGFloat] = [4, 3]
+        path.setLineDash(dash, count: dash.count, phase: 0)
+        NSColor.white.withAlphaComponent(0.8).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+
+    /// Rect passed to `drawItemSelectionOutline` for a selected non-image item.
+    private func itemSelectionOutlineBase(for item: EditorDrawing.Item) -> NSRect? {
+        EditorImageRenderer.bounds(for: item)?.insetBy(dx: -3, dy: -3)
+    }
+
+    private func textSelectionOutlineRect(for item: EditorDrawing.TextItem) -> NSRect {
+        EditorImageRenderer.textBounds(for: item).insetBy(dx: -2, dy: -2)
+    }
+
+    private func markerSelectionOutlineRect(for item: EditorDrawing.MarkerItem) -> NSRect {
+        EditorImageRenderer.markerBounds(for: item).insetBy(dx: -2, dy: -2)
+    }
+
+    // MARK: - Painted bounds & partial invalidation
+
+    /// Device pixels per canvas unit: live magnification times backing scale.
+    private var deviceScale: CGFloat {
+        let scale = canvasToScreenScale * (window?.backingScaleFactor ?? 1)
+        return (scale.isFinite && scale > 0) ? scale : 1
+    }
+
+    /// Grows `rect` by one device pixel of antialiasing and rounds it out to
+    /// the device-pixel grid, so the margin stays correct at any zoom level.
+    private func deviceAligned(_ rect: NSRect) -> NSRect {
+        let scale = deviceScale
+        let padded = rect.insetBy(dx: -1 / scale, dy: -1 / scale)
+        let minX = floor(padded.minX * scale) / scale
+        let minY = floor(padded.minY * scale) / scale
+        let maxX = ceil(padded.maxX * scale) / scale
+        let maxY = ceil(padded.maxY * scale) / scale
+        return NSRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    /// Area touched by stroking `rect` with a line of `lineWidth`.
+    private func outlinePaintedRect(_ rect: NSRect, lineWidth: CGFloat) -> NSRect {
+        deviceAligned(rect.insetBy(dx: -lineWidth / 2, dy: -lineWidth / 2))
+    }
+
+    private func selectionOutlinePaintedRect(_ rect: NSRect) -> NSRect {
+        outlinePaintedRect(rect, lineWidth: 2)
+    }
+
+    /// Area painted by `drawItemSelectionOutline(rect)`.
+    private func itemSelectionOutlinePaintedRect(_ rect: NSRect) -> NSRect {
+        outlinePaintedRect(rect.insetBy(dx: -2, dy: -2), lineWidth: 2)
+    }
+
+    /// Base image plus its 1pt border and drop shadow. Shadow blur and offset
+    /// are applied in screen space, so their reach in canvas units grows as the
+    /// canvas is zoomed out. Twice the blur radius covers the Gaussian tail.
+    private var baseImagePaintedBounds: NSRect {
+        let shadowReach = (2 * Self.baseImageShadowBlur + Self.baseImageShadowOffset) / canvasToScreenScale
+        let reach = 1 + shadowReach
+        return deviceAligned(baseImageBounds.insetBy(dx: -reach, dy: -reach))
+    }
+
+    private func paintedBounds(for item: EditorDrawing.Item) -> NSRect? {
+        EditorImageRenderer.bounds(for: item).map(deviceAligned)
+    }
+
+    /// Painted area of an item plus whichever selection outline is drawn for it.
+    private func paintedBoundsIncludingSelection(ofItemAt index: Int) -> NSRect? {
+        guard items.indices.contains(index) else { return nil }
+        let item = items[index]
+        var rects = [paintedBounds(for: item)].compactMap { $0 }
+        if index == selectedImageIndex, case let .image(_, rect) = item {
+            rects.append(itemSelectionOutlinePaintedRect(rect))
+        }
+        if index == selectedItemIndex, let base = itemSelectionOutlineBase(for: item) {
+            rects.append(itemSelectionOutlinePaintedRect(base))
+        }
+        if textEditor == nil, index == selectedTextIndex, case let .text(textItem) = item {
+            rects.append(outlinePaintedRect(textSelectionOutlineRect(for: textItem), lineWidth: 1))
+        }
+        if textEditor == nil, index == selectedMarkerIndex, case let .marker(markerItem) = item {
+            rects.append(outlinePaintedRect(markerSelectionOutlineRect(for: markerItem), lineWidth: 1))
+        }
+        return rects.dropFirst().reduce(rects.first) { $0?.union($1) }
+    }
+
+    /// Canvas region the in-flight drag gesture currently paints, or nil when
+    /// no drag gesture is active.
+    private func activeGestureDirtyRect() -> NSRect? {
+        if let start = selectionDragStart, let current = selectionDragCurrent {
+            return selectionOutlinePaintedRect(normalizedRect(from: start, to: current))
+        }
+        if let index = draggingImageIndex ?? draggingItemIndex ?? draggingTextIndex ?? draggingMarkerIndex {
+            return paintedBoundsIncludingSelection(ofItemAt: index)
+        }
+        guard let start = dragStartPoint, let current = dragCurrentPoint else { return nil }
+        let halfWidth = annotationStrokeWidth / 2
+        let rect: NSRect?
+        switch currentTool {
+        case .pen:
+            // Appending a point only reshapes the smoothed curve across the
+            // last three points; earlier segments are geometrically unchanged.
+            // CoreGraphics may re-rasterize them by at most one level (of 255),
+            // which the full redraw on mouse-up clears.
+            rect = EditorImageRenderer.boundsForPoints(Array(currentPoints.suffix(3)), padding: halfWidth)
+        case .line:
+            rect = EditorImageRenderer.boundsForPoints([start, current], padding: halfWidth)
+        case .arrow:
+            rect = EditorImageRenderer.boundsForArrow(start: start, end: current, lineWidth: annotationStrokeWidth)
+        case .rectangle, .ellipse:
+            // Cover both the free and Shift-constrained preview so a modifier
+            // change between events can never strand the other shape.
+            rect = normalizedRect(from: start, to: current)
+                .union(normalizedRect(from: start, to: current, constrain: true))
+                .insetBy(dx: -halfWidth, dy: -halfWidth)
+        case .text, .marker, .selection:
+            rect = nil
+        }
+        return rect.map(deviceAligned)
+    }
+
+    /// Invalidates what the gesture painted before (`before`) and paints now.
+    private func invalidateGesture(from before: NSRect?) {
+        let after = activeGestureDirtyRect()
+        guard let dirty = [before, after].compactMap({ $0 }).reduce(nil, { $0?.union($1) ?? $1 }) else { return }
+        setNeedsDisplay(dirty)
+        onPartialInvalidation?(dirty)
     }
 
     private var defaultTextFontSize: CGFloat {
@@ -772,6 +919,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         lastMousePoint = point
+        constrainShapes = event.modifierFlags.contains(.shift)
 
         if currentTool == .selection {
             selectedTextIndex = nil
@@ -931,6 +1079,11 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         lastMousePoint = point
+        // Only the gesture's before/after footprint changes during a drag.
+        // `defer` covers every early return below.
+        let paintedBeforeDrag = activeGestureDirtyRect()
+        defer { invalidateGesture(from: paintedBeforeDrag) }
+        constrainShapes = event.modifierFlags.contains(.shift)
 
         if currentTool == .selection {
             if let index = draggingImageIndex {
@@ -942,7 +1095,6 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
                     let newOrigin = NSPoint(x: point.x - imageDragOffset.x, y: point.y - imageDragOffset.y)
                     let newRect = NSRect(origin: newOrigin, size: oldRect.size)
                     items[index] = .image(image: image, rect: newRect)
-                    needsDisplay = true
                 }
                 return
             }
@@ -953,12 +1105,10 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
                 }
                 moveItem(at: index, byX: point.x - lastPoint.x, byY: point.y - lastPoint.y)
                 lastItemDragPoint = point
-                needsDisplay = true
                 return
             }
             guard selectionDragStart != nil else { return }
             selectionDragCurrent = point
-            needsDisplay = true
             return
         }
 
@@ -972,7 +1122,6 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
                 }
                 item.origin = newOrigin
                 items[index] = .text(item)
-                needsDisplay = true
             }
             return
         }
@@ -987,7 +1136,6 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
                 }
                 item.center = newCenter
                 items[index] = .marker(item)
-                needsDisplay = true
             }
             return
         }
@@ -999,20 +1147,21 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         if currentTool == .pen {
             currentPoints.append(point)
         }
-
-        needsDisplay = true
     }
 
     override func flagsChanged(with event: NSEvent) {
         super.flagsChanged(with: event)
+        let paintedBefore = activeGestureDirtyRect()
+        constrainShapes = event.modifierFlags.contains(.shift)
         if dragStartPoint != nil && (currentTool == .rectangle || currentTool == .ellipse) {
-            needsDisplay = true
+            invalidateGesture(from: paintedBefore)
         }
     }
 
     override func mouseUp(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         lastMousePoint = point
+        constrainShapes = event.modifierFlags.contains(.shift)
 
         if currentTool == .selection {
             if draggingImageIndex != nil {
@@ -1087,16 +1236,14 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
                 updateCanvasSizeIfNeeded()
             }
         case .rectangle:
-            let shiftHeld = event.modifierFlags.contains(.shift)
-            let rect = normalizedRect(from: start, to: point, constrain: shiftHeld)
+            let rect = normalizedRect(from: start, to: point, constrain: constrainShapes)
             if rect.width >= 2, rect.height >= 2 {
                 pushUndoSnapshot()
                 items.append(.rect(rect: rect, color: currentColor, lineWidth: annotationStrokeWidth))
                 updateCanvasSizeIfNeeded()
             }
         case .ellipse:
-            let shiftHeld = event.modifierFlags.contains(.shift)
-            let rect = normalizedRect(from: start, to: point, constrain: shiftHeld)
+            let rect = normalizedRect(from: start, to: point, constrain: constrainShapes)
             if rect.width >= 2, rect.height >= 2 {
                 pushUndoSnapshot()
                 items.append(.ellipse(rect: rect, color: currentColor, lineWidth: annotationStrokeWidth))
@@ -1772,21 +1919,44 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         return NSSize(width: canvasBounds.width * scale, height: canvasBounds.height * scale)
     }
 
-    private func markerPreviewCursor() -> NSCursor {
+    /// Everything the rendered marker cursor depends on.
+    private struct MarkerCursorKey: Equatable {
+        let number: Int
+        let color: NSColor
+        let diameter: CGFloat
+        let magnification: CGFloat
+        let backing: CGFloat
+    }
+
+    /// Last rendered marker cursor. Cursor rects are reset on every scroll and
+    /// zoom step, so reuse the bitmap while its inputs are unchanged.
+    private var markerCursorCache: (key: MarkerCursorKey, cursor: NSCursor)?
+
+    /// Internal for tests.
+    func markerPreviewCursor() -> NSCursor {
         let screenSize = markerPreviewScreenSize()
         guard screenSize.width >= 1, screenSize.height >= 1 else { return .crosshair }
 
-        var badge = EditorDrawing.MarkerItem(number: nextMarkerNumber ?? EditorDrawing.MarkerItem.maxNumber,
+        let backing = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let key = MarkerCursorKey(number: nextMarkerNumber ?? EditorDrawing.MarkerItem.maxNumber,
+                                  color: currentColor,
+                                  diameter: defaultMarkerDiameter,
+                                  magnification: canvasToScreenScale,
+                                  backing: backing)
+        if let cached = markerCursorCache, cached.key == key {
+            return cached.cursor
+        }
+
+        var badge = EditorDrawing.MarkerItem(number: key.number,
                                                center: .zero,
-                                               color: currentColor,
-                                               diameter: defaultMarkerDiameter)
+                                               color: key.color,
+                                               diameter: key.diameter)
         let canvasBounds = EditorImageRenderer.markerBounds(for: badge)
         badge.center = NSPoint(x: canvasBounds.width / 2, y: canvasBounds.height / 2)
 
         // Render the exact placed-marker geometry, scaled by the live
         // magnification, into a bitmap at the display's backing factor so the
         // cursor is Retina-sharp and the outline/width ratios are identical.
-        let backing = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         let pixelW = max(1, Int((screenSize.width * backing).rounded()))
         let pixelH = max(1, Int((screenSize.height * backing).rounded()))
         let image = NSImage(size: screenSize)
@@ -1809,8 +1979,10 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             EditorImageRenderer.drawMarker(badge)
             NSGraphicsContext.restoreGraphicsState()
         }
-        return NSCursor(image: image,
-                        hotSpot: NSPoint(x: screenSize.width / 2, y: screenSize.height / 2))
+        let cursor = NSCursor(image: image,
+                              hotSpot: NSPoint(x: screenSize.width / 2, y: screenSize.height / 2))
+        markerCursorCache = (key, cursor)
+        return cursor
     }
 
     private func invalidateMarkerCursorPreview() {

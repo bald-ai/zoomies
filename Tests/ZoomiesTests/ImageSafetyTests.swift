@@ -47,6 +47,34 @@ final class ImageSafetyTests: XCTestCase {
         XCTAssertNil(resolved.editorState)
     }
 
+    func testInspectFileHandlesNonPNGEmptyAndTruncatedFilesFromTheHeader() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let jpegURL = root.appendingPathComponent("photo.jpg")
+        try TestSupport.solidImageJPEGData(width: 40, height: 30).write(to: jpegURL)
+        XCTAssertEqual(ImageSafety.inspectFile(at: jpegURL), .safe, "Non-PNG images go through ImageIO")
+        var tinyLimits = ImageSafetyLimits.runtime
+        tinyLimits.maxDimension = 10
+        XCTAssertEqual(ImageSafety.inspectFile(at: jpegURL, limits: tinyLimits), .tooLarge)
+
+        let emptyURL = root.appendingPathComponent("empty.png")
+        try Data().write(to: emptyURL)
+        XCTAssertEqual(ImageSafety.inspectFile(at: emptyURL), .notAnImage)
+
+        let png = try TestSupport.solidImagePNGData(width: 20, height: 10)
+        let truncatedURL = root.appendingPathComponent("truncated.png")
+        try png.prefix(20).write(to: truncatedURL)
+        XCTAssertEqual(ImageSafety.inspectFile(at: truncatedURL), .notAnImage)
+
+        let pngURL = root.appendingPathComponent("ok.png")
+        try png.write(to: pngURL)
+        XCTAssertEqual(ImageSafety.inspectFile(at: pngURL), .safe)
+        XCTAssertEqual(ImageSafety.boundedFileData(at: pngURL), png)
+
+        XCTAssertEqual(ImageSafety.inspectFile(at: root.appendingPathComponent("missing.png")), .notAnImage)
+    }
+
     func testUnsafeOuterStubPNGIsReportedRatherThanOpened() throws {
         let root = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(root) }

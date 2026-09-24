@@ -170,6 +170,39 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
         XCTAssertEqual(reopenWorkflow.pendingNoteText, "round trip me")
     }
 
+    func testFreshCaptureEncodesCleanOriginalOnlyWhenANoteIsBurned() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+
+        let fileURL = root.appendingPathComponent("fresh-shot.png")
+        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+        let initialImage = TestSupport.solidImage(width: 80, height: 40, color: .systemBlue)
+        XCTAssertNil(WorkflowReopenMetadataLogic.resolve(fileURL: fileURL, initialImage: initialImage).cleanOriginalPNG,
+                     "Fresh captures must not be PNG-encoded up front")
+
+        let persistence = Task<URL, Error> {
+            try XCTUnwrap(ImageEncoding.pngData(from: initialImage)).write(to: fileURL)
+            return fileURL
+        }
+        let workflow = try makeWorkflow(root: root,
+                                        fileURL: fileURL,
+                                        clipboardDirectory: clipboardDirectory,
+                                        initialImage: initialImage,
+                                        initialFilePersistence: persistence,
+                                        writeOriginalFile: false)
+        let finished = expectation(description: "workflow finished")
+        workflow.onFinish = { finished.fulfill() }
+        workflow.pendingNoteText = "lazy baseline"
+        workflow.handleRenameAction(.save(newName: fileURL.lastPathComponent))
+        wait(for: [finished], timeout: 3.0)
+
+        // The capture was released from `initialImage` once persisted, yet the
+        // lazily encoded clean original still round-trips.
+        let extracted = try XCTUnwrap(PNGMetadata.extract(fromPNG: try Data(contentsOf: fileURL)))
+        XCTAssertEqual(extracted.prompt, "lazy baseline")
+        XCTAssertEqual(extracted.originalPNG, ImageEncoding.pngData(from: initialImage))
+    }
+
     func testResavePreservesOriginalOriginalNotOnceBurnedImage() throws {
         let root = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(root) }

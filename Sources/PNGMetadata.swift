@@ -1,4 +1,5 @@
 import Foundation
+import zlib
 
 /// Embeds and extracts Zoomies round-trip metadata in PNG text chunks so a
 /// saved screenshot can carry its clean (pre-note) original plus the prompt
@@ -18,6 +19,8 @@ enum PNGMetadata {
     static let editorStateKeyword = "Zoomies-EditorState-v1"
 
     private static let signature: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+    private static let iTXtType = Array("iTXt".utf8)
+    private static let zoomiesKeywords = [originalPNGKeyword, promptKeyword, editorStateKeyword]
 
     /// Inserts the original PNG bytes and prompt as `iTXt` chunks just before
     /// `IEND`. Returns nil if either input is not a PNG, or the input PNG is
@@ -30,12 +33,17 @@ enum PNGMetadata {
         guard hasPNGSignature(bytes), isPNG(originalPNG) else { return nil }
         guard let iendStart = indexOfChunk(named: "IEND", in: bytes) else { return nil }
 
+        let originalChunk = makeITXtChunk(keyword: originalPNGKeyword, text: originalPNG.base64EncodedData())
+        let promptChunk = makeITXtChunk(keyword: promptKeyword, text: Data(prompt.utf8))
+        let editorStateChunk = encodeEditorState(editorState).map { makeITXtChunk(keyword: editorStateKeyword, text: $0) }
+
         var result = Data()
+        result.reserveCapacity(bytes.count + originalChunk.count + promptChunk.count + (editorStateChunk?.count ?? 0))
         result.append(stripZoomiesChunks(from: bytes[0..<iendStart]))
-        result.append(makeITXtChunk(keyword: originalPNGKeyword, text: originalPNG.base64EncodedString()))
-        result.append(makeITXtChunk(keyword: promptKeyword, text: prompt))
-        if let editorStateText = encodeEditorState(editorState) {
-            result.append(makeITXtChunk(keyword: editorStateKeyword, text: editorStateText))
+        result.append(originalChunk)
+        result.append(promptChunk)
+        if let editorStateChunk {
+            result.append(editorStateChunk)
         }
         result.append(contentsOf: bytes[iendStart...])
         return result
@@ -47,9 +55,11 @@ enum PNGMetadata {
         guard let iendStart = indexOfChunk(named: "IEND", in: bytes),
               let editorStateText = encodeEditorState(editorState) else { return nil }
 
+        let editorStateChunk = makeITXtChunk(keyword: editorStateKeyword, text: editorStateText)
         var result = Data()
+        result.reserveCapacity(bytes.count + editorStateChunk.count)
         result.append(stripZoomiesChunks(from: bytes[0..<iendStart]))
-        result.append(makeITXtChunk(keyword: editorStateKeyword, text: editorStateText))
+        result.append(editorStateChunk)
         result.append(contentsOf: bytes[iendStart...])
         return result
     }
@@ -78,7 +88,7 @@ enum PNGMetadata {
                     if len > limits.maxOriginalPNGChunkBytes {
                         return nil
                     }
-                    if let (_, text) = parseITXt(Array(bytes[dataStart..<dataStart + len])),
+                    if let text = parseITXt(bytes[dataStart..<dataStart + len]),
                        let decoded = Data(base64Encoded: text),
                        ImageSafety.isSafePNG(decoded, limits: limits),
                        decoded.count <= limits.maxEmbeddedImageBytes {
@@ -90,7 +100,7 @@ enum PNGMetadata {
                     if len > limits.maxPromptChunkBytes {
                         return nil
                     }
-                    if let (_, text) = parseITXt(Array(bytes[dataStart..<dataStart + len])),
+                    if let text = parseITXt(bytes[dataStart..<dataStart + len]),
                        text.count <= limits.maxPromptLength {
                         prompt = text
                     } else {
@@ -126,7 +136,7 @@ enum PNGMetadata {
                 if len > limits.maxEditorStateChunkBytes {
                     return nil
                 }
-                if let (_, text) = parseITXt(Array(bytes[dataStart..<dataStart + len])) {
+                if let text = parseITXt(bytes[dataStart..<dataStart + len]) {
                     editorState = decodeEditorState(text, limits: limits)
                 }
             }
@@ -144,22 +154,24 @@ enum PNGMetadata {
 
     // MARK: - Chunk building
 
-    private static func makeITXtChunk(keyword: String, text: String) -> Data {
+    /// `text` must already be UTF-8 bytes (base64 and JSON output both are).
+    private static func makeITXtChunk(keyword: String, text: Data) -> Data {
         var payload = Data()
-        payload.append(contentsOf: Array(keyword.utf8))
+        payload.reserveCapacity(keyword.utf8.count + 5 + text.count)
+        payload.append(contentsOf: keyword.utf8)
         payload.append(0x00) // keyword null separator
         payload.append(0x00) // compression flag: uncompressed
         payload.append(0x00) // compression method
         payload.append(0x00) // empty language tag, terminated
         payload.append(0x00) // empty translated keyword, terminated
-        payload.append(contentsOf: Array(text.utf8))
+        payload.append(text)
         return assembleChunk(type: "iTXt", payload: payload)
     }
 
-    private static func encodeEditorState(_ editorState: EditorCanvasState?) -> String? {
-        guard let editorState,
-              let data = try? JSONEncoder().encode(editorState) else { return nil }
-        return String(data: data, encoding: .utf8)
+    /// JSON-encoded state; `JSONEncoder` always produces UTF-8.
+    private static func encodeEditorState(_ editorState: EditorCanvasState?) -> Data? {
+        guard let editorState else { return nil }
+        return try? JSONEncoder().encode(editorState)
     }
 
     private static func decodeEditorState(_ text: String,
@@ -174,7 +186,8 @@ enum PNGMetadata {
 
     /// Reads width/height from the IHDR chunk without allocating a bitmap.
     static func pixelDimensions(ofPNG data: Data) -> (width: Int, height: Int)? {
-        let bytes = [UInt8](data)
+        // Signature + IHDR length/type + width/height fit in the first 24 bytes.
+        let bytes = [UInt8](data.prefix(24))
         guard hasPNGSignature(bytes), bytes.count >= 24 else { return nil }
         let type = String(bytes: bytes[12..<16], encoding: .ascii)
         guard type == "IHDR",
@@ -207,52 +220,59 @@ enum PNGMetadata {
         return png
     }
 
-    private static func isKeyword(_ keyword: String, in bytes: [UInt8], dataStart: Int, length: Int) -> Bool {
-        let keywordBytes = Array(keyword.utf8)
-        guard length > keywordBytes.count, dataStart + keywordBytes.count < bytes.count else { return false }
-        if Array(bytes[dataStart..<(dataStart + keywordBytes.count)]) != keywordBytes {
-            return false
-        }
-        return bytes[dataStart + keywordBytes.count] == 0
+    /// Indexes are absolute positions in `bytes`, so slices work unchanged.
+    private static func isKeyword<Bytes: RandomAccessCollection>(_ keyword: String,
+                                                                 in bytes: Bytes,
+                                                                 dataStart: Int,
+                                                                 length: Int) -> Bool
+        where Bytes.Element == UInt8, Bytes.Index == Int {
+        let keywordBytes = keyword.utf8
+        let keywordEnd = dataStart + keywordBytes.count
+        guard length > keywordBytes.count,
+              dataStart >= bytes.startIndex,
+              keywordEnd < bytes.endIndex else { return false }
+        return bytes[dataStart..<keywordEnd].elementsEqual(keywordBytes) && bytes[keywordEnd] == 0
     }
 
     private static func assembleChunk(type: String, payload: Data) -> Data {
-        var typeAndPayload = Data(type.utf8)
-        typeAndPayload.append(payload)
-
         var chunk = Data()
+        chunk.reserveCapacity(payload.count + 12)
         chunk.append(contentsOf: bigEndianBytes(UInt32(payload.count)))
-        chunk.append(typeAndPayload)
-        chunk.append(contentsOf: bigEndianBytes(crc32(typeAndPayload)))
+        chunk.append(contentsOf: type.utf8)
+        chunk.append(payload)
+        // The CRC covers the chunk type and payload, not the length.
+        let crc = crc32(chunk[(chunk.startIndex + 4)...])
+        chunk.append(contentsOf: bigEndianBytes(crc))
         return chunk
     }
 
     // MARK: - Chunk parsing
 
-    /// Parses an uncompressed `iTXt` chunk payload into its keyword and text.
-    private static func parseITXt(_ data: [UInt8]) -> (keyword: String, text: String)? {
+    /// Parses an uncompressed `iTXt` chunk payload and returns its text.
+    /// Accepts a slice with any start index; returns nil for compressed,
+    /// empty, or truncated payloads.
+    static func parseITXt(_ data: ArraySlice<UInt8>) -> String? {
         guard let keywordNull = data.firstIndex(of: 0x00),
-              let keyword = String(bytes: data[0..<keywordNull], encoding: .utf8) else {
+              String(bytes: data[data.startIndex..<keywordNull], encoding: .utf8) != nil else {
             return nil
         }
 
         var cursor = keywordNull + 1
-        guard cursor + 2 <= data.count else { return nil }
+        guard cursor + 2 <= data.endIndex else { return nil }
         let compressionFlag = data[cursor]
         cursor += 2 // skip compression flag + method
         guard compressionFlag == 0 else { return nil } // we only write uncompressed
 
-        guard let languageNull = data[cursor...].firstIndex(of: 0x00) else { return nil }
+        guard let languageNull = data[cursor..<data.endIndex].firstIndex(of: 0x00) else { return nil }
         cursor = languageNull + 1
-        guard let translatedNull = data[cursor...].firstIndex(of: 0x00) else { return nil }
+        guard let translatedNull = data[cursor..<data.endIndex].firstIndex(of: 0x00) else { return nil }
         cursor = translatedNull + 1
 
-        guard let text = String(bytes: data[cursor...], encoding: .utf8) else { return nil }
-        return (keyword, text)
+        return String(bytes: data[cursor..<data.endIndex], encoding: .utf8)
     }
 
     private static func indexOfChunk(named name: String, in bytes: [UInt8]) -> Int? {
-        let nameBytes = Array(name.utf8)
+        let nameBytes = name.utf8
         var index = 8
         while index + 8 <= bytes.count {
             guard let length = readUInt32(bytes, at: index) else { return nil }
@@ -260,7 +280,7 @@ enum PNGMetadata {
             let dataStart = typeStart + 4
             let len = Int(length)
             guard dataStart + len + 4 <= bytes.count else { return nil }
-            if Array(bytes[typeStart..<dataStart]) == nameBytes {
+            if bytes[typeStart..<dataStart].elementsEqual(nameBytes) {
                 return index
             }
             index = dataStart + len + 4
@@ -268,29 +288,27 @@ enum PNGMetadata {
         return nil
     }
 
+    /// Drops every `iTXt` chunk whose keyword is a Zoomies keyword. Matching is
+    /// on the keyword alone, so compressed or malformed Zoomies chunks are
+    /// stripped too rather than left behind next to the fresh ones.
     private static func stripZoomiesChunks(from bytes: ArraySlice<UInt8>) -> Data {
         guard bytes.count >= 8 else { return Data(bytes) }
 
         var result = Data()
+        result.reserveCapacity(bytes.count)
         result.append(contentsOf: bytes.prefix(8))
 
         var index = bytes.startIndex + 8
         while index + 8 <= bytes.endIndex {
-            guard let length = readUInt32(Array(bytes), at: index - bytes.startIndex) else { break }
+            guard let length = readUInt32(bytes, at: index) else { break }
             let typeStart = index + 4
             let dataStart = typeStart + 4
             let len = Int(length)
             let chunkEnd = dataStart + len + 4
             guard chunkEnd <= bytes.endIndex else { break }
 
-            let type = String(bytes: bytes[typeStart..<dataStart], encoding: .ascii) ?? ""
-            var shouldSkip = false
-            if type == "iTXt",
-               let (keyword, _) = parseITXt(Array(bytes[dataStart..<dataStart + len])) {
-                shouldSkip = keyword == originalPNGKeyword
-                    || keyword == promptKeyword
-                    || keyword == editorStateKeyword
-            }
+            let shouldSkip = bytes[typeStart..<dataStart].elementsEqual(iTXtType)
+                && zoomiesKeywords.contains { isKeyword($0, in: bytes, dataStart: dataStart, length: len) }
 
             if !shouldSkip {
                 result.append(contentsOf: bytes[index..<chunkEnd])
@@ -307,8 +325,10 @@ enum PNGMetadata {
         bytes.count >= 8 && Array(bytes[0..<8]) == signature
     }
 
-    private static func readUInt32(_ bytes: [UInt8], at index: Int) -> UInt32? {
-        guard index + 4 <= bytes.count else { return nil }
+    /// Big-endian read at an absolute index; works on arrays and slices.
+    private static func readUInt32<Bytes: RandomAccessCollection>(_ bytes: Bytes, at index: Int) -> UInt32?
+        where Bytes.Element == UInt8, Bytes.Index == Int {
+        guard index >= bytes.startIndex, index + 4 <= bytes.endIndex else { return nil }
         return (UInt32(bytes[index]) << 24)
             | (UInt32(bytes[index + 1]) << 16)
             | (UInt32(bytes[index + 2]) << 8)
@@ -319,19 +339,9 @@ enum PNGMetadata {
         [UInt8(value >> 24 & 0xFF), UInt8(value >> 16 & 0xFF), UInt8(value >> 8 & 0xFF), UInt8(value & 0xFF)]
     }
 
-    private static let crcTable: [UInt32] = (0..<256).map { index -> UInt32 in
-        var c = UInt32(index)
-        for _ in 0..<8 {
-            c = (c & 1) != 0 ? (0xEDB8_8320 ^ (c >> 1)) : (c >> 1)
-        }
-        return c
-    }
-
     private static func crc32(_ data: Data) -> UInt32 {
-        var crc: UInt32 = 0xFFFF_FFFF
-        for byte in data {
-            crc = crcTable[Int((crc ^ UInt32(byte)) & 0xFF)] ^ (crc >> 8)
+        data.withUnsafeBytes { buffer in
+            UInt32(zlib.crc32(0, buffer.bindMemory(to: Bytef.self).baseAddress, uInt(buffer.count)))
         }
-        return crc ^ 0xFFFF_FFFF
     }
 }

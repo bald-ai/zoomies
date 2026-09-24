@@ -50,6 +50,26 @@ enum TestSupport {
         return data
     }
 
+    /// Deterministic noisy PNG. Noise barely compresses, so ImageIO splits the
+    /// pixel data across many IDAT chunks, like a real screenshot.
+    static func noiseImagePNGData(width: Int, height: Int) throws -> Data {
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+                                         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let pixels = rep.bitmapData else {
+            throw NSError(domain: "TestSupport", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to allocate noise bitmap"])
+        }
+        var seed: UInt32 = 0x2545_F491
+        for index in 0..<(rep.bytesPerRow * height) {
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            pixels[index] = UInt8(truncatingIfNeeded: seed >> 24)
+        }
+        guard let data = rep.representation(using: .png, properties: [:]) else {
+            throw NSError(domain: "TestSupport", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to encode noise PNG"])
+        }
+        return data
+    }
+
     static func writeSolidImagePNG(to url: URL,
                                    width: CGFloat = 100,
                                    height: CGFloat = 60,
