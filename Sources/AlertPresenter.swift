@@ -25,6 +25,8 @@ enum AlertPresenter {
             }
         }
         appActivator()
+        // Workflow confirmations should appear immediately, without the system's zoom animation.
+        alert.window.animationBehavior = .none
         alert.window.level = .modalPanel
         alert.window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .transient]
         return modalRunner(alert)
