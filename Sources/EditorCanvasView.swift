@@ -26,7 +26,7 @@ enum EditorTool: Hashable {
 final class EditorCanvasView: NSView, NSTextViewDelegate {
     // MARK: - Commands sent back to the controller
 
-    enum KeyCommand {
+    enum KeyCommand: Equatable {
         case finalAction(ScreenshotFinalAction)
         case zoomIn
         case zoomOut
@@ -104,14 +104,11 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     private var editingWasNewItem = false
     private var isCommittingText = false
     private var isCancellingText = false
-    // Marker selection/dragging/editing. `editingMarkerIndex` reuses the same
-    // inline text editor as text items; when set, commit/cancel edit the
-    // marker's number instead of a text item's content.
+    // Marker selection and dragging. Numbers are assigned on placement.
     private var selectedMarkerIndex: Int?
     private var draggingMarkerIndex: Int?
     private var markerDragOffset: NSPoint = .zero
     private var didPushUndoForMarkerDrag = false
-    private var editingMarkerIndex: Int?
     // Rectangle selection state.
     private var selectionRect: NSRect?
     private var selectionDragStart: NSPoint?
@@ -216,14 +213,9 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             draggingMarkerIndex = nil
             didPushUndoForMarkerDrag = false
         }
-        // Commit inline editing only on a real tool change: the editor is owned
-        // by whichever tool spawned it (text or marker), and re-selecting that
-        // same tool must not tear down an in-progress edit.
-        if textEditor != nil {
-            let editingTool: EditorTool = editingMarkerIndex != nil ? .marker : .text
-            if tool != editingTool {
-                endTextEditingIfNeeded()
-            }
+        // Re-selecting Text keeps its inline editor; changing tools commits it.
+        if textEditor != nil, tool != .text {
+            endTextEditingIfNeeded()
         }
         if tool != .selection {
             clearSelectionState()
@@ -444,16 +436,30 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             }
         }
 
+        drawSelectionOverlays(in: dirtyRect)
+        drawGesturePreview()
+    }
+
+    private func drawSelectionOverlays(in dirtyRect: NSRect) {
         if let selectionRect, selectionOutlinePaintedRect(selectionRect).intersects(dirtyRect) {
             drawSelectionOutline(selectionRect)
         }
+        drawSelectedImageOutline(in: dirtyRect)
+        drawSelectedItemOutline(in: dirtyRect)
+        drawSelectedTextOutline(in: dirtyRect)
+        drawSelectedMarkerOutline(in: dirtyRect)
+    }
 
+    private func drawSelectedImageOutline(in dirtyRect: NSRect) {
         if let selectedImageIndex,
            case let .image(_, rect) = items[selectedImageIndex],
            itemSelectionOutlinePaintedRect(rect).intersects(dirtyRect) {
             drawImageSelectionOutline(rect)
         }
 
+    }
+
+    private func drawSelectedItemOutline(in dirtyRect: NSRect) {
         if let selectedItemIndex,
            selectedItemIndex < items.count,
            let rect = itemSelectionOutlineBase(for: items[selectedItemIndex]),
@@ -461,6 +467,9 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             drawItemSelectionOutline(rect)
         }
 
+    }
+
+    private func drawSelectedTextOutline(in dirtyRect: NSRect) {
         if let index = selectedTextIndex, textEditor == nil {
             if case let .text(textItem) = items[index] {
                 let rect = textSelectionOutlineRect(for: textItem)
@@ -470,6 +479,9 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             }
         }
 
+    }
+
+    private func drawSelectedMarkerOutline(in dirtyRect: NSRect) {
         if let index = selectedMarkerIndex, textEditor == nil, index < items.count {
             if case let .marker(markerItem) = items[index] {
                 let rect = markerSelectionOutlineRect(for: markerItem)
@@ -479,34 +491,37 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             }
         }
 
+    }
+
+    private func drawGesturePreview() {
         // In-progress shapes
         if let start = dragStartPoint, let current = dragCurrentPoint {
-            let shiftHeld = constrainShapes
-            switch currentTool {
-            case .pen:
-                EditorImageRenderer.drawPen(points: currentPoints, color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
-            case .line:
-                EditorImageRenderer.drawPen(points: [start, current], color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
-            case .arrow:
-                EditorImageRenderer.drawArrow(from: start, to: current, color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
-            case .rectangle:
-                let rect = normalizedRect(from: start, to: current, constrain: shiftHeld)
-                EditorImageRenderer.drawRect(rect, color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
-            case .ellipse:
-                let rect = normalizedRect(from: start, to: current, constrain: shiftHeld)
-                EditorImageRenderer.drawEllipse(rect, color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
-            case .text:
-                break
-            case .marker:
-                break
-            case .selection:
-                break
-            }
+            drawShapePreview(from: start, to: current)
         } else if let start = selectionDragStart, let current = selectionDragCurrent {
             let rect = normalizedRect(from: start, to: current)
             drawSelectionOutline(rect)
         } else if currentTool == .pen && !currentPoints.isEmpty {
             EditorImageRenderer.drawPen(points: currentPoints, color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
+        }
+    }
+
+    private func drawShapePreview(from start: NSPoint, to current: NSPoint) {
+        let shiftHeld = constrainShapes
+        switch currentTool {
+        case .pen:
+            EditorImageRenderer.drawPen(points: currentPoints, color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
+        case .line:
+            EditorImageRenderer.drawPen(points: [start, current], color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
+        case .arrow:
+            EditorImageRenderer.drawArrow(from: start, to: current, color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
+        case .rectangle:
+            let rect = normalizedRect(from: start, to: current, constrain: shiftHeld)
+            EditorImageRenderer.drawRect(rect, color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
+        case .ellipse:
+            let rect = normalizedRect(from: start, to: current, constrain: shiftHeld)
+            EditorImageRenderer.drawEllipse(rect, color: currentColor, lineWidth: annotationStrokeWidth, isPreview: true)
+        case .text, .marker, .selection:
+            break
         }
     }
 
@@ -645,13 +660,20 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         if index == selectedItemIndex, let base = itemSelectionOutlineBase(for: item) {
             rects.append(itemSelectionOutlinePaintedRect(base))
         }
-        if textEditor == nil, index == selectedTextIndex, case let .text(textItem) = item {
+        rects += textSelectionPaintedRects(for: item, at: index)
+        return rects.dropFirst().reduce(rects.first) { $0?.union($1) }
+    }
+
+    private func textSelectionPaintedRects(for item: EditorDrawing.Item, at index: Int) -> [NSRect] {
+        guard textEditor == nil else { return [] }
+        var rects: [NSRect] = []
+        if index == selectedTextIndex, case let .text(textItem) = item {
             rects.append(outlinePaintedRect(textSelectionOutlineRect(for: textItem), lineWidth: 1))
         }
-        if textEditor == nil, index == selectedMarkerIndex, case let .marker(markerItem) = item {
+        if index == selectedMarkerIndex, case let .marker(markerItem) = item {
             rects.append(outlinePaintedRect(markerSelectionOutlineRect(for: markerItem), lineWidth: 1))
         }
-        return rects.dropFirst().reduce(rects.first) { $0?.union($1) }
+        return rects
     }
 
     /// Canvas region the in-flight drag gesture currently paints, or nil when
@@ -660,10 +682,14 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         if let start = selectionDragStart, let current = selectionDragCurrent {
             return selectionOutlinePaintedRect(normalizedRect(from: start, to: current))
         }
-        if let index = draggingImageIndex ?? draggingItemIndex ?? draggingTextIndex ?? draggingMarkerIndex {
+        if let index = [draggingImageIndex, draggingItemIndex, draggingTextIndex, draggingMarkerIndex].compactMap({ $0 }).first {
             return paintedBoundsIncludingSelection(ofItemAt: index)
         }
         guard let start = dragStartPoint, let current = dragCurrentPoint else { return nil }
+        return shapeGestureBounds(from: start, to: current).map(deviceAligned)
+    }
+
+    private func shapeGestureBounds(from start: NSPoint, to current: NSPoint) -> NSRect? {
         let halfWidth = annotationStrokeWidth / 2
         let rect: NSRect?
         switch currentTool {
@@ -686,7 +712,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         case .text, .marker, .selection:
             rect = nil
         }
-        return rect.map(deviceAligned)
+        return rect
     }
 
     /// Invalidates what the gesture painted before (`before`) and paints now.
@@ -746,30 +772,16 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         undoStack = undoStack.map { EditorImageRenderer.shiftedItems($0, byX: dx, byY: dy) }
         redoStack = redoStack.map { EditorImageRenderer.shiftedItems($0, byX: dx, byY: dy) }
 
-        if let point = dragStartPoint {
-            dragStartPoint = EditorImageRenderer.shiftedPoint(point, byX: dx, byY: dy)
-        }
-        if let point = dragCurrentPoint {
-            dragCurrentPoint = EditorImageRenderer.shiftedPoint(point, byX: dx, byY: dy)
-        }
+        dragStartPoint = dragStartPoint.map { EditorImageRenderer.shiftedPoint($0, byX: dx, byY: dy) }
+        dragCurrentPoint = dragCurrentPoint.map { EditorImageRenderer.shiftedPoint($0, byX: dx, byY: dy) }
         currentPoints = currentPoints.map { EditorImageRenderer.shiftedPoint($0, byX: dx, byY: dy) }
 
-        if let point = selectionDragStart {
-            selectionDragStart = EditorImageRenderer.shiftedPoint(point, byX: dx, byY: dy)
-        }
-        if let point = selectionDragCurrent {
-            selectionDragCurrent = EditorImageRenderer.shiftedPoint(point, byX: dx, byY: dy)
-        }
-        if let rect = selectionRect {
-            selectionRect = EditorImageRenderer.shiftedRect(rect, byX: dx, byY: dy)
-        }
+        selectionDragStart = selectionDragStart.map { EditorImageRenderer.shiftedPoint($0, byX: dx, byY: dy) }
+        selectionDragCurrent = selectionDragCurrent.map { EditorImageRenderer.shiftedPoint($0, byX: dx, byY: dy) }
+        selectionRect = selectionRect.map { EditorImageRenderer.shiftedRect($0, byX: dx, byY: dy) }
 
-        if let rect = copiedSelectionRect {
-            copiedSelectionRect = EditorImageRenderer.shiftedRect(rect, byX: dx, byY: dy)
-        }
-        if let point = lastMousePoint {
-            lastMousePoint = EditorImageRenderer.shiftedPoint(point, byX: dx, byY: dy)
-        }
+        copiedSelectionRect = copiedSelectionRect.map { EditorImageRenderer.shiftedRect($0, byX: dx, byY: dy) }
+        lastMousePoint = lastMousePoint.map { EditorImageRenderer.shiftedPoint($0, byX: dx, byY: dy) }
 
         if let editor = textEditor {
             editor.frame = EditorImageRenderer.shiftedRect(editor.frame, byX: dx, byY: dy)
@@ -779,35 +791,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     private func moveItem(at index: Int, byX dx: CGFloat, byY dy: CGFloat) {
         guard index < items.count, dx != 0 || dy != 0 else { return }
 
-        switch items[index] {
-        case .pen(let points, let color, let lineWidth):
-            items[index] = .pen(points: points.map { EditorImageRenderer.shiftedPoint($0, byX: dx, byY: dy) },
-                                color: color,
-                                lineWidth: lineWidth)
-        case .arrow(let start, let end, let color, let lineWidth):
-            items[index] = .arrow(start: EditorImageRenderer.shiftedPoint(start, byX: dx, byY: dy),
-                                  end: EditorImageRenderer.shiftedPoint(end, byX: dx, byY: dy),
-                                  color: color,
-                                  lineWidth: lineWidth)
-        case .rect(let rect, let color, let lineWidth):
-            items[index] = .rect(rect: EditorImageRenderer.shiftedRect(rect, byX: dx, byY: dy),
-                                 color: color,
-                                 lineWidth: lineWidth)
-        case .ellipse(let rect, let color, let lineWidth):
-            items[index] = .ellipse(rect: EditorImageRenderer.shiftedRect(rect, byX: dx, byY: dy),
-                                    color: color,
-                                    lineWidth: lineWidth)
-        case .text(var textItem):
-            textItem.origin = EditorImageRenderer.shiftedPoint(textItem.origin, byX: dx, byY: dy)
-            items[index] = .text(textItem)
-        case .marker(var markerItem):
-            markerItem.center = EditorImageRenderer.shiftedPoint(markerItem.center, byX: dx, byY: dy)
-            items[index] = .marker(markerItem)
-        case .image(let image, let rect):
-            items[index] = .image(image: image, rect: EditorImageRenderer.shiftedRect(rect, byX: dx, byY: dy))
-        case .erase(let rect):
-            items[index] = .erase(rect: EditorImageRenderer.shiftedRect(rect, byX: dx, byY: dy))
-        }
+        items[index] = EditorImageRenderer.shiftedItem(items[index], byX: dx, byY: dy)
     }
 
     private var clampedSelectionRect: NSRect? {
@@ -921,141 +905,11 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         lastMousePoint = point
         constrainShapes = event.modifierFlags.contains(.shift)
 
-        if currentTool == .selection {
-            selectedTextIndex = nil
-            endTextEditingIfNeeded()
-            if let (index, rect) = hitTestImage(at: point) {
-                selectedImageIndex = index
-                selectedItemIndex = nil
-                draggingItemIndex = nil
-                lastItemDragPoint = nil
-                didPushUndoForItemDrag = false
-                draggingImageIndex = index
-                imageDragOffset = NSPoint(x: point.x - rect.origin.x, y: point.y - rect.origin.y)
-                didPushUndoForImageDrag = false
-                clearSelectionState()
-                needsDisplay = true
-                return
-            }
-            selectedImageIndex = nil
-            draggingImageIndex = nil
-            if selectEditableItem(at: point) {
-                draggingItemIndex = selectedItemIndex
-                lastItemDragPoint = point
-                didPushUndoForItemDrag = false
-                return
-            }
-            selectedItemIndex = nil
-            draggingItemIndex = nil
-            lastItemDragPoint = nil
-            didPushUndoForItemDrag = false
-            selectionRect = nil
-            selectionDragStart = point
-            selectionDragCurrent = point
-            isCutSelectionPreview = false
-            needsDisplay = true
-            return
-        }
-
-        if currentTool == .text {
-            var activeBounds = textEditor?.frame
-            if activeBounds == nil, let index = selectedTextIndex,
-               items.indices.contains(index), case .text(let item) = items[index] {
-                activeBounds = EditorImageRenderer.textBounds(for: item)
-            }
-            if (textInteractionActive || textEditor != nil),
-               activeBounds?.contains(point) != true {
-                endTextEditingIfNeeded()
-                setTool(.pen)
-                onKeyCommand?(.selectTool(.pen))
-                // Consume this click; the next gesture starts the pen stroke.
-                return
-            }
-            // Finishing a new, empty text item can remove it from `items`.
-            // Commit before hit testing so the index we pass to the editor is
-            // always derived from the current collection.
-            endTextEditingIfNeeded()
-            let clickCount = event.clickCount
-
-            if let (index, rect) = hitTestText(at: point) {
-                textInteractionActive = true
-                selectedTextIndex = index
-                selectedItemIndex = nil
-                draggingItemIndex = nil
-                lastItemDragPoint = nil
-                didPushUndoForItemDrag = false
-                if clickCount >= 2 {
-                    beginEditingText(at: index, pushUndoOnEnd: true, isNewItem: false)
-                } else {
-                    draggingTextIndex = index
-                    didPushUndoForTextDrag = false
-                    textDragOffset = NSPoint(x: point.x - rect.origin.x, y: point.y - rect.origin.y)
-                }
-                needsDisplay = true
-                return
-            } else {
-                selectedTextIndex = nil
-                selectedItemIndex = nil
-                draggingItemIndex = nil
-                lastItemDragPoint = nil
-                didPushUndoForItemDrag = false
-
-                let item = EditorDrawing.TextItem(text: "", origin: point, color: currentColor, fontSize: defaultTextFontSize)
-                pushUndoSnapshot()
-                items.append(.text(item))
-                let index = items.count - 1
-                selectedTextIndex = index
-                beginEditingText(at: index, pushUndoOnEnd: false, isNewItem: true)
-                updateCanvasSizeIfNeeded()
-                needsDisplay = true
-                return
-            }
-        }
-
-        if currentTool == .marker {
-            // Commit any open inline editor before hit testing, like the text flow.
-            endTextEditingIfNeeded()
-            if let (index, rect) = hitTestMarker(at: point) {
-                selectedMarkerIndex = index
-                selectedTextIndex = nil
-                selectedImageIndex = nil
-                selectedItemIndex = nil
-                draggingItemIndex = nil
-                lastItemDragPoint = nil
-                didPushUndoForItemDrag = false
-                // Repeated clicks only select or drag; number editing is disabled.
-                draggingMarkerIndex = index
-                didPushUndoForMarkerDrag = false
-                markerDragOffset = NSPoint(x: point.x - rect.midX, y: point.y - rect.midY)
-                needsDisplay = true
-                return
-            }
-
-            selectedMarkerIndex = nil
-            selectedTextIndex = nil
-            selectedImageIndex = nil
-            selectedItemIndex = nil
-            draggingItemIndex = nil
-            lastItemDragPoint = nil
-            didPushUndoForItemDrag = false
-
-            // Range exhausted (all numbers up to the supported cap in use):
-            // refuse placement rather than duplicate or wrap.
-            guard let number = nextMarkerNumber else {
-                needsDisplay = true
-                return
-            }
-            let marker = EditorDrawing.MarkerItem(number: number,
-                                                center: point,
-                                                color: currentColor,
-                                                diameter: defaultMarkerDiameter)
-            pushUndoSnapshot()
-            items.append(.marker(marker))
-            selectedMarkerIndex = items.count - 1
-            updateCanvasSizeIfNeeded()
-            invalidateMarkerCursorPreview()
-            needsDisplay = true
-            return
+        switch currentTool {
+        case .selection: beginSelectionGesture(at: point); return
+        case .text: beginTextGesture(at: point, clickCount: event.clickCount); return
+        case .marker: beginMarkerGesture(at: point); return
+        default: break
         }
 
         selectedTextIndex = nil
@@ -1076,6 +930,145 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         needsDisplay = true
     }
 
+    private func beginSelectionGesture(at point: NSPoint) {
+        selectedTextIndex = nil
+        endTextEditingIfNeeded()
+        if let (index, rect) = hitTestImage(at: point) {
+            selectedImageIndex = index
+            selectedItemIndex = nil
+            draggingItemIndex = nil
+            lastItemDragPoint = nil
+            didPushUndoForItemDrag = false
+            draggingImageIndex = index
+            imageDragOffset = NSPoint(x: point.x - rect.origin.x, y: point.y - rect.origin.y)
+            didPushUndoForImageDrag = false
+            clearSelectionState()
+            needsDisplay = true
+            return
+        }
+        selectedImageIndex = nil
+        draggingImageIndex = nil
+        if selectEditableItem(at: point) {
+            draggingItemIndex = selectedItemIndex
+            lastItemDragPoint = point
+            didPushUndoForItemDrag = false
+            return
+        }
+        selectedItemIndex = nil
+        draggingItemIndex = nil
+        lastItemDragPoint = nil
+        didPushUndoForItemDrag = false
+        selectionRect = nil
+        selectionDragStart = point
+        selectionDragCurrent = point
+        isCutSelectionPreview = false
+        needsDisplay = true
+        return
+    }
+
+    private func beginTextGesture(at point: NSPoint, clickCount: Int) {
+        let activeBounds = activeTextBounds
+        if (textInteractionActive || textEditor != nil),
+           activeBounds?.contains(point) != true {
+            endTextEditingIfNeeded()
+            setTool(.pen)
+            onKeyCommand?(.selectTool(.pen))
+            // Consume this click; the next gesture starts the pen stroke.
+            return
+        }
+        // Finishing a new, empty text item can remove it from `items`.
+        // Commit before hit testing so the index we pass to the editor is
+        // always derived from the current collection.
+        endTextEditingIfNeeded()
+
+        if let (index, rect) = hitTestText(at: point) {
+            textInteractionActive = true
+            selectedTextIndex = index
+            selectedItemIndex = nil
+            draggingItemIndex = nil
+            lastItemDragPoint = nil
+            didPushUndoForItemDrag = false
+            if clickCount >= 2 {
+                beginEditingText(at: index, pushUndoOnEnd: true, isNewItem: false)
+            } else {
+                draggingTextIndex = index
+                didPushUndoForTextDrag = false
+                textDragOffset = NSPoint(x: point.x - rect.origin.x, y: point.y - rect.origin.y)
+            }
+            needsDisplay = true
+            return
+        } else {
+            selectedTextIndex = nil
+            selectedItemIndex = nil
+            draggingItemIndex = nil
+            lastItemDragPoint = nil
+            didPushUndoForItemDrag = false
+
+            let item = EditorDrawing.TextItem(text: "", origin: point, color: currentColor, fontSize: defaultTextFontSize)
+            pushUndoSnapshot()
+            items.append(.text(item))
+            let index = items.count - 1
+            selectedTextIndex = index
+            beginEditingText(at: index, pushUndoOnEnd: false, isNewItem: true)
+            updateCanvasSizeIfNeeded()
+            needsDisplay = true
+            return
+        }
+    }
+
+    private func beginMarkerGesture(at point: NSPoint) {
+        // Commit any open inline editor before hit testing, like the text flow.
+        endTextEditingIfNeeded()
+        if let (index, rect) = hitTestMarker(at: point) {
+            selectedMarkerIndex = index
+            selectedTextIndex = nil
+            selectedImageIndex = nil
+            selectedItemIndex = nil
+            draggingItemIndex = nil
+            lastItemDragPoint = nil
+            didPushUndoForItemDrag = false
+            // Repeated clicks only select or drag; number editing is disabled.
+            draggingMarkerIndex = index
+            didPushUndoForMarkerDrag = false
+            markerDragOffset = NSPoint(x: point.x - rect.midX, y: point.y - rect.midY)
+            needsDisplay = true
+            return
+        }
+
+        selectedMarkerIndex = nil
+        selectedTextIndex = nil
+        selectedImageIndex = nil
+        selectedItemIndex = nil
+        draggingItemIndex = nil
+        lastItemDragPoint = nil
+        didPushUndoForItemDrag = false
+
+        // Range exhausted (all numbers up to the supported cap in use):
+        // refuse placement rather than duplicate or wrap.
+        guard let number = nextMarkerNumber else {
+            needsDisplay = true
+            return
+        }
+        let marker = EditorDrawing.MarkerItem(number: number,
+                                            center: point,
+                                            color: currentColor,
+                                            diameter: defaultMarkerDiameter)
+        pushUndoSnapshot()
+        items.append(.marker(marker))
+        selectedMarkerIndex = items.count - 1
+        updateCanvasSizeIfNeeded()
+        invalidateMarkerCursorPreview()
+        needsDisplay = true
+        return
+    }
+
+    private var activeTextBounds: NSRect? {
+        if let editor = textEditor { return editor.frame }
+        guard let index = selectedTextIndex, items.indices.contains(index),
+              case .text(let item) = items[index] else { return nil }
+        return EditorImageRenderer.textBounds(for: item)
+    }
+
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         lastMousePoint = point
@@ -1086,32 +1079,59 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         constrainShapes = event.modifierFlags.contains(.shift)
 
         if currentTool == .selection {
-            if let index = draggingImageIndex {
-                if !didPushUndoForImageDrag {
-                    pushUndoSnapshot()
-                    didPushUndoForImageDrag = true
-                }
-                if case let .image(image, oldRect) = items[index] {
-                    let newOrigin = NSPoint(x: point.x - imageDragOffset.x, y: point.y - imageDragOffset.y)
-                    let newRect = NSRect(origin: newOrigin, size: oldRect.size)
-                    items[index] = .image(image: image, rect: newRect)
-                }
-                return
-            }
-            if let index = draggingItemIndex, index < items.count, let lastPoint = lastItemDragPoint {
-                if !didPushUndoForItemDrag {
-                    pushUndoSnapshot()
-                    didPushUndoForItemDrag = true
-                }
-                moveItem(at: index, byX: point.x - lastPoint.x, byY: point.y - lastPoint.y)
-                lastItemDragPoint = point
-                return
-            }
-            guard selectionDragStart != nil else { return }
-            selectionDragCurrent = point
+            dragSelection(to: point)
+            return
+        }
+        if draggingTextIndex != nil {
+            dragText(to: point)
+            return
+        }
+        if draggingMarkerIndex != nil {
+            dragMarker(to: point)
             return
         }
 
+        guard dragStartPoint != nil else { return }
+
+        dragCurrentPoint = point
+
+        if currentTool == .pen {
+            currentPoints.append(point)
+        }
+    }
+
+    private func dragSelection(to point: NSPoint) {
+        if let index = draggingImageIndex {
+            dragImage(at: index, to: point)
+            return
+        }
+        if let index = draggingItemIndex, index < items.count, let lastPoint = lastItemDragPoint {
+            if !didPushUndoForItemDrag {
+                pushUndoSnapshot()
+                didPushUndoForItemDrag = true
+            }
+            moveItem(at: index, byX: point.x - lastPoint.x, byY: point.y - lastPoint.y)
+            lastItemDragPoint = point
+            return
+        }
+        guard selectionDragStart != nil else { return }
+        selectionDragCurrent = point
+        return
+    }
+
+    private func dragImage(at index: Int, to point: NSPoint) {
+        if !didPushUndoForImageDrag {
+            pushUndoSnapshot()
+            didPushUndoForImageDrag = true
+        }
+        if case let .image(image, oldRect) = items[index] {
+            let newOrigin = NSPoint(x: point.x - imageDragOffset.x, y: point.y - imageDragOffset.y)
+            let newRect = NSRect(origin: newOrigin, size: oldRect.size)
+            items[index] = .image(image: image, rect: newRect)
+        }
+    }
+
+    private func dragText(to point: NSPoint) {
         if let index = draggingTextIndex {
             if case var .text(item) = items[index] {
                 let newOrigin = NSPoint(x: point.x - textDragOffset.x, y: point.y - textDragOffset.y)
@@ -1126,6 +1146,9 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             return
         }
 
+    }
+
+    private func dragMarker(to point: NSPoint) {
         if let index = draggingMarkerIndex {
             if case var .marker(item) = items[index] {
                 let newCenter = NSPoint(x: point.x - markerDragOffset.x, y: point.y - markerDragOffset.y)
@@ -1140,13 +1163,6 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             return
         }
 
-        guard dragStartPoint != nil else { return }
-
-        dragCurrentPoint = point
-
-        if currentTool == .pen {
-            currentPoints.append(point)
-        }
     }
 
     override func flagsChanged(with event: NSEvent) {
@@ -1164,35 +1180,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         constrainShapes = event.modifierFlags.contains(.shift)
 
         if currentTool == .selection {
-            if draggingImageIndex != nil {
-                draggingImageIndex = nil
-                selectedItemIndex = nil
-                didPushUndoForImageDrag = false
-                updateCanvasSizeIfNeeded()
-                needsDisplay = true
-                return
-            }
-            if draggingItemIndex != nil {
-                draggingItemIndex = nil
-                lastItemDragPoint = nil
-                didPushUndoForItemDrag = false
-                updateCanvasSizeIfNeeded()
-                needsDisplay = true
-                return
-            }
-            guard let start = selectionDragStart else { return }
-            selectionDragCurrent = point
-            let rect = normalizedRect(from: start, to: point)
-            selectionDragStart = nil
-            selectionDragCurrent = nil
-            selectionRect = rect.width >= 2 && rect.height >= 2 ? rect : nil
-            if let clampedRect = clampedSelectionRect {
-                selectionRect = clampedRect
-            } else {
-                selectionRect = nil
-            }
-            isCutSelectionPreview = false
-            needsDisplay = true
+            finishSelection(at: point)
             return
         }
 
@@ -1214,53 +1202,82 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         guard let start = dragStartPoint else { return }
         dragCurrentPoint = point
 
-        switch currentTool {
-        case .pen:
-            if currentPoints.count > 1 {
-                pushUndoSnapshot()
-                items.append(.pen(points: currentPoints, color: currentColor, lineWidth: annotationStrokeWidth))
-                updateCanvasSizeIfNeeded()
-            }
-        case .line:
-            if EditorImageRenderer.distance(from: start, to: point) >= 2 {
-                pushUndoSnapshot()
-                // A two-point stroke is a straight line and already supports
-                // selection, moving, clipboard operations, and saved edit state.
-                items.append(.pen(points: [start, point], color: currentColor, lineWidth: annotationStrokeWidth))
-                updateCanvasSizeIfNeeded()
-            }
-        case .arrow:
-            if EditorImageRenderer.distance(from: start, to: point) >= 2 {
-                pushUndoSnapshot()
-                items.append(.arrow(start: start, end: point, color: currentColor, lineWidth: annotationStrokeWidth))
-                updateCanvasSizeIfNeeded()
-            }
-        case .rectangle:
-            let rect = normalizedRect(from: start, to: point, constrain: constrainShapes)
-            if rect.width >= 2, rect.height >= 2 {
-                pushUndoSnapshot()
-                items.append(.rect(rect: rect, color: currentColor, lineWidth: annotationStrokeWidth))
-                updateCanvasSizeIfNeeded()
-            }
-        case .ellipse:
-            let rect = normalizedRect(from: start, to: point, constrain: constrainShapes)
-            if rect.width >= 2, rect.height >= 2 {
-                pushUndoSnapshot()
-                items.append(.ellipse(rect: rect, color: currentColor, lineWidth: annotationStrokeWidth))
-                updateCanvasSizeIfNeeded()
-            }
-        case .text:
-            break
-        case .marker:
-            break
-        case .selection:
-            break
+        if let item = completedShape(from: start, to: point) {
+            pushUndoSnapshot()
+            items.append(item)
+            updateCanvasSizeIfNeeded()
         }
 
         dragStartPoint = nil
         dragCurrentPoint = nil
         currentPoints.removeAll()
         needsDisplay = true
+    }
+
+    private func finishSelection(at point: NSPoint) {
+        if draggingImageIndex != nil {
+            draggingImageIndex = nil
+            selectedItemIndex = nil
+            didPushUndoForImageDrag = false
+            updateCanvasSizeIfNeeded()
+            needsDisplay = true
+            return
+        }
+        if draggingItemIndex != nil {
+            draggingItemIndex = nil
+            lastItemDragPoint = nil
+            didPushUndoForItemDrag = false
+            updateCanvasSizeIfNeeded()
+            needsDisplay = true
+            return
+        }
+        guard let start = selectionDragStart else { return }
+        selectionDragCurrent = point
+        let rect = normalizedRect(from: start, to: point)
+        selectionDragStart = nil
+        selectionDragCurrent = nil
+        selectionRect = rect.width >= 2 && rect.height >= 2 ? rect : nil
+        if let clampedRect = clampedSelectionRect {
+            selectionRect = clampedRect
+        } else {
+            selectionRect = nil
+        }
+        isCutSelectionPreview = false
+        needsDisplay = true
+        return
+    }
+
+    /// Build a committed item before changing history. Invalid/tiny gestures
+    /// leave both the canvas and undo stack untouched.
+    private func completedShape(from start: NSPoint, to point: NSPoint) -> EditorDrawing.Item? {
+        switch currentTool {
+        case .pen:
+            guard currentPoints.count > 1 else { return nil }
+            return .pen(points: currentPoints, color: currentColor, lineWidth: annotationStrokeWidth)
+        case .line, .arrow:
+            return completedLine(from: start, to: point)
+        case .rectangle, .ellipse:
+            return completedArea(from: start, to: point)
+        case .text, .marker, .selection:
+            return nil
+        }
+    }
+
+    private func completedLine(from start: NSPoint, to point: NSPoint) -> EditorDrawing.Item? {
+        guard EditorImageRenderer.distance(from: start, to: point) >= 2 else { return nil }
+        if currentTool == .line {
+            return .pen(points: [start, point], color: currentColor, lineWidth: annotationStrokeWidth)
+        }
+        return .arrow(start: start, end: point, color: currentColor, lineWidth: annotationStrokeWidth)
+    }
+
+    private func completedArea(from start: NSPoint, to point: NSPoint) -> EditorDrawing.Item? {
+        let rect = normalizedRect(from: start, to: point, constrain: constrainShapes)
+        guard rect.width >= 2, rect.height >= 2 else { return nil }
+        if currentTool == .rectangle {
+            return .rect(rect: rect, color: currentColor, lineWidth: annotationStrokeWidth)
+        }
+        return .ellipse(rect: rect, color: currentColor, lineWidth: annotationStrokeWidth)
     }
 
     // MARK: - Text editing helpers
@@ -1332,9 +1349,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             let rect = EditorImageRenderer.markerRect(for: markerItem).insetBy(dx: -4, dy: -4)
             let radius = rect.height / 2
             return NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).contains(point)
-        case .image(_, let rect):
-            return rect.insetBy(dx: -3, dy: -3).contains(point)
-        case .erase(let rect):
+        case .image(_, let rect), .erase(let rect):
             return rect.insetBy(dx: -3, dy: -3).contains(point)
         }
     }
@@ -1450,38 +1465,6 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         resizeTextEditorToFit()
     }
 
-    /// Opens the shared inline editor on a marker so its number can be edited.
-    /// The entered value must parse as a positive integer; anything else is
-    /// treated like a cancel and leaves the number unchanged.
-    private func beginEditingMarker(at index: Int) {
-        endTextEditingIfNeeded()
-        guard items.indices.contains(index),
-              case let .marker(item) = items[index] else {
-            return
-        }
-
-        let rect = EditorImageRenderer.markerRect(for: item)
-        let editor = makeInlineEditor(in: rect)
-        editor.string = String(item.number)
-        editor.textColor = item.color
-        editor.font = EditorImageRenderer.markerFont(forDiameter: item.diameter)
-        editor.alignment = .center
-        editor.onDidChange = { [weak self] in
-            self?.resizeMarkerEditorToFit()
-        }
-
-        addSubview(editor)
-        window?.makeFirstResponder(editor)
-        editor.selectAll(nil)
-
-        editingMarkerIndex = index
-        editingOriginalText = String(item.number)
-        editingWasNewItem = false
-        shouldPushUndoOnTextEnd = false
-        textEditor = editor
-        resizeMarkerEditorToFit()
-    }
-
     private func resizeTextEditorToFit() {
         guard let editor = textEditor else { return }
         let font = editor.font ?? NSFont.systemFont(ofSize: defaultTextFontSize, weight: .regular)
@@ -1492,31 +1475,8 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         editor.frame.size = NSSize(width: width, height: height)
     }
 
-    /// Keeps the marker's inline editor centered on the marker capsule.
-    private func resizeMarkerEditorToFit() {
-        guard let editor = textEditor,
-              let index = editingMarkerIndex,
-              items.indices.contains(index),
-              case let .marker(item) = items[index] else { return }
-        let font = editor.font ?? EditorImageRenderer.markerFont(forDiameter: item.diameter)
-        let contentSize = EditorImageRenderer.textContentSize(for: editor.string, font: font)
-        let markerRect = EditorImageRenderer.markerRect(for: item)
-        let width = max(contentSize.width + EditorImageRenderer.textPadding.width * 2, markerRect.width + 8)
-        let height = max(contentSize.height + EditorImageRenderer.textPadding.height * 2, markerRect.height + 8)
-        editor.frame = NSRect(x: item.center.x - width / 2,
-                              y: item.center.y - height / 2,
-                              width: width,
-                              height: height)
-    }
-
     private func commitTextEditing() {
         guard !isCommittingText else { return }
-        if editingMarkerIndex != nil {
-            isCommittingText = true
-            defer { isCommittingText = false }
-            commitMarkerEditing()
-            return
-        }
         guard let index = editingTextIndex,
               let editor = textEditor,
               items.indices.contains(index) else {
@@ -1526,7 +1486,15 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         isCommittingText = true
         defer { isCommittingText = false }
 
-        let updatedText = trimTrailingWhitespace(editor.string.replacingOccurrences(of: "\r", with: ""))
+        updateTextItem(at: index, from: editor.string)
+
+        removeTextEditor()
+        updateCanvasSizeIfNeeded()
+        needsDisplay = true
+    }
+
+    private func updateTextItem(at index: Int, from rawText: String) {
+        let updatedText = trimTrailingWhitespace(rawText.replacingOccurrences(of: "\r", with: ""))
         let isEmpty = updatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
         if isEmpty {
@@ -1547,49 +1515,9 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             selectedTextIndex = index
         }
 
-        removeTextEditor()
-        updateCanvasSizeIfNeeded()
-        needsDisplay = true
-    }
-
-    private func commitMarkerEditing() {
-        guard let index = editingMarkerIndex,
-              let editor = textEditor,
-              items.indices.contains(index),
-              case var .marker(item) = items[index] else {
-            removeTextEditor()
-            return
-        }
-
-        let trimmed = editor.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let newNumber = Int(trimmed),
-           newNumber > 0,
-           newNumber <= EditorDrawing.MarkerItem.maxNumber,
-           newNumber != item.number {
-            pushUndoSnapshot()
-            item.number = newNumber
-            items[index] = .marker(item)
-            invalidateMarkerCursorPreview()
-        }
-        selectedMarkerIndex = index
-        removeTextEditor()
-        updateCanvasSizeIfNeeded()
-        needsDisplay = true
     }
 
     private func cancelTextEditing() {
-        if editingMarkerIndex != nil {
-            isCancellingText = true
-            if let index = editingMarkerIndex,
-               items.indices.contains(index),
-               case .marker = items[index] {
-                selectedMarkerIndex = index
-            }
-            removeTextEditor()
-            needsDisplay = true
-            isCancellingText = false
-            return
-        }
         guard let index = editingTextIndex else { return }
         isCancellingText = true
         guard items.indices.contains(index) else {
@@ -1614,7 +1542,6 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     private func removeTextEditor() {
         textEditor?.removeFromSuperview()
         editingTextIndex = nil
-        editingMarkerIndex = nil
         textEditor = nil
         editingOriginalText = nil
         editingWasNewItem = false
@@ -1691,128 +1618,96 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     // MARK: - Keyboard & gestures
 
     override func keyDown(with event: NSEvent) {
-        if textEditor != nil {
+        guard textEditor == nil else {
             super.keyDown(with: event)
             return
         }
-
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // Order matters: picker Escape precedes selection Escape, and final
+        // actions (Cmd+Delete) precede deletion of an annotation.
+        let handlers = [handlePaletteShortcut, handleToolShortcut, handleEditingShortcut,
+                        handleEscapeShortcut, handleWorkflowShortcut, handleDeletionShortcut]
+        for handler in handlers {
+            if handler(event, flags) { return }
+        }
+        super.keyDown(with: event)
+    }
 
+    private func openPickerCommands(for key: UInt16) -> [KeyCommand]? {
+        if let index = Self.colorPickerKeyCodeToColorIndex[key] {
+            return [.selectColor(index: index), .colorPickerClose]
+        }
+        let navigation: [UInt16: KeyCommand] = [123: .colorPickerMove(direction: -1),
+            124: .colorPickerMove(direction: 1), 36: .colorPickerSelect,
+            76: .colorPickerSelect, 53: .colorPickerClose]
+        return navigation[key].map { [$0] }
+    }
+
+    private func handlePaletteShortcut(_ event: NSEvent, _ flags: NSEvent.ModifierFlags) -> Bool {
         if event.keyCode == UInt16(kVK_ANSI_Q),
            flags.intersection([.command, .control, .option, .shift]).isEmpty {
             onKeyCommand?(.cycleColor)
-            return
+            return true
         }
-
-        if isColorPickerOpen {
-            if let index = Self.colorPickerKeyCodeToColorIndex[event.keyCode] {
-                onKeyCommand?(.selectColor(index: index))
-                onKeyCommand?(.colorPickerClose)
-                return
-            }
-            switch event.keyCode {
-            case 123: // left arrow
-                onKeyCommand?(.colorPickerMove(direction: -1))
-                return
-            case 124: // right arrow
-                onKeyCommand?(.colorPickerMove(direction: 1))
-                return
-            case 36, 76: // enter
-                onKeyCommand?(.colorPickerSelect)
-                return
-            case 53: // escape
-                onKeyCommand?(.colorPickerClose)
-                return
-            default:
-                break
-            }
+        if isColorPickerOpen, let commands = openPickerCommands(for: event.keyCode) {
+            commands.forEach { onKeyCommand?($0) }
+            return true
         }
-
-        if !flags.contains(.command)
-            && !flags.contains(.control)
-            && !flags.contains(.shift)
-            && Self.colorPickerToggleKeyCodes.contains(event.keyCode) {
-            if isColorPickerOpen { return }
-            onKeyCommand?(.toggleColorPicker)
-            return
+        if flags.intersection([.command, .control, .shift]).isEmpty,
+           Self.colorPickerToggleKeyCodes.contains(event.keyCode) {
+            if !isColorPickerOpen { onKeyCommand?(.toggleColorPicker) }
+            return true
         }
+        return false
+    }
 
-        if !flags.contains(.command)
-            && !flags.contains(.control)
-            && !flags.contains(.option)
-            && !flags.contains(.shift),
-           let tool = Self.toolKeyCodeToTool[event.keyCode] {
-            onKeyCommand?(.selectTool(tool))
-            return
-        }
+    private func handleToolShortcut(_ event: NSEvent, _ flags: NSEvent.ModifierFlags) -> Bool {
+        guard flags.intersection([.command, .control, .option, .shift]).isEmpty,
+              let tool = Self.toolKeyCodeToTool[event.keyCode] else { return false }
+        onKeyCommand?(.selectTool(tool))
+        return true
+    }
 
-        if flags.contains(.option) && event.keyCode == 51 {
+    private func handleEditingShortcut(_ event: NSEvent, _ flags: NSEvent.ModifierFlags) -> Bool {
+        if flags.contains(.option), event.keyCode == 51 {
             onKeyCommand?(.clear)
-            return
+            return true
         }
+        guard flags.contains(.command), let chars = event.charactersIgnoringModifiers?.lowercased() else { return false }
+        let commands: [String: KeyCommand] = ["=": .zoomIn, "+": .zoomIn, "-": .zoomOut,
+            "0": .zoomReset, "c": .copyToClipboard, "x": .cutSelectionToClipboard,
+            "v": .pasteSelectionInCanvas, "z": flags.contains(.shift) ? .redo : .undo]
+        guard let command = commands[chars] else { return false }
+        onKeyCommand?(command)
+        return true
+    }
 
-        if flags.contains(.command), let chars = event.charactersIgnoringModifiers?.lowercased() {
-            switch chars {
-            case "=", "+":
-                onKeyCommand?(.zoomIn)
-                return
-            case "-":
-                onKeyCommand?(.zoomOut)
-                return
-            case "0":
-                onKeyCommand?(.zoomReset)
-                return
-            case "z":
-                // FloatingInputPanel models the same distinction for text views:
-                // Cmd+Z undoes, Cmd+Shift+Z redoes.
-                if flags.contains(.shift) {
-                    onKeyCommand?(.redo)
-                } else {
-                    onKeyCommand?(.undo)
-                }
-                return
-            case "c":
-                onKeyCommand?(.copyToClipboard)
-                return
-            case "x":
-                onKeyCommand?(.cutSelectionToClipboard)
-                return
-            case "v":
-                onKeyCommand?(.pasteSelectionInCanvas)
-                return
-            default:
-                break
-            }
-        }
-
-        if event.keyCode == 53, currentTool == .marker {
+    private func handleEscapeShortcut(_ event: NSEvent, _ flags: NSEvent.ModifierFlags) -> Bool {
+        guard event.keyCode == 53 else { return false }
+        if currentTool == .marker {
             setTool(.pen)
             onKeyCommand?(.selectTool(.pen))
-            return
+            return true
         }
+        return clearSelectionIfNeeded()
+    }
 
-        if event.keyCode == 53, clearSelectionIfNeeded() {
-            return
-        }
-
+    private func handleWorkflowShortcut(_ event: NSEvent, _ flags: NSEvent.ModifierFlags) -> Bool {
         if let final = interpretFinalAction(from: event, flags: flags) {
             onKeyCommand?(.finalAction(final))
-            return
+            return true
         }
-
-        if event.keyCode == 48 && flags.contains(.shift) { // Shift+Tab
+        if event.keyCode == 48, flags.contains(.shift) {
             onKeyCommand?(.backToNote)
-            return
+            return true
         }
+        return false
+    }
 
-        if event.keyCode == 51 || event.keyCode == 117 {
-            if deleteSelectedImageIfNeeded() { return }
-            if deleteSelectedItemIfNeeded() { return }
-            if deleteSelectedTextIfNeeded() { return }
-            if deleteSelectedMarkerIfNeeded() { return }
-        }
-
-        super.keyDown(with: event)
+    private func handleDeletionShortcut(_ event: NSEvent, _ flags: NSEvent.ModifierFlags) -> Bool {
+        guard event.keyCode == 51 || event.keyCode == 117 else { return false }
+        return deleteSelectedImageIfNeeded() || deleteSelectedItemIfNeeded()
+            || deleteSelectedTextIfNeeded() || deleteSelectedMarkerIfNeeded()
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -1827,34 +1722,19 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             return super.performKeyEquivalent(with: event)
         }
 
-        if chars == "z" {
-            if flags == [.command] {
-                onKeyCommand?(.undo)
-                return true
-            }
-            if flags == [.command, .shift] {
-                onKeyCommand?(.redo)
-                return true
-            }
-        }
-
-        guard flags == [.command] else {
+        guard let command = Self.keyEquivalentCommand(chars: chars, flags: flags) else {
             return super.performKeyEquivalent(with: event)
         }
+        onKeyCommand?(command)
+        return true
+    }
 
-        switch chars {
-        case "c":
-            onKeyCommand?(.copyToClipboard)
-            return true
-        case "x":
-            onKeyCommand?(.cutSelectionToClipboard)
-            return true
-        case "v":
-            onKeyCommand?(.pasteSelectionInCanvas)
-            return true
-        default:
-            return super.performKeyEquivalent(with: event)
-        }
+    private static func keyEquivalentCommand(chars: String, flags: NSEvent.ModifierFlags) -> KeyCommand? {
+        if chars == "z", flags == [.command, .shift] { return .redo }
+        guard flags == [.command] else { return nil }
+        let commands: [String: KeyCommand] = ["z": .undo, "c": .copyToClipboard,
+                                              "x": .cutSelectionToClipboard, "v": .pasteSelectionInCanvas]
+        return commands[chars]
     }
 
     @objc func copy(_ sender: Any?) {
@@ -1947,6 +1827,12 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             return cached.cursor
         }
 
+        let cursor = renderMarkerCursor(key: key, screenSize: screenSize)
+        markerCursorCache = (key, cursor)
+        return cursor
+    }
+
+    private func renderMarkerCursor(key: MarkerCursorKey, screenSize: NSSize) -> NSCursor {
         var badge = EditorDrawing.MarkerItem(number: key.number,
                                                center: .zero,
                                                color: key.color,
@@ -1957,8 +1843,8 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         // Render the exact placed-marker geometry, scaled by the live
         // magnification, into a bitmap at the display's backing factor so the
         // cursor is Retina-sharp and the outline/width ratios are identical.
-        let pixelW = max(1, Int((screenSize.width * backing).rounded()))
-        let pixelH = max(1, Int((screenSize.height * backing).rounded()))
+        let pixelW = max(1, Int((screenSize.width * key.backing).rounded()))
+        let pixelH = max(1, Int((screenSize.height * key.backing).rounded()))
         let image = NSImage(size: screenSize)
         if let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
                                       pixelsWide: pixelW,
@@ -1974,14 +1860,13 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             image.addRepresentation(rep)
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = graphicsContext
-            graphicsContext.cgContext.scaleBy(x: backing * canvasToScreenScale,
-                                              y: backing * canvasToScreenScale)
+            graphicsContext.cgContext.scaleBy(x: key.backing * canvasToScreenScale,
+                                              y: key.backing * canvasToScreenScale)
             EditorImageRenderer.drawMarker(badge)
             NSGraphicsContext.restoreGraphicsState()
         }
         let cursor = NSCursor(image: image,
                               hotSpot: NSPoint(x: screenSize.width / 2, y: screenSize.height / 2))
-        markerCursorCache = (key, cursor)
         return cursor
     }
 

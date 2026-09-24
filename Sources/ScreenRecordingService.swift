@@ -26,7 +26,7 @@ final class ScreenRecordingService: NSObject {
     static let outputHeight = 1080
     static let monitorPollInterval: TimeInterval = 0.1
     static let monitorDwellTime: TimeInterval = 0.5
-    static let finalizeTimeout: TimeInterval = 8
+    nonisolated static let finalizeTimeout: TimeInterval = 8
 
     /// Retained: SCStreamConfiguration.backgroundColor is unowned(unsafe).
     private static let letterboxColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
@@ -60,7 +60,14 @@ final class ScreenRecordingService: NSObject {
     private var pollTimer: Timer?
     private var terminationCompletion: (() -> Void)?
     private var sessionFactoryBox: Any?
+    private var displayUpdaterBox: Any?
+    private var uptime: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    private var displays: () -> (live: Set<CGDirectDisplayID>, pointed: CGDirectDisplayID?) = {
+        (Set(NSScreen.screens.compactMap { $0.recordingDisplayID }), ScreenRecordingService.screenUnderMouse()?.recordingDisplayID)
+    }
     private let recordingDirectory: URL
+    private var errorPresenter: (String, String) -> Void = { AlertPresenter.presentWarning(title: $0, message: $1) }
+    private var finalizationDelay: TimeInterval = ScreenRecordingService.finalizeTimeout
 
     override init() {
         recordingDirectory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop", isDirectory: true)
@@ -69,9 +76,19 @@ final class ScreenRecordingService: NSObject {
 
     @available(macOS 15, *)
     init(recordingDirectory: URL,
+         errorPresenter: @escaping (String, String) -> Void = { AlertPresenter.presentWarning(title: $0, message: $1) },
+         finalizationDelay: TimeInterval = ScreenRecordingService.finalizeTimeout,
+         uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         displays: (() -> (live: Set<CGDirectDisplayID>, pointed: CGDirectDisplayID?))? = nil,
+         displayUpdater: ((ScreenRecordingSession, CGDirectDisplayID) async throws -> Bool)? = nil,
          sessionFactory: @escaping (UUID, Int) async throws -> ScreenRecordingSession) {
         self.recordingDirectory = recordingDirectory
+        self.errorPresenter = errorPresenter
+        self.finalizationDelay = finalizationDelay
         self.sessionFactoryBox = sessionFactory
+        self.uptime = uptime
+        if let displays { self.displays = displays }
+        self.displayUpdaterBox = displayUpdater
         super.init()
     }
     /// Set while handling app-quit shutdown so the saved file keeps its
@@ -92,9 +109,9 @@ final class ScreenRecordingService: NSObject {
     func start(frameRate: Int = 30) {
         guard state == .idle else { return }
         guard Self.isSupported else {
-            AlertPresenter.presentWarning(
-                title: "Screen recording unavailable",
-                message: "Screen recording requires macOS 15 or later. Screenshots and notes continue to work on this Mac."
+            errorPresenter(
+                "Screen recording unavailable",
+                "Screen recording requires macOS 15 or later. Screenshots and notes continue to work on this Mac."
             )
             return
         }
@@ -159,12 +176,7 @@ final class ScreenRecordingService: NSObject {
     @available(macOS 15, *)
     private func runStartup(sessionID id: UUID, frameRate: Int) async {
         do {
-            let session: ScreenRecordingSession
-            if let factory = sessionFactoryBox as? ((UUID, Int) async throws -> ScreenRecordingSession) {
-                session = try await factory(id, frameRate)
-            } else {
-                session = try await makeSession(sessionID: id, frameRate: frameRate)
-            }
+            let session = try await createSession(sessionID: id, frameRate: frameRate)
             self.session = session
 
             if self.isStale(sessionID: id) || self.pendingStop {
@@ -183,21 +195,30 @@ final class ScreenRecordingService: NSObject {
             // The recording-output callback owns the timer. A stream-start
             // completion may arrive after the writer has already finished.
         } catch {
-            if !isStale(sessionID: id), pendingStop {
-                await finalizeSession(sessionID: id, publish: true)
-                return
-            }
-            self.fail(sessionID: id, error: error)
+            await handleStartupFailure(sessionID: id, error: error)
         }
     }
 
     @available(macOS 15, *)
-    private func makeSession(sessionID id: UUID, frameRate: Int) async throws -> ScreenRecordingSession {
-        let screen = Self.screenUnderMouse() ?? NSScreen.main ?? NSScreen.screens.first
-        guard let screen, let displayID = screen.recordingDisplayID else {
-            throw NSError(domain: "ScreenRecordingService", code: -1,
-                          userInfo: [NSLocalizedDescriptionKey: "Unable to determine which display to record."])
+    private func createSession(sessionID id: UUID, frameRate: Int) async throws -> ScreenRecordingSession {
+        if let factory = sessionFactoryBox as? ((UUID, Int) async throws -> ScreenRecordingSession) {
+            return try await factory(id, frameRate)
         }
+        return try await makeSession(sessionID: id, frameRate: frameRate)
+    }
+
+    @available(macOS 15, *)
+    private func handleStartupFailure(sessionID id: UUID, error: Error) async {
+        if !isStale(sessionID: id), pendingStop {
+            await finalizeSession(sessionID: id, publish: true)
+            return
+        }
+        fail(sessionID: id, error: error)
+    }
+
+    @available(macOS 15, *)
+    private func makeSession(sessionID id: UUID, frameRate: Int) async throws -> ScreenRecordingSession {
+        let displayID = try Self.recordingDisplayID()
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
             throw NSError(domain: "ScreenRecordingService", code: -3,
@@ -229,6 +250,15 @@ final class ScreenRecordingService: NSObject {
                                              frameRate: frameRate,
                                              startUptime: ProcessInfo.processInfo.systemUptime)
         return session
+    }
+
+    private static func recordingDisplayID() throws -> CGDirectDisplayID {
+        // Area mode shares this adapter's pointer/main/first display ordering.
+        guard let screen = try ScreenshotService.currentCaptureScreen(.area) else {
+            throw NSError(domain: "ScreenRecordingService", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "Unable to determine which display to record."])
+        }
+        return screen.displayID
     }
 
     // MARK: - Finish
@@ -263,6 +293,11 @@ final class ScreenRecordingService: NSObject {
         } else {
             try? FileManager.default.removeItem(at: session.tempURL)
         }
+        completeFinalization(session: session, savedURL: savedURL)
+    }
+
+    @available(macOS 15, *)
+    private func completeFinalization(session: ScreenRecordingSession, savedURL: URL?) {
         if sessionBox as? ScreenRecordingSession === session {
             sessionBox = nil
         }
@@ -270,7 +305,7 @@ final class ScreenRecordingService: NSObject {
         // other operation can start between saving and showing the panel.
         let shouldReport = savedURL != nil && !isTerminating
         isTerminating = false
-        goIdleIfCurrent(sessionID: id)
+        goIdleIfCurrent(sessionID: session.id)
         if shouldReport, let savedURL {
             onRecordingSaved?(savedURL)
         }
@@ -285,7 +320,7 @@ final class ScreenRecordingService: NSObject {
             session.finalizeContinuation = continuation
             let id = session.id
             Task {
-                try? await Task.sleep(for: .seconds(Self.finalizeTimeout))
+                try? await Task.sleep(for: .seconds(self.finalizationDelay))
                 await MainActor.run {
                     self.timeoutFinalize(sessionID: id)
                 }
@@ -309,12 +344,11 @@ final class ScreenRecordingService: NSObject {
     @available(macOS 15, *)
     @discardableResult
     private func publishSession(_ session: ScreenRecordingSession) -> URL? {
-        defer { try? FileManager.default.removeItem(at: session.tempURL) }
         guard session.didFinishRecording else {
             try? FileManager.default.removeItem(at: session.tempURL)
-            AlertPresenter.presentWarning(
-                title: "Recording failed",
-                message: "The recording couldn’t be finalized, so it wasn’t saved."
+            errorPresenter(
+                "Recording failed",
+                "The recording couldn’t be finalized, so it wasn’t saved."
             )
             return nil
         }
@@ -322,6 +356,7 @@ final class ScreenRecordingService: NSObject {
         guard fileManager.fileExists(atPath: session.tempURL.path),
               let size = try? fileManager.attributesOfItem(atPath: session.tempURL.path)[.size] as? NSNumber,
               size.intValue > 0 else {
+            try? FileManager.default.removeItem(at: session.tempURL)
             return nil
         }
         do {
@@ -334,7 +369,10 @@ final class ScreenRecordingService: NSObject {
             try fileManager.moveItem(at: session.tempURL, to: target)
             return target
         } catch {
-            AlertPresenter.presentWarning(title: "Couldn’t save recording", message: error.localizedDescription)
+            // A finalized recording is the user's only copy until the move
+            // succeeds. Keep it available for recovery if the destination fails.
+            errorPresenter("Couldn’t save recording",
+                           "\(error.localizedDescription)\n\nThe recording was kept at \(session.tempURL.path).")
             return nil
         }
     }
@@ -352,7 +390,7 @@ final class ScreenRecordingService: NSObject {
             }
         }
         goIdleIfCurrent(sessionID: id)
-        AlertPresenter.presentWarning(title: "Recording failed", message: (error as NSError).localizedDescription)
+        errorPresenter("Recording failed", (error as NSError).localizedDescription)
     }
 
     private func goIdleIfCurrent(sessionID id: UUID) {
@@ -383,14 +421,19 @@ final class ScreenRecordingService: NSObject {
 
     // MARK: - Delegate callbacks (forwarded to main actor)
 
+    @available(macOS 15, *)
+    private func currentSession(_ id: UUID) -> ScreenRecordingSession? {
+        guard let session, session.id == id, !isStale(sessionID: id) else { return nil }
+        return session
+    }
+
     func handleRecordingDidStart(sessionID id: UUID) {
         guard #available(macOS 15, *),
-              let session, session.id == id, !isStale(sessionID: id),
-              !session.finalized, !session.writerStarted else { return }
+              let session = currentSession(id), !session.finalized, !session.writerStarted else { return }
         session.writerStarted = true
         Self.logger.notice("Recording writer started; state=\(String(describing: self.state), privacy: .public)")
         guard state == .starting, !pendingStop else { return }
-        session.startUptime = ProcessInfo.processInfo.systemUptime
+        session.startUptime = uptime()
         state = .recording
         startPollTimer()
         notify()
@@ -415,10 +458,10 @@ final class ScreenRecordingService: NSObject {
         }
     }
 
-    fileprivate func handleRecordingDidFail(sessionID id: UUID, error: Error) {
+    func handleRecordingDidFail(sessionID id: UUID, error: Error) {
         guard #available(macOS 15, *) else { return }
         // A late failure after finalize timed out must not disturb idle.
-        guard let session, session.id == id, !isStale(sessionID: id) else { return }
+        guard let session = currentSession(id) else { return }
         if session.finalized && state == .idle {
             return
         }
@@ -433,7 +476,7 @@ final class ScreenRecordingService: NSObject {
         }
     }
 
-    fileprivate func handleStreamDidStop(sessionID id: UUID, error: Error) {
+    func handleStreamDidStop(sessionID id: UUID, error: Error) {
         // Unexpected mid-recording stream death: stop and save what we have.
         guard state == .recording, !isStale(sessionID: id) else { return }
         stop()
@@ -457,11 +500,11 @@ final class ScreenRecordingService: NSObject {
         pollTimer = nil
     }
 
-    private func tick() {
+    func tick() {
         guard state == .recording else { return }
         if #available(macOS 15, *) {
             guard let session, session.id == sessionID else { return }
-            let now = ProcessInfo.processInfo.systemUptime
+            let now = uptime()
             elapsed = now - session.startUptime
             notify()
             if elapsed >= Self.maxDuration {
@@ -477,13 +520,13 @@ final class ScreenRecordingService: NSObject {
         if session.filterUpdateInProgress {
             return
         }
-        let liveDisplayIDs = Set(NSScreen.screens.compactMap { $0.recordingDisplayID })
-        guard liveDisplayIDs.contains(session.displayID) else {
+        let snapshot = displays()
+        guard snapshot.live.contains(session.displayID) else {
             // Recorded display disconnected: stop and save this prototype.
             stop()
             return
         }
-        guard let pointed = Self.screenUnderMouse()?.recordingDisplayID else {
+        guard let pointed = snapshot.pointed else {
             session.candidateDisplayID = nil
             return
         }
@@ -506,27 +549,33 @@ final class ScreenRecordingService: NSObject {
         session.filterUpdateInProgress = true
         let id = session.id
         Task {
-            defer {
-                Task { @MainActor [weak self] in
-                    self?.clearFilterUpdateFlag(sessionID: id)
+            defer { clearFilterUpdateFlag(sessionID: id) }
+            do {
+                let changed: Bool
+                if let update = displayUpdaterBox as? ((ScreenRecordingSession, CGDirectDisplayID) async throws -> Bool) {
+                    changed = try await update(session, displayID)
+                } else {
+                    changed = try await updateDisplayFilter(session: session, to: displayID)
                 }
-            }
-            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-            guard let display = content.displays.first(where: { $0.displayID == displayID }) else { return }
-            let filter = SCContentFilter(display: display,
-                                         excludingApplications: Self.excludedApplications(in: content),
-                                         exceptingWindows: [])
-            // Same stream, same output file, same fixed canvas: only the
-            // content filter changes. Whether SCRecordingOutput keeps writing
-            // one seamless file across this update is unverified at runtime.
-            try await session.stream.updateContentFilter(filter)
-            await MainActor.run {
-                guard !self.isStale(sessionID: id),
-                      let current = self.session, current.id == id else { return }
+                guard changed, let current = currentSession(id) else { return }
                 current.displayID = displayID
                 current.candidateDisplayID = nil
+            } catch {
+                // Keep the current stream on failure. A later dwell may retry.
+                Self.logger.error("Display update failed: \(error.localizedDescription, privacy: .public)")
             }
         }
+    }
+
+    @available(macOS 15, *)
+    private func updateDisplayFilter(session: ScreenRecordingSession, to displayID: CGDirectDisplayID) async throws -> Bool {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        guard let display = content.displays.first(where: { $0.displayID == displayID }) else { return false }
+        let filter = SCContentFilter(display: display,
+                                     excludingApplications: Self.excludedApplications(in: content),
+                                     exceptingWindows: [])
+        try await session.stream.updateContentFilter(filter)
+        return true
     }
 
     // MARK: - Stream configuration
@@ -543,7 +592,7 @@ final class ScreenRecordingService: NSObject {
     }
 
     @available(macOS 15, *)
-    private static func makeStreamConfiguration(frameRate: Int) -> SCStreamConfiguration {
+    static func makeStreamConfiguration(frameRate: Int) -> SCStreamConfiguration {
         let configuration = SCStreamConfiguration()
         // Fixed 1920x1080 canvas. scalesToFit + preservesAspectRatio fits the
         // entire display without cropping or stretching; the black background

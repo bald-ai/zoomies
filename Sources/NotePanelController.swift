@@ -8,6 +8,17 @@ enum NotePanelAction {
     case close
     case backToRename(text: String)
     case goToEditor(text: String)
+
+    var completion: (action: ScreenshotFinalAction, note: String?)? {
+        switch self {
+        case .save(let text): return (.saveOnly, text)
+        case .copyAndSave(let text): return (.copyAndSave, text)
+        case .copyAndDelete(let text): return (.copyAndDelete, text)
+        case .delete: return (.deleteOnly, nil)
+        case .close: return (.closeOnly, nil)
+        case .backToRename, .goToEditor: return nil
+        }
+    }
 }
 
 class NotePanelController: NSWindowController {
@@ -61,6 +72,20 @@ class NotePanelController: NSWindowController {
         fatalError("init(coder:) has not been implemented")
     }
 
+    private func handleKeyCommand(_ command: KeyCommand) {
+        let value = String(textView.string.prefix(maxLength))
+        let actions: [KeyCommand: NotePanelAction?] = [
+            .enter: .save(text: value),
+            .commandEnter: .copyAndSave(text: value),
+            .commandShiftEnter: .copyAndSave(text: value),
+            .commandBackspace: showsCopyAndDelete ? .copyAndDelete(text: value) : nil,
+            .escape: escapeKeyDeletesFile ? .delete : .close,
+            .tab: showsEditorShortcut ? .goToEditor(text: value) : nil,
+            .shiftTab: .backToRename(text: value)
+        ]
+        if let action = actions[command] ?? nil { onAction?(action) }
+    }
+
     private func configureUI(initialText: String) {
         guard let contentView = window?.contentView else { return }
 
@@ -93,35 +118,7 @@ class NotePanelController: NSWindowController {
         textView.configureFixedWhiteText()
         textView.setFixedWhiteString(String(initialText.prefix(maxLength)))
 
-        textView.keyCommandHandler = { [weak self] (command: KeyCommand) in
-            guard let self = self else { return }
-            let value = String(self.textView.string.prefix(self.maxLength))
-            switch command {
-            case .enter:
-                self.onAction?(.save(text: value))
-            case .commandEnter, .commandShiftEnter:
-                // The note interpreter folds Cmd+Shift+Enter into commandEnter
-                // (Command wins over Shift); the second case only guards
-                // exhaustiveness if that ever changes.
-                self.onAction?(.copyAndSave(text: value))
-            case .commandBackspace:
-                if self.showsCopyAndDelete {
-                    self.onAction?(.copyAndDelete(text: value))
-                }
-            case .escape:
-                if self.escapeKeyDeletesFile {
-                    self.onAction?(.delete)
-                } else {
-                    self.onAction?(.close)
-                }
-            case .tab:
-                if self.showsEditorShortcut {
-                    self.onAction?(.goToEditor(text: value))
-                }
-            case .shiftTab:
-                self.onAction?(.backToRename(text: value))
-            }
-        }
+        textView.keyCommandHandler = { [weak self] command in self?.handleKeyCommand(command) }
 
         let scrollView = NSScrollView()
         scrollView.borderType = .bezelBorder
@@ -325,8 +322,7 @@ func interpretNoteKeyCommand(from event: NSEvent) -> KeyCommand? {
     case 36, 76:
         // Shift+Enter falls through to super.keyDown so the text view inserts
         // a newline; plain Enter still saves. Mirrors EditorInlineTextView.
-        if flags.contains(.shift) && !flags.contains(.command) { return nil }
-        return flags.contains(.command) ? .commandEnter : .enter
+        return noteEnterCommand(flags: flags)
     case 51:
         return flags.contains(.command) ? .commandBackspace : nil
     case 53:
@@ -336,4 +332,9 @@ func interpretNoteKeyCommand(from event: NSEvent) -> KeyCommand? {
     default:
         return nil
     }
+}
+
+private func noteEnterCommand(flags: NSEvent.ModifierFlags) -> KeyCommand? {
+    if flags.contains(.command) { return .commandEnter }
+    return flags.contains(.shift) ? nil : .enter
 }

@@ -37,3 +37,9 @@ RELEASE_TODO.md
 # Python bytecode (no Python is part of this project).
 __pycache__/
 *.pyc
+
+# Disposable verification output; manual runs clean it up.
+/Dev/quality-campaign
+/Dev/code-quality-metrics-local.json
+/.verification-session/
+/**/__pycache__/

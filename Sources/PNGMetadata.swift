@@ -72,78 +72,74 @@ enum PNGMetadata {
         let bytes = [UInt8](pngData)
         guard hasPNGSignature(bytes) else { return nil }
 
+        var metadata = NoteMetadata()
+        var cursor = 8
+        while let chunk = nextChunk(in: bytes, cursor: &cursor) {
+            guard metadata.read(chunk, limits: limits) else { return nil }
+        }
+        guard let original = metadata.original, let prompt = metadata.prompt else { return nil }
+        return (original, prompt)
+    }
+
+    private struct Chunk {
+        let type: String
+        let payload: ArraySlice<UInt8>
+
+        func hasKeyword(_ keyword: String) -> Bool {
+            type == "iTXt" && isKeyword(keyword, in: payload, dataStart: payload.startIndex, length: payload.count)
+        }
+    }
+
+    /// Iterates complete chunks only, and never reads past IEND. A truncated
+    /// tail retains the complete metadata preceding it, as in earlier files.
+    private static func nextChunk(in bytes: [UInt8], cursor: inout Int) -> Chunk? {
+        guard cursor + 8 <= bytes.count, let length = readUInt32(bytes, at: cursor) else { return nil }
+        let dataStart = cursor + 8
+        let end = dataStart + Int(length)
+        guard end + 4 <= bytes.count else { return nil }
+        let type = String(bytes: bytes[(cursor + 4)..<dataStart], encoding: .ascii) ?? ""
+        cursor = type == "IEND" ? bytes.count : end + 4
+        return Chunk(type: type, payload: bytes[dataStart..<end])
+    }
+
+    private struct NoteMetadata {
         var original: Data?
         var prompt: String?
-        var index = 8
-        while index + 8 <= bytes.count {
-            guard let length = readUInt32(bytes, at: index) else { break }
-            let typeStart = index + 4
-            let dataStart = typeStart + 4
-            let len = Int(length)
-            guard dataStart + len + 4 <= bytes.count else { break }
 
-            let type = String(bytes: bytes[typeStart..<dataStart], encoding: .ascii) ?? ""
-            if type == "iTXt" {
-                if isKeyword(originalPNGKeyword, in: bytes, dataStart: dataStart, length: len) {
-                    if len > limits.maxOriginalPNGChunkBytes {
-                        return nil
-                    }
-                    if let text = parseITXt(bytes[dataStart..<dataStart + len]),
-                       let decoded = Data(base64Encoded: text),
-                       ImageSafety.isSafePNG(decoded, limits: limits),
-                       decoded.count <= limits.maxEmbeddedImageBytes {
-                        original = decoded
-                    } else {
-                        return nil
-                    }
-                } else if isKeyword(promptKeyword, in: bytes, dataStart: dataStart, length: len) {
-                    if len > limits.maxPromptChunkBytes {
-                        return nil
-                    }
-                    if let text = parseITXt(bytes[dataStart..<dataStart + len]),
-                       text.count <= limits.maxPromptLength {
-                        prompt = text
-                    } else {
-                        return nil
-                    }
-                }
+        mutating func read(_ chunk: Chunk, limits: ImageSafetyLimits) -> Bool {
+            if chunk.hasKeyword(originalPNGKeyword) {
+                guard let decoded = validatedOriginal(chunk.payload, limits: limits) else { return false }
+                original = decoded
+            } else if chunk.hasKeyword(promptKeyword) {
+                guard chunk.payload.count <= limits.maxPromptChunkBytes,
+                      let text = parseITXt(chunk.payload), text.count <= limits.maxPromptLength else { return false }
+                prompt = text
             }
-            if type == "IEND" { break }
-            index = dataStart + len + 4
+            return true
         }
+    }
 
-        guard let original, let prompt else { return nil }
-        return (original, prompt)
+    private static func validatedOriginal(_ payload: ArraySlice<UInt8>, limits: ImageSafetyLimits) -> Data? {
+        guard payload.count <= limits.maxOriginalPNGChunkBytes,
+              let text = parseITXt(payload), let decoded = Data(base64Encoded: text),
+              ImageSafety.isSafePNG(decoded, limits: limits),
+              decoded.count <= limits.maxEmbeddedImageBytes else { return nil }
+        return decoded
     }
 
     static func extractEditorState(fromPNG pngData: Data,
                                    limits: EditorCanvasState.SafetyLimits = .runtime) -> EditorCanvasState? {
         let bytes = [UInt8](pngData)
         guard hasPNGSignature(bytes) else { return nil }
-
         var editorState: EditorCanvasState?
-        var index = 8
-        while index + 8 <= bytes.count {
-            guard let length = readUInt32(bytes, at: index) else { break }
-            let typeStart = index + 4
-            let dataStart = typeStart + 4
-            let len = Int(length)
-            guard dataStart + len + 4 <= bytes.count else { break }
-
-            let type = String(bytes: bytes[typeStart..<dataStart], encoding: .ascii) ?? ""
-            if type == "iTXt",
-               isKeyword(editorStateKeyword, in: bytes, dataStart: dataStart, length: len) {
-                if len > limits.maxEditorStateChunkBytes {
-                    return nil
-                }
-                if let text = parseITXt(bytes[dataStart..<dataStart + len]) {
-                    editorState = decodeEditorState(text, limits: limits)
-                }
+        var cursor = 8
+        while let chunk = nextChunk(in: bytes, cursor: &cursor) {
+            guard chunk.hasKeyword(editorStateKeyword) else { continue }
+            guard chunk.payload.count <= limits.maxEditorStateChunkBytes else { return nil }
+            if let text = parseITXt(chunk.payload) {
+                editorState = decodeEditorState(text, limits: limits)
             }
-            if type == "IEND" { break }
-            index = dataStart + len + 4
         }
-
         return editorState
     }
 

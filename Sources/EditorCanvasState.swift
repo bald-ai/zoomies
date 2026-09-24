@@ -105,23 +105,8 @@ struct EditorCanvasState: Codable {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             let type = try container.decode(Kind.self, forKey: .type)
             switch type {
-            case .pen:
-                self = .pen(points: try container.decode([Point].self, forKey: .points),
-                            color: try container.decode(Color.self, forKey: .color),
-                            lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
-            case .arrow:
-                self = .arrow(start: try container.decode(Point.self, forKey: .start),
-                              end: try container.decode(Point.self, forKey: .end),
-                              color: try container.decode(Color.self, forKey: .color),
-                              lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
-            case .rect:
-                self = .rect(rect: try container.decode(Rect.self, forKey: .rect),
-                             color: try container.decode(Color.self, forKey: .color),
-                             lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
-            case .ellipse:
-                self = .ellipse(rect: try container.decode(Rect.self, forKey: .rect),
-                                color: try container.decode(Color.self, forKey: .color),
-                                lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
+            case .pen, .arrow, .rect, .ellipse:
+                self = try Self.decodeStroke(type, from: container)
             case .text:
                 self = .text(try container.decode(Text.self, forKey: .text))
             case .marker:
@@ -134,8 +119,50 @@ struct EditorCanvasState: Codable {
             }
         }
 
+        private static func decodeStroke(_ type: Kind, from container: KeyedDecodingContainer<CodingKeys>) throws -> Item {
+            switch type {
+            case .pen:
+                return .pen(points: try container.decode([Point].self, forKey: .points),
+                            color: try container.decode(Color.self, forKey: .color),
+                            lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
+            case .arrow:
+                return .arrow(start: try container.decode(Point.self, forKey: .start),
+                              end: try container.decode(Point.self, forKey: .end),
+                              color: try container.decode(Color.self, forKey: .color),
+                              lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
+            case .rect:
+                return .rect(rect: try container.decode(Rect.self, forKey: .rect),
+                             color: try container.decode(Color.self, forKey: .color),
+                             lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
+            case .ellipse:
+                return .ellipse(rect: try container.decode(Rect.self, forKey: .rect),
+                                color: try container.decode(Color.self, forKey: .color),
+                                lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
+            default: throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "Expected a vector stroke")
+            }
+        }
+
         func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case .pen, .arrow, .rect, .ellipse:
+                try encodeStroke(to: &container)
+            case .text(let text):
+                try container.encode(Kind.text, forKey: .type)
+                try container.encode(text, forKey: .text)
+            case .marker(let marker):
+                try container.encode(Kind.marker, forKey: .type)
+                try container.encode(marker, forKey: .marker)
+            case .image(let pngData, let rect):
+                try container.encode(Kind.image, forKey: .type)
+                try container.encode(pngData, forKey: .pngData)
+                try container.encode(rect, forKey: .rect)
+            case .erase(let rect):
+                try container.encode(Kind.erase, forKey: .type)
+                try container.encode(rect, forKey: .rect)
+            }
+        }
+        private func encodeStroke(to container: inout KeyedEncodingContainer<CodingKeys>) throws {
             switch self {
             case .pen(let points, let color, let lineWidth):
                 try container.encode(Kind.pen, forKey: .type)
@@ -158,19 +185,7 @@ struct EditorCanvasState: Codable {
                 try container.encode(rect, forKey: .rect)
                 try container.encode(color, forKey: .color)
                 try container.encode(lineWidth, forKey: .lineWidth)
-            case .text(let text):
-                try container.encode(Kind.text, forKey: .type)
-                try container.encode(text, forKey: .text)
-            case .marker(let marker):
-                try container.encode(Kind.marker, forKey: .type)
-                try container.encode(marker, forKey: .marker)
-            case .image(let pngData, let rect):
-                try container.encode(Kind.image, forKey: .type)
-                try container.encode(pngData, forKey: .pngData)
-                try container.encode(rect, forKey: .rect)
-            case .erase(let rect):
-                try container.encode(Kind.erase, forKey: .type)
-                try container.encode(rect, forKey: .rect)
+            default: break
             }
         }
     }
@@ -221,6 +236,10 @@ extension EditorCanvasState {
             }
             union = union.union(bounds)
         }
+        return isSafeExportBounds(union, limits: limits)
+    }
+
+    private func isSafeExportBounds(_ union: NSRect, limits: SafetyLimits) -> Bool {
         guard union.width.isFinite, union.height.isFinite,
               let width = ImageSafety.pixelLength(union.width),
               let height = ImageSafety.pixelLength(union.height) else {
@@ -243,12 +262,10 @@ private extension EditorCanvasState.Point {
 
 private extension EditorCanvasState.Rect {
     func isSafe(limits: EditorCanvasState.SafetyLimits) -> Bool {
-        x.isFinite && y.isFinite && width.isFinite && height.isFinite
-            && abs(x) <= limits.maxAbsoluteCoordinate
-            && abs(y) <= limits.maxAbsoluteCoordinate
-            && width > 0 && height > 0
-            && width <= CGFloat(limits.maxDimension)
-            && height <= CGFloat(limits.maxDimension)
+        EditorCanvasState.Point(NSPoint(x: x, y: y)).isSafe(limits: limits)
+            && [width, height].allSatisfy {
+                $0.isFinite && $0 > 0 && $0 <= CGFloat(limits.maxDimension)
+            }
     }
 }
 
@@ -262,42 +279,46 @@ private extension EditorCanvasState.Item {
     func isSafeToRestore(limits: EditorCanvasState.SafetyLimits) -> Bool {
         switch self {
         case .pen(let points, let color, let lineWidth):
-            return points.count <= limits.maxPenPointCount
-                && points.allSatisfy { $0.isSafe(limits: limits) }
-                && color.isSafe
-                && isSafeLineWidth(lineWidth, limits: limits)
+            return isSafePen(points, color: color, lineWidth: lineWidth, limits: limits)
         case .arrow(let start, let end, let color, let lineWidth):
-            return start.isSafe(limits: limits)
-                && end.isSafe(limits: limits)
-                && color.isSafe
-                && isSafeLineWidth(lineWidth, limits: limits)
+            return isSafeArrow(start, end: end, color: color, lineWidth: lineWidth, limits: limits)
         case .rect(let rect, let color, let lineWidth),
              .ellipse(let rect, let color, let lineWidth):
-            return rect.isSafe(limits: limits)
-                && color.isSafe
-                && isSafeLineWidth(lineWidth, limits: limits)
+            return isSafeShape(rect, color: color, lineWidth: lineWidth, limits: limits)
         case .text(let text):
-            return text.text.count <= limits.maxTextLength
-                && text.origin.isSafe(limits: limits)
-                && text.color.isSafe
-                && text.fontSize.isFinite
-                && text.fontSize > 0
-                && text.fontSize <= limits.maxFontSize
+            return text.isSafe(limits: limits)
         case .marker(let marker):
-            return marker.number >= 1
-                && marker.number <= EditorDrawing.MarkerItem.maxNumber
-                && marker.center.isSafe(limits: limits)
-                && marker.color.isSafe
-                && marker.diameter.isFinite
-                && marker.diameter > 0
-                && marker.diameter <= limits.maxFontSize
+            return marker.isSafe(limits: limits)
         case .image(let pngData, let rect):
-            return pngData.count <= limits.maxEmbeddedImageBytes
-                && ImageSafety.isSafePNG(pngData, limits: limits)
-                && rect.isSafe(limits: limits)
+            return isSafeImage(pngData, rect: rect, limits: limits)
         case .erase(let rect):
             return rect.isSafe(limits: limits)
         }
+    }
+
+    func isSafePen(_ points: [EditorCanvasState.Point], color: EditorCanvasState.Color,
+                   lineWidth: CGFloat, limits: EditorCanvasState.SafetyLimits) -> Bool {
+        points.count <= limits.maxPenPointCount
+            && points.allSatisfy { $0.isSafe(limits: limits) }
+            && color.isSafe && isSafeLineWidth(lineWidth, limits: limits)
+    }
+
+    func isSafeArrow(_ start: EditorCanvasState.Point, end: EditorCanvasState.Point,
+                     color: EditorCanvasState.Color, lineWidth: CGFloat,
+                     limits: EditorCanvasState.SafetyLimits) -> Bool {
+        start.isSafe(limits: limits) && end.isSafe(limits: limits)
+            && color.isSafe && isSafeLineWidth(lineWidth, limits: limits)
+    }
+
+    func isSafeShape(_ rect: EditorCanvasState.Rect, color: EditorCanvasState.Color,
+                     lineWidth: CGFloat, limits: EditorCanvasState.SafetyLimits) -> Bool {
+        rect.isSafe(limits: limits) && color.isSafe && isSafeLineWidth(lineWidth, limits: limits)
+    }
+
+    func isSafeImage(_ pngData: Data, rect: EditorCanvasState.Rect,
+                     limits: EditorCanvasState.SafetyLimits) -> Bool {
+        pngData.count <= limits.maxEmbeddedImageBytes
+            && ImageSafety.isSafePNG(pngData, limits: limits) && rect.isSafe(limits: limits)
     }
 
     func isSafeLineWidth(_ lineWidth: CGFloat, limits: EditorCanvasState.SafetyLimits) -> Bool {
@@ -307,12 +328,7 @@ private extension EditorCanvasState.Item {
     func estimatedCanvasBounds(limits _: EditorCanvasState.SafetyLimits) -> NSRect? {
         switch self {
         case .pen(let points, _, let lineWidth):
-            guard let first = points.first else { return nil }
-            var union = NSRect(x: first.x, y: first.y, width: 0, height: 0)
-            for point in points {
-                union = union.union(NSRect(x: point.x, y: point.y, width: 0, height: 0))
-            }
-            return union.insetBy(dx: -lineWidth, dy: -lineWidth)
+            return estimatedPenBounds(points: points, lineWidth: lineWidth)
         case .arrow(let start, let end, _, let lineWidth):
             let union = NSRect(x: start.x, y: start.y, width: 0, height: 0)
                 .union(NSRect(x: end.x, y: end.y, width: 0, height: 0))
@@ -321,22 +337,54 @@ private extension EditorCanvasState.Item {
              .ellipse(let rect, _, let lineWidth):
             return rect.nsRect.insetBy(dx: -lineWidth / 2, dy: -lineWidth / 2)
         case .text(let text):
-            let width = CGFloat(text.text.count) * text.fontSize
-            let height = text.fontSize * 1.5
-            guard width.isFinite, height.isFinite else { return nil }
-            return NSRect(x: text.origin.x, y: text.origin.y, width: max(width, 1), height: max(height, 1))
+            return estimatedTextBounds(text)
         case .marker(let marker):
-            // Generous capsule estimate: digit count widens the marker.
-            let digits = max(1, String(marker.number).count)
-            let width = max(marker.diameter, CGFloat(digits) * marker.diameter * 0.7) + 8
-            let height = marker.diameter + 8
-            guard width.isFinite, height.isFinite else { return nil }
-            return NSRect(x: marker.center.x - width / 2,
-                          y: marker.center.y - height / 2,
-                          width: max(width, 1),
-                          height: max(height, 1))
+            return estimatedMarkerBounds(marker)
         case .image(_, let rect), .erase(let rect):
             return rect.nsRect
         }
+    }
+    private func estimatedPenBounds(points: [EditorCanvasState.Point], lineWidth: CGFloat) -> NSRect? {
+        guard let first = points.first else { return nil }
+        var union = NSRect(x: first.x, y: first.y, width: 0, height: 0)
+        for point in points {
+            union = union.union(NSRect(x: point.x, y: point.y, width: 0, height: 0))
+        }
+        return union.insetBy(dx: -lineWidth, dy: -lineWidth)
+    }
+
+    private func estimatedTextBounds(_ text: EditorCanvasState.Text) -> NSRect? {
+        let width = CGFloat(text.text.count) * text.fontSize
+        let height = text.fontSize * 1.5
+        guard width.isFinite, height.isFinite else { return nil }
+        return NSRect(x: text.origin.x, y: text.origin.y, width: max(width, 1), height: max(height, 1))
+    }
+
+    private func estimatedMarkerBounds(_ marker: EditorCanvasState.Marker) -> NSRect? {
+        // Generous capsule estimate: digit count widens the marker.
+        let digits = max(1, String(marker.number).count)
+        let width = max(marker.diameter, CGFloat(digits) * marker.diameter * 0.7) + 8
+        let height = marker.diameter + 8
+        guard width.isFinite, height.isFinite else { return nil }
+        return NSRect(x: marker.center.x - width / 2,
+                      y: marker.center.y - height / 2,
+                      width: max(width, 1),
+                      height: max(height, 1))
+    }
+
+}
+
+private extension EditorCanvasState.Text {
+    func isSafe(limits: EditorCanvasState.SafetyLimits) -> Bool {
+        text.count <= limits.maxTextLength && origin.isSafe(limits: limits)
+            && color.isSafe && fontSize.isFinite && fontSize > 0 && fontSize <= limits.maxFontSize
+    }
+}
+
+private extension EditorCanvasState.Marker {
+    func isSafe(limits: EditorCanvasState.SafetyLimits) -> Bool {
+        number >= 1 && number <= EditorDrawing.MarkerItem.maxNumber
+            && center.isSafe(limits: limits) && color.isSafe
+            && diameter.isFinite && diameter > 0 && diameter <= limits.maxFontSize
     }
 }

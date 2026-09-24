@@ -147,9 +147,12 @@ final class FilenameTemplateEditorView: NSView, NSTableViewDataSource, NSTableVi
     }
 
     func tableView(_ tableView: NSTableView, acceptDrop info: any NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
-        guard let item = info.draggingPasteboard.pasteboardItems?.first,
-              let uuidString = item.string(forType: blockPasteboardType),
-              let draggedID = UUID(uuidString: uuidString) else { return false }
+        let value = info.draggingPasteboard.pasteboardItems?.first?.string(forType: blockPasteboardType)
+        return moveBlock(fromPasteboardString: value, toRow: row)
+    }
+
+    func moveBlock(fromPasteboardString value: String?, toRow row: Int) -> Bool {
+        guard let value, let draggedID = UUID(uuidString: value) else { return false }
 
         guard let sourceIndex = blocks.firstIndex(where: { $0.id == draggedID }) else { return false }
 

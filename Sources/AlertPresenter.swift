@@ -5,6 +5,8 @@ enum AlertPresenter {
     static var appActivator: () -> Void = { NSApp.activate(ignoringOtherApps: true) }
     static var modalRunner: (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
 
+    static var urlOpener: (URL) -> Void = { NSWorkspace.shared.open($0) }
+
     /// Keep floating workflow panels below the modal while it is running.
     /// Setting only the alert's level before runModal is not sufficient: modal
     /// presentation manages the alert's level itself.
@@ -61,7 +63,7 @@ enum AlertPresenter {
             let response = runModal(alert)
             if response == .alertFirstButtonReturn {
                 if let url = URL(string: settingsURL) {
-                    NSWorkspace.shared.open(url)
+                    urlOpener(url)
                 }
             }
         }

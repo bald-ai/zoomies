@@ -5,6 +5,9 @@ import AppKit
 final class ScratchpadService {
     private let clipboardService: ClipboardService
     private let noteWriter: ScratchpadNoteWriter
+    private let showNote: (DedicatedNotePanelController) -> Void
+    private let showRename: (RenamePanelController) -> Void
+    private let errorPresenter: (String, String) -> Void
 
     private var renamePanelController: RenamePanelController?
     private var notePanelController: DedicatedNotePanelController?
@@ -22,8 +25,14 @@ final class ScratchpadService {
 
     init(fileManager: FileManager = .default,
          clipboardService: ClipboardService,
-         desktopDirectory: URL? = nil) {
+         desktopDirectory: URL? = nil,
+         showNote: @escaping (DedicatedNotePanelController) -> Void = { $0.show() },
+         showRename: @escaping (RenamePanelController) -> Void = { $0.show() },
+         errorPresenter: @escaping (String, String) -> Void = { AlertPresenter.presentWarning(title: $0, message: $1) }) {
         self.clipboardService = clipboardService
+        self.showNote = showNote
+        self.showRename = showRename
+        self.errorPresenter = errorPresenter
         let resolvedDesktopDirectory = desktopDirectory
             ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Desktop", isDirectory: true)
         self.noteWriter = ScratchpadNoteWriter(fileManager: fileManager, directory: resolvedDesktopDirectory)
@@ -41,12 +50,12 @@ final class ScratchpadService {
 
     private func openOnMain() {
         if let notePanelController {
-            notePanelController.show()
+            showNote(notePanelController)
             return
         }
 
         if let renamePanelController {
-            renamePanelController.show()
+            showRename(renamePanelController)
             return
         }
 
@@ -69,10 +78,10 @@ final class ScratchpadService {
         renamePanelController = controller
         presentedPanel = .rename
         centerOnActiveScreen(controller.window)
-        controller.show()
+        showRename(controller)
     }
 
-    private func handleRenameAction(_ action: RenamePanelAction) {
+    func handleRenameAction(_ action: RenamePanelAction) {
         switch action {
         case .save(let newName):
             saveAndClose(text: cachedText, newName: newName, copy: false)
@@ -98,10 +107,10 @@ final class ScratchpadService {
         notePanelController = controller
         presentedPanel = .note
         centerOnActiveScreen(controller.window)
-        controller.show()
+        showNote(controller)
     }
 
-    private func handleNoteAction(_ action: NotePanelAction) {
+    func handleNoteAction(_ action: NotePanelAction) {
         switch action {
         case .save(let text):
             saveAndClose(text: text, newName: currentBaseName, copy: false)
@@ -130,7 +139,7 @@ final class ScratchpadService {
             }
             closeFlow()
         } catch {
-            AlertPresenter.presentWarning(title: "Couldn't save note", message: error.localizedDescription)
+            errorPresenter("Couldn't save note", error.localizedDescription)
         }
     }
 

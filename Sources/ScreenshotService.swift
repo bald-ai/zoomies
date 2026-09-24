@@ -11,8 +11,20 @@ extension ScreenshotSoundPlayer: ScreenshotSoundPlaying {}
 /// Handles screenshot capture, resizing, encoding and filename generation,
 /// and then kicks off the rename/note workflow.
 final class ScreenshotService: NSObject {
-    private struct ScreenSnapshot: Sendable {
+    enum CaptureMode { case area, fullScreen }
+    enum ScreenResolutionError: LocalizedError {
+        case missingDisplayID
+        var errorDescription: String? { "Unable to determine display ID." }
+    }
+
+    struct ScreenSnapshot: Sendable {
         let displayID: CGDirectDisplayID
+        let frame: CGRect
+        let scale: CGFloat
+    }
+
+    struct ScreenCandidate {
+        let displayID: CGDirectDisplayID?
         let frame: CGRect
         let scale: CGFloat
     }
@@ -23,17 +35,15 @@ final class ScreenshotService: NSObject {
         let currentCounter: Int
     }
 
-    @MainActor
-    private struct ShareableContentPrefetch {
-        let token: UUID
-        let task: Task<SCShareableContent, Error>
-        var fetchedAt: Date?
-    }
-
     private let settingsStore: SettingsStore
     private let backupService: BackupService
     private let clipboardService: ClipboardService
     private let soundPlayer: ScreenshotSoundPlaying
+    private let areaCapture: () async throws -> CGImage?
+    private let workflowPresenter: (ScreenshotWorkflowController) -> Void
+    private let errorPresenter: (String, String) -> Void
+    private let captureScreen: (CaptureMode) throws -> ScreenSnapshot?
+    private let regionCapture: ((CGRect, ScreenSnapshot) async throws -> CGImage)?
 
     private let fileManager: FileManager
     private let desktopDirectory: URL
@@ -41,19 +51,28 @@ final class ScreenshotService: NSObject {
 
     private var activeWorkflow: ScreenshotWorkflowController?
     private var isCaptureInProgress = false
-    @MainActor private var shareableContentPrefetch: ShareableContentPrefetch?
-    private let shareableContentPrefetchTTL: TimeInterval = 2
+    @MainActor private var contentCache: CaptureContentCache<SCShareableContent>?
 
     init(settingsStore: SettingsStore,
          backupService: BackupService,
          clipboardService: ClipboardService,
          fileManager: FileManager = .default,
          desktopDirectory: URL? = nil,
-         soundPlayer: ScreenshotSoundPlaying = ScreenshotSoundPlayer()) {
+         soundPlayer: ScreenshotSoundPlaying = ScreenshotSoundPlayer(),
+         areaCapture: @escaping () async throws -> CGImage? = { try await NativeAreaCapture.capture() },
+         captureScreen: @escaping (CaptureMode) throws -> ScreenSnapshot? = ScreenshotService.currentCaptureScreen,
+         regionCapture: ((CGRect, ScreenSnapshot) async throws -> CGImage)? = nil,
+         workflowPresenter: @escaping (ScreenshotWorkflowController) -> Void = { $0.start() },
+         errorPresenter: @escaping (String, String) -> Void = { AlertPresenter.presentWarning(title: $0, message: $1) }) {
         self.settingsStore = settingsStore
         self.backupService = backupService
         self.clipboardService = clipboardService
         self.soundPlayer = soundPlayer
+        self.areaCapture = areaCapture
+        self.captureScreen = captureScreen
+        self.regionCapture = regionCapture
+        self.workflowPresenter = workflowPresenter
+        self.errorPresenter = errorPresenter
         self.fileManager = fileManager
 
         if let desktopDirectory {
@@ -80,25 +99,10 @@ final class ScreenshotService: NSObject {
             return
         }
 
-        isCaptureInProgress = true
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let image = try await NativeAreaCapture.capture()
-                try await MainActor.run {
-                    defer { self.isCaptureInProgress = false }
-                    guard let image else { return }
-                    // The pointer remains on the display where selection finished.
-                    let screen = self.screenUnderMouse() ?? NSScreen.main ?? NSScreen.screens.first
-                    guard let displayID = screen?.displayID else { return }
-                    try self.finishCapture(with: image, onDisplayID: displayID)
-                }
-            } catch {
-                await MainActor.run {
-                    self.isCaptureInProgress = false
-                    self.handleCaptureFailure(error)
-                }
-            }
+        performCapture { [self] in
+            guard let image = try await areaCapture() else { return nil }
+            guard let screen = try await MainActor.run(body: { try self.captureScreen(.area) }) else { return nil }
+            return (image, screen.displayID)
         }
     }
 
@@ -114,11 +118,12 @@ final class ScreenshotService: NSObject {
         guard canStartFullScreenCapture() else {
             return
         }
-        guard let screen = screenUnderMouse() ?? menuBarScreen() ?? NSScreen.main ?? NSScreen.screens.first else {
-            return
+        do {
+            guard let screen = try captureScreen(.fullScreen) else { return }
+            captureRegion(in: screen.frame, on: screen)
+        } catch {
+            handleCaptureFailure(error)
         }
-
-        captureRegion(in: screen.frame, on: screen)
     }
 
     /// Starts the rename/note flow for an already-saved image.
@@ -181,7 +186,7 @@ final class ScreenshotService: NSObject {
         }
 
         activeWorkflow = workflow
-        workflow.start()
+        workflowPresenter(workflow)
     }
 
     var isBusyForUserCommands: Bool {
@@ -215,37 +220,30 @@ final class ScreenshotService: NSObject {
         canStartNewCapture()
     }
 
-    private func captureRegion(in rect: CGRect, on screen: NSScreen) {
-        if !Thread.isMainThread {
-            let screenID = screen.displayID
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let targetScreen = self.screenForDisplayID(screenID) ?? NSScreen.main ?? NSScreen.screens.first
-                guard let targetScreen else { return }
-                self.captureRegion(in: rect, on: targetScreen)
+    private func captureRegion(in rect: CGRect, on screen: ScreenSnapshot) {
+        performCapture { [self] in
+            let image: CGImage
+            if let regionCapture {
+                image = try await regionCapture(rect, screen)
+            } else {
+                image = try await captureCGImage(rect: rect, on: screen)
             }
-            return
+            return (image, screen.displayID)
         }
+    }
 
-        guard !isCaptureInProgress else { return }
-        guard let displayID = screen.displayID else {
-            presentError(title: "Screenshot failed", message: "Unable to determine display ID.")
-            return
-        }
-
-        let snapshot = ScreenSnapshot(displayID: displayID,
-                                      frame: screen.frame,
-                                      scale: screen.backingScaleFactor)
+    /// Both capture adapters share command gating, cancellation, failure and
+    /// the handoff to persistence. A nil result is user cancellation.
+    private func performCapture(_ operation: @escaping () async throws -> (CGImage, CGDirectDisplayID)?) {
+        guard canStartNewCapture() else { return }
         isCaptureInProgress = true
-
-        Task { [weak self] in
-            guard let self else { return }
-
+        Task { [self] in
             do {
-                let cgImage = try await self.captureCGImage(rect: rect, on: snapshot)
+                let result = try await operation()
                 try await MainActor.run {
                     defer { self.isCaptureInProgress = false }
-                    try self.finishCapture(with: cgImage, onDisplayID: snapshot.displayID)
+                    guard let (image, displayID) = result else { return }
+                    try self.finishCapture(with: image, onDisplayID: displayID)
                 }
             } catch {
                 await MainActor.run {
@@ -277,6 +275,23 @@ final class ScreenshotService: NSObject {
                           code: -3,
                           userInfo: [NSLocalizedDescriptionKey: "No display found for capture."])
         }
+        let configuration = try Self.captureConfiguration(rect: rect, screen: screen)
+
+        let excludedApplications = content.applications.filter { application in
+            application.processID == ProcessInfo.processInfo.processIdentifier
+        }
+        let filter = SCContentFilter(display: display,
+                                     excludingApplications: excludedApplications,
+                                     exceptingWindows: [])
+
+        return try await withCheckedThrowingContinuation { continuation in
+            SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, error in
+                continuation.resume(with: Result { try Self.captureResult(image: image, error: error) })
+            }
+        }
+    }
+
+    static func captureConfiguration(rect: CGRect, screen: ScreenSnapshot) throws -> SCStreamConfiguration {
         guard let captureRect = ScreenshotServiceCoreLogic.screenCaptureRect(rectInScreenPoints: rect,
                                                                              screenFrame: screen.frame,
                                                                              scale: screen.scale) else {
@@ -292,26 +307,16 @@ final class ScreenshotService: NSObject {
         configuration.showsCursor = true
         configuration.scalesToFit = false
 
-        let excludedApplications = content.applications.filter { application in
-            application.processID == ProcessInfo.processInfo.processIdentifier
-        }
-        let filter = SCContentFilter(display: display,
-                                     excludingApplications: excludedApplications,
-                                     exceptingWindows: [])
+        return configuration
+    }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let image {
-                    continuation.resume(returning: image)
-                } else {
-                    continuation.resume(throwing: NSError(domain: "ScreenshotService",
-                                                          code: -5,
-                                                          userInfo: [NSLocalizedDescriptionKey: "No image captured."]))
-                }
-            }
+    static func captureResult(image: CGImage?, error: Error?) throws -> CGImage {
+        if let error { throw error }
+        guard let image else {
+            throw NSError(domain: "ScreenshotService", code: -5,
+                          userInfo: [NSLocalizedDescriptionKey: "No image captured."])
         }
+        return image
     }
 
     // MARK: - Error handling
@@ -328,13 +333,34 @@ final class ScreenshotService: NSObject {
 
     // MARK: - Helpers
 
-    private func screenUnderMouse() -> NSScreen? {
-        NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) })
+    static func currentCaptureScreen(_ mode: CaptureMode) throws -> ScreenSnapshot? {
+        let screens = NSScreen.screens.map(screenCandidate)
+        return try resolveCaptureScreen(mode, screens: screens, mouse: NSEvent.mouseLocation,
+                                        mainDisplayID: CGMainDisplayID(), mainScreen: NSScreen.main.map(screenCandidate))
     }
 
-    private func menuBarScreen() -> NSScreen? {
-        let mainDisplayID = CGMainDisplayID()
-        return NSScreen.screens.first(where: { $0.displayID == mainDisplayID })
+    private static func screenCandidate(_ screen: NSScreen) -> ScreenCandidate {
+        ScreenCandidate(displayID: screen.displayID, frame: screen.frame, scale: screen.backingScaleFactor)
+    }
+
+    static func resolveCaptureScreen(_ mode: CaptureMode, screens: [ScreenCandidate], mouse: CGPoint,
+                                     mainDisplayID: CGDirectDisplayID, mainScreen: ScreenCandidate?) throws -> ScreenSnapshot? {
+        guard let screen = preferredScreen(mode, screens: screens, mouse: mouse,
+                                           mainDisplayID: mainDisplayID, mainScreen: mainScreen) else { return nil }
+        guard let displayID = screen.displayID else {
+            if mode == .fullScreen { throw ScreenResolutionError.missingDisplayID }
+            return nil
+        }
+        return ScreenSnapshot(displayID: displayID, frame: screen.frame, scale: screen.scale)
+    }
+
+    private static func preferredScreen(_ mode: CaptureMode, screens: [ScreenCandidate], mouse: CGPoint,
+                                        mainDisplayID: CGDirectDisplayID, mainScreen: ScreenCandidate?) -> ScreenCandidate? {
+        let menuBarScreen = mode == .fullScreen
+            ? screens.first(where: { $0.displayID == mainDisplayID }) : nil
+        return screens.first(where: { $0.frame.contains(mouse) })
+            ?? menuBarScreen
+            ?? mainScreen ?? screens.first
     }
 
     private func screenForDisplayID(_ displayID: CGDirectDisplayID?) -> NSScreen? {
@@ -438,43 +464,16 @@ final class ScreenshotService: NSObject {
 
     private func shareableContentTask(trigger: String) async -> Task<SCShareableContent, Error> {
         await MainActor.run {
-            let now = Date()
-            if let prefetch = shareableContentPrefetch {
-                if prefetch.fetchedAt == nil {
-                    return prefetch.task
-                }
-
-                if let fetchedAt = prefetch.fetchedAt,
-                   now.timeIntervalSince(fetchedAt) < shareableContentPrefetchTTL {
-                    return prefetch.task
-                }
+            let cache = contentCache ?? CaptureContentCache(lifetime: 2)
+            contentCache = cache
+            return cache.task {
+                try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             }
-
-            let token = UUID()
-            let task = Task<SCShareableContent, Error> { [weak self] in
-                do {
-                    let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                    await MainActor.run {
-                        guard let self, self.shareableContentPrefetch?.token == token else { return }
-                        self.shareableContentPrefetch?.fetchedAt = Date()
-                    }
-                    return content
-                } catch {
-                    await MainActor.run {
-                        guard let self, self.shareableContentPrefetch?.token == token else { return }
-                        self.shareableContentPrefetch = nil
-                    }
-                    throw error
-                }
-            }
-
-            shareableContentPrefetch = ShareableContentPrefetch(token: token, task: task, fetchedAt: nil)
-            return task
         }
     }
 
     private func presentError(title: String, message: String) {
-        AlertPresenter.presentWarning(title: title, message: message)
+        errorPresenter(title, message)
     }
 }
 

@@ -4,6 +4,63 @@ import Carbon
 @testable import Zoomies
 
 final class EditorCanvasViewTests: XCTestCase {
+    func testCompositeChoosesLargestBitmapRepresentationWithoutChangingPointSize() throws {
+        let image = NSImage(size: NSSize(width: 20, height: 10))
+        for size in [NSSize(width: 10, height: 5), NSSize(width: 40, height: 20)] {
+            let rep = try XCTUnwrap(ImageSafety.makeBitmapRep(pixelsWide: Int(size.width), pixelsHigh: Int(size.height)))
+            rep.size = image.size
+            image.addRepresentation(rep)
+        }
+        let drawing = EditorDrawing(baseImage: image, baseImageOrigin: .zero, items: [])
+        let output = EditorImageRenderer.compositeImage(of: drawing, croppingTo: CGRect(origin: .zero, size: image.size))
+        let rep = try XCTUnwrap(output.representations.compactMap { $0 as? NSBitmapImageRep }.first)
+        XCTAssertEqual(rep.pixelsWide, 40)
+        XCTAssertEqual(rep.pixelsHigh, 20)
+        XCTAssertEqual(output.size, image.size)
+    }
+
+    private final class MagnificationEvent: NSEvent {
+        var amount: CGFloat = 0
+        override var magnification: CGFloat { amount }
+        override var type: NSEvent.EventType { .magnify }
+    }
+
+    func testSyntheticMagnificationRequestsOnlyDirectionalZoom() {
+        let canvas = EditorCanvasView(image: TestSupport.solidImage())
+        let event = MagnificationEvent()
+        var commands: [String] = []
+        canvas.onKeyCommand = {
+            switch $0 {
+            case .zoomIn: commands.append("in")
+            case .zoomOut: commands.append("out")
+            default: XCTFail("Unexpected gesture command")
+            }
+        }
+        for amount: CGFloat in [0, 0.1, -0.1] { event.amount = amount; canvas.magnify(with: event) }
+        XCTAssertEqual(commands, ["in", "out"])
+    }
+
+    func testEmptyEditOfExistingTextRestoresOriginalAndMarkerDeletionCanBeUndone() throws {
+        let png = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let item = EditorCanvasState.Item.text(.init(text: "Keep", origin: .init(NSPoint(x: 30, y: 30)), color: .init(.red), fontSize: 20))
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80),
+                                      initialState: EditorCanvasState(baseImagePNG: png, items: [item]))
+        canvas.setTool(.text)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas, location: NSPoint(x: 40, y: 40), clickCount: 2))
+        let editor = try XCTUnwrap(canvas.subviews.compactMap { $0 as? NSTextView }.first)
+        editor.string = "  \n"
+        canvas.textDidEndEditing(Notification(name: NSText.didEndEditingNotification))
+        XCTAssertEqual(canvas.editableState()?.items, [item])
+        canvas.setTool(.marker)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas, location: NSPoint(x: 150, y: 100)))
+        let placed = try XCTUnwrap(canvas.editableState()).items
+        XCTAssertEqual(placed.count, 2)
+        canvas.keyDown(with: try keyEvent(keyCode: 51))
+        XCTAssertEqual(canvas.editableState()?.items, [item])
+        canvas.undo()
+        XCTAssertEqual(canvas.editableState()?.items, placed)
+    }
+
     private struct Probe { let name: String; let x: Int; let y: Int; let color: NSColor }
 
     /// Builds an image with four distinct quadrant colors using top-left pixel

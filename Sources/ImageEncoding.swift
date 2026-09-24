@@ -19,16 +19,25 @@ enum ImageEncoding {
             return bitmap
         }
 
-        let pointSize = image.size
-        let pixelSize = image.representations
+        return renderBitmap(from: image)
+    }
+
+    private static func preferredPixelSize(for image: NSImage) -> NSSize {
+        image.representations
             .compactMap({ $0 as? NSBitmapImageRep })
             .max(by: { lhs, rhs in
                 (ImageSafety.pixelCount(width: lhs.pixelsWide, height: lhs.pixelsHigh) ?? 0)
                     < (ImageSafety.pixelCount(width: rhs.pixelsWide, height: rhs.pixelsHigh) ?? 0)
             })
             .map { NSSize(width: CGFloat($0.pixelsWide), height: CGFloat($0.pixelsHigh)) }
-            ?? pointSize
+            ?? image.size
+    }
 
+    /// Some image representations cannot expose a CGImage. Render their best
+    /// available pixel size without inheriting the current display's scale.
+    private static func renderBitmap(from image: NSImage) -> NSBitmapImageRep? {
+        let pointSize = image.size
+        let pixelSize = preferredPixelSize(for: image)
         guard let pixelWidth = ImageSafety.pixelLength(pixelSize.width.rounded(.up)),
               let pixelHeight = ImageSafety.pixelLength(pixelSize.height.rounded(.up)),
               let bitmap = ImageSafety.makeBitmapRep(pixelsWide: pixelWidth, pixelsHigh: pixelHeight) else {

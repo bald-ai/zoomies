@@ -12,7 +12,7 @@ enum FinderSelectionService {
     }
 
     /// Returns Finder selection state (none / multiple / single file URL).
-    static func selection(scriptRunner: (String) throws -> String = runAppleScriptReturningString) throws -> Selection {
+    static func selection(scriptRunner: (String) throws -> String = { try runAppleScriptReturningString($0) }) throws -> Selection {
         // Finder can report no selection when it is not frontmost, especially for
         // Desktop icons. Try once passively, then bring Finder forward and retry.
         let scriptNoBringToFront = """
@@ -68,26 +68,32 @@ enum FinderSelectionService {
         }
     }
 
-    private static func runAppleScriptReturningString(_ source: String) throws -> String {
-        var errorDict: NSDictionary?
-        guard let appleScript = NSAppleScript(source: source) else {
-            throw NSError(domain: "FinderSelectionService",
-                          code: -1,
+    struct ScriptResult {
+        let string: String?
+        let error: NSDictionary?
+    }
+
+    static func runAppleScriptReturningString(_ source: String,
+                                              execute: (String) -> ScriptResult? = executeAppleScript) throws -> String {
+        guard let result = execute(source) else {
+            throw NSError(domain: "FinderSelectionService", code: -1,
                           userInfo: [NSLocalizedDescriptionKey: "Failed to create AppleScript."])
         }
-
-        let result = appleScript.executeAndReturnError(&errorDict)
-
-        if let errorDict = errorDict {
-            let message = (errorDict[NSAppleScript.errorMessage] as? String)
-                ?? (errorDict["NSAppleScriptErrorMessage"] as? String)
+        if let error = result.error {
+            let message = (error[NSAppleScript.errorMessage] as? String)
+                ?? (error["NSAppleScriptErrorMessage"] as? String)
                 ?? "Unknown AppleScript error."
-            throw NSError(domain: "FinderSelectionService",
-                          code: -2,
+            throw NSError(domain: "FinderSelectionService", code: -2,
                           userInfo: [NSLocalizedDescriptionKey: message])
         }
+        return result.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
 
-        return result.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    private static func executeAppleScript(_ source: String) -> ScriptResult? {
+        guard let script = NSAppleScript(source: source) else { return nil }
+        var error: NSDictionary?
+        let result = script.executeAndReturnError(&error)
+        return ScriptResult(string: result.stringValue, error: error)
     }
 
 }

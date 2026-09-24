@@ -52,6 +52,10 @@ final class EditorPaletteSettingsView: NSStackView {
             row.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
         }
 
+        addAvailableColors(ids: ids)
+    }
+
+    private func addAvailableColors(ids: [String]) {
         let choose = NSTextField(labelWithString: ids.count == 6 ? "Available colors · remove one above to add another" : "Available colors · click to add")
         choose.font = .systemFont(ofSize: 12, weight: .medium)
         choose.textColor = .secondaryLabelColor

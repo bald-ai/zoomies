@@ -69,10 +69,11 @@ final class ScratchpadServiceTests: XCTestCase {
         let base = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(base) }
         let cache = base.appendingPathComponent("clipboard", isDirectory: true)
-        let clipboard = ClipboardService(fileManager: .default, cacheDirectory: cache)
+        let clipboard = ClipboardService(fileManager: .default, cacheDirectory: cache, pasteboardWriter: { _ in true })
         let service = ScratchpadService(fileManager: .default,
                                         clipboardService: clipboard,
-                                        desktopDirectory: base.appendingPathComponent("desktop", isDirectory: true))
+                                        desktopDirectory: base.appendingPathComponent("desktop", isDirectory: true),
+                                        showNote: { _ in }, showRename: { _ in })
 
         service.open()
 

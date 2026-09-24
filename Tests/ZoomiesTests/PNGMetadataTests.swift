@@ -3,6 +3,38 @@ import AppKit
 @testable import Zoomies
 
 final class PNGMetadataTests: XCTestCase {
+    func testPixelDimensionsRejectsWrongIHDRAndZeroDimensions() throws {
+        let png = try XCTUnwrap(PNGMetadata.stubPNGDeclaringSize(width: 12, height: 8))
+        var wrongType = png
+        wrongType.replaceSubrange(12..<16, with: Data("TEXT".utf8))
+        XCTAssertNil(PNGMetadata.pixelDimensions(ofPNG: wrongType))
+        for offset in [16, 20] {
+            var zero = png
+            zero.replaceSubrange(offset..<(offset + 4), with: [0, 0, 0, 0])
+            XCTAssertNil(PNGMetadata.pixelDimensions(ofPNG: zero))
+        }
+    }
+
+    func testExtractionStopsAtIENDAndRetainsCompleteMetadataBeforeTruncatedTail() throws {
+        let original = try TestSupport.solidImagePNGData(width: 12, height: 8)
+        let state = EditorCanvasState(baseImagePNG: original, items: [])
+        let annotated = try XCTUnwrap(PNGMetadata.embed(intoPNG: original, originalPNG: original, prompt: "retained", editorState: state))
+        // Removing part of IEND leaves all three complete metadata chunks.
+        let truncated = Data(annotated.dropLast(6))
+        XCTAssertEqual(PNGMetadata.extract(fromPNG: truncated)?.prompt, "retained")
+        XCTAssertEqual(PNGMetadata.extract(fromPNG: truncated)?.originalPNG, original)
+        let recovered = try XCTUnwrap(PNGMetadata.extractEditorState(fromPNG: truncated))
+        XCTAssertEqual(recovered.baseImagePNG, state.baseImagePNG)
+        XCTAssertEqual(recovered.items, state.items)
+        // Valid-looking chunks after an earlier image's IEND must be ignored.
+        var trailing = original
+        trailing.append(annotated.dropFirst(8))
+        XCTAssertNil(PNGMetadata.extract(fromPNG: trailing))
+        XCTAssertNil(PNGMetadata.extractEditorState(fromPNG: trailing))
+        XCTAssertNil(PNGMetadata.extract(fromPNG: Data(annotated.prefix(16))))
+        XCTAssertNil(PNGMetadata.extractEditorState(fromPNG: Data(annotated.prefix(16))))
+    }
+
     func testEmbedThenExtractRoundTripsOriginalAndPrompt() throws {
         let burned = try TestSupport.solidImagePNGData(width: 40, height: 20, color: .systemRed)
         let original = try TestSupport.solidImagePNGData(width: 30, height: 15, color: .systemBlue)

@@ -3,6 +3,17 @@ import AppKit
 @testable import Zoomies
 
 final class WorkflowNoteRendererTests: XCTestCase {
+    func testBurnRejectsMissingBitmapAndOversizedOutputBeforeAllocation() throws {
+        XCTAssertNil(WorkflowNoteRenderer.burn(note: "note", into: NSImage(size: .zero)))
+        // A one-row fixture is cheap to allocate but exceeds the width budget.
+        let rep = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 17_000, pixelsHigh: 1,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let image = NSImage(size: NSSize(width: 17_000, height: 1))
+        image.addRepresentation(rep)
+        XCTAssertNil(WorkflowNoteRenderer.burn(note: "note", into: image))
+    }
+
     func testPrepareNoteTextAppliesPrefixAndTrimRules() {
         var settings = Settings.default
         settings.notePrefixEnabled = true

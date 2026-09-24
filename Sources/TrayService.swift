@@ -2,15 +2,26 @@ import AppKit
 
 /// Manages the NSStatusItem (menubar icon and menu).
 final class TrayService {
-    private let statusItem: NSStatusItem
+    private let statusItem: NSStatusItem?
+    private let button: NSButton?
+    private let onQuit: () -> Void
+    private(set) var menu: NSMenu!
     private let onShowSettings: () -> Void
 
-    init(onShowSettings: @escaping () -> Void) {
+    convenience init(onShowSettings: @escaping () -> Void) {
+        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        self.init(statusItem: statusItem, button: statusItem.button, onShowSettings: onShowSettings)
+    }
+
+    init(statusItem: NSStatusItem? = nil, button: NSButton?, onShowSettings: @escaping () -> Void,
+         onQuit: @escaping () -> Void = { NSApp.terminate(nil) }) {
         self.onShowSettings = onShowSettings
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        self.onQuit = onQuit
+        self.statusItem = statusItem
+        self.button = button
         restoreStatusImage()
-        // AppKit anchors the menu to its status item, including across displays.
-        statusItem.menu = makeMenu()
+        menu = makeMenu()
+        statusItem?.menu = menu
     }
 
     private func makeMenu() -> NSMenu {
@@ -33,7 +44,7 @@ final class TrayService {
     /// Compact elapsed seconds, capped at the recording limit.
     @MainActor
     func updateRecording(state: ScreenRecordingService.State, elapsed: TimeInterval) {
-        guard let button = statusItem.button else { return }
+        guard let button else { return }
         switch state {
         case .idle:
             button.attributedTitle = NSAttributedString(string: "")
@@ -49,7 +60,7 @@ final class TrayService {
     }
 
     private func setRecordingTitle(_ title: String) {
-        guard let button = statusItem.button else { return }
+        guard let button else { return }
         button.image = nil
         button.attributedTitle = NSAttributedString(string: title, attributes: [
             .foregroundColor: NSColor.systemRed,
@@ -58,7 +69,7 @@ final class TrayService {
     }
 
     private func restoreStatusImage() {
-        guard let button = statusItem.button else { return }
+        guard let button else { return }
         if #available(macOS 11.0, *) {
             button.image = NSImage(systemSymbolName: "camera", accessibilityDescription: "Zoomies")
         }
@@ -69,6 +80,6 @@ final class TrayService {
     }
 
     @objc private func didSelectQuit() {
-        NSApp.terminate(nil)
+        onQuit()
     }
 }

@@ -19,38 +19,33 @@ enum WorkflowImagePersistenceLogic {
                                  prompt: String? = nil,
                                  editorState: EditorCanvasState? = nil,
                                  uniqueURL: UniqueURLResolver) -> WorkflowEncodedImageResult? {
-        // PNG-only: every image is encoded as PNG regardless of the original
-        // file's extension.
-        let ext = originalURL.pathExtension.lowercased()
+        guard let data = ImageEncoding.pngData(from: image) else { return nil }
+        let annotated = embedMetadata(in: data, cleanOriginalPNG: cleanOriginalPNG, prompt: prompt, editorState: editorState)
+        return WorkflowEncodedImageResult(data: annotated, outputURL: pngOutputURL(originalURL, uniqueURL: uniqueURL))
+    }
 
-        guard let bitmap = ImageEncoding.bitmapRepresentation(from: image) else { return nil }
-        guard var data = bitmap.representation(using: .png, properties: [:]) else { return nil }
-
-        // Round-trip metadata: embed the clean original + prompt and/or editable
-        // canvas state when present.
+    private static func embedMetadata(in data: Data, cleanOriginalPNG: Data?, prompt: String?,
+                                      editorState: EditorCanvasState?) -> Data {
         if let prompt, !prompt.isEmpty,
            let cleanOriginalPNG, cleanOriginalPNG.count < maxEmbeddedOriginalBytes,
-           let embedded = PNGMetadata.embed(intoPNG: data,
-                                            originalPNG: cleanOriginalPNG,
-                                            prompt: prompt,
-                                            editorState: editorState) {
-            data = embedded
-        } else if let editorState,
-                  editorState.baseImagePNG.count < maxEmbeddedOriginalBytes,
-                  let embedded = PNGMetadata.embed(intoPNG: data, editorState: editorState) {
-            data = embedded
+           let embedded = PNGMetadata.embed(intoPNG: data, originalPNG: cleanOriginalPNG,
+                                            prompt: prompt, editorState: editorState) {
+            return embedded
         }
+        return embedEditorState(in: data, editorState: editorState)
+    }
 
-        let outputURL: URL
-        if ext != "png" && !ext.isEmpty {
-            // Original wasn't a PNG (e.g. an opened JPEG/HEIC). Rewrite as .png.
-            let proposedName = originalURL.deletingPathExtension().lastPathComponent + ".png"
-            outputURL = uniqueURL(proposedName, originalURL.deletingLastPathComponent())
-        } else {
-            outputURL = originalURL
-        }
+    private static func embedEditorState(in data: Data, editorState: EditorCanvasState?) -> Data {
+        guard let editorState, editorState.baseImagePNG.count < maxEmbeddedOriginalBytes,
+              let embedded = PNGMetadata.embed(intoPNG: data, editorState: editorState) else { return data }
+        return embedded
+    }
 
-        return WorkflowEncodedImageResult(data: data, outputURL: outputURL)
+    private static func pngOutputURL(_ originalURL: URL, uniqueURL: UniqueURLResolver) -> URL {
+        let ext = originalURL.pathExtension.lowercased()
+        guard ext != "png", !ext.isEmpty else { return originalURL }
+        let proposedName = originalURL.deletingPathExtension().lastPathComponent + ".png"
+        return uniqueURL(proposedName, originalURL.deletingLastPathComponent())
     }
 
     static func writeEncodedImageData(_ data: Data,

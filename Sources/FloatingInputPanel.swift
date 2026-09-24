@@ -4,7 +4,11 @@ final class FloatingInputPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    init(contentRect: NSRect) {
+    private let sendEditingAction: (Selector, Any?) -> Bool
+
+    init(contentRect: NSRect,
+         sendEditingAction: @escaping (Selector, Any?) -> Bool = { NSApp.sendAction($0, to: nil, from: $1) }) {
+        self.sendEditingAction = sendEditingAction
         super.init(contentRect: contentRect,
                    styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered,
@@ -32,30 +36,24 @@ final class FloatingInputPanel: NSPanel {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let chars = event.charactersIgnoringModifiers?.lowercased()
 
-        // NSText has no `undo:` action, so drive the first-responder text view's
-        // undoManager directly. ⌘Z = undo, ⌘⇧Z = redo.
-        if chars == "z", let textView = firstResponder as? NSTextView {
-            if flags == [.command] { textView.undoManager?.undo(); return true }
-            if flags == [.command, .shift] { textView.undoManager?.redo(); return true }
+        if performTextUndo(chars: chars, flags: flags) { return true }
+        if flags == [.command], let chars,
+           let selector = Self.editingSelectors[chars], sendEditingAction(selector, self) {
+            return true
         }
-
-        if flags == [.command],
-           let chars,
-           chars.count == 1 {
-            switch chars {
-            case "c":
-                if NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self) { return true }
-            case "v":
-                if NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self) { return true }
-            case "x":
-                if NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: self) { return true }
-            case "a":
-                if NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: self) { return true }
-            default:
-                break
-            }
-        }
-
         return super.performKeyEquivalent(with: event)
     }
+
+    // NSText has no undo: action; its first-responder undo manager owns edits.
+    private func performTextUndo(chars: String?, flags: NSEvent.ModifierFlags) -> Bool {
+        guard chars == "z", let textView = firstResponder as? NSTextView else { return false }
+        if flags == [.command] { textView.undoManager?.undo(); return true }
+        if flags == [.command, .shift] { textView.undoManager?.redo(); return true }
+        return false
+    }
+
+    private static let editingSelectors: [String: Selector] = [
+        "c": #selector(NSText.copy(_:)), "v": #selector(NSText.paste(_:)),
+        "x": #selector(NSText.cut(_:)), "a": #selector(NSText.selectAll(_:))
+    ]
 }

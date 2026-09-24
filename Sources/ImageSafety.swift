@@ -105,10 +105,17 @@ enum ImageSafety {
         inspectData(data, limits: limits) == .safe && PNGMetadata.isPNG(data)
     }
 
+    /// URL resource values may retain a cached size after the same path is
+    /// rewritten. Reopening must inspect the current filesystem entry.
+    private static func currentFileSize(at url: URL) -> Int? {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.resolvingSymlinksInPath().path)
+        return (attributes?[.size] as? NSNumber)?.intValue
+    }
+
     /// Inspects a file without loading it into memory: PNG dimensions come from
     /// the first 24 bytes, other formats from ImageIO's property lookup.
     static func inspectFile(at url: URL, limits: ImageSafetyLimits = .runtime) -> ImageFileInspection {
-        guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size >= 0 else {
+        guard let size = currentFileSize(at: url), size >= 0 else {
             return .notAnImage
         }
         if size > limits.maxFileBytes {
@@ -123,6 +130,10 @@ enum ImageSafety {
             return inspection(width: dimensions.width, height: dimensions.height, limits: limits)
         }
 
+        return inspectImageFile(at: url, limits: limits)
+    }
+
+    private static func inspectImageFile(at url: URL, limits: ImageSafetyLimits) -> ImageFileInspection {
         let options = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithURL(url as CFURL, options) else {
             return .notAnImage
@@ -132,7 +143,7 @@ enum ImageSafety {
 
     static func boundedFileData(at url: URL, limits: ImageSafetyLimits = .runtime) -> Data? {
         guard inspectFile(at: url, limits: limits) != .tooLarge else { return nil }
-        guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+        guard let size = currentFileSize(at: url),
               size >= 0, size <= limits.maxFileBytes else {
             return nil
         }

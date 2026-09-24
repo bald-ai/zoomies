@@ -349,7 +349,7 @@ final class HotKeyService {
 
 // MARK: - Carbon callback
 
-private func hotKeyEventHandler(
+func hotKeyEventHandler(
     _ nextHandler: EventHandlerCallRef?,
     _ event: EventRef?,
     _ userData: UnsafeMutableRawPointer?

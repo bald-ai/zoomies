@@ -189,14 +189,8 @@ enum EditorImageRenderer {
     /// Draws one committed item into the current graphics context.
     static func draw(item: EditorDrawing.Item) {
         switch item {
-        case .pen(let points, let color, let lineWidth):
-            drawPen(points: points, color: color, lineWidth: lineWidth, isPreview: false)
-        case .arrow(let start, let end, let color, let lineWidth):
-            drawArrow(from: start, to: end, color: color, lineWidth: lineWidth, isPreview: false)
-        case .rect(let rect, let color, let lineWidth):
-            drawRect(rect, color: color, lineWidth: lineWidth, isPreview: false)
-        case .ellipse(let rect, let color, let lineWidth):
-            drawEllipse(rect, color: color, lineWidth: lineWidth, isPreview: false)
+        case .pen, .arrow, .rect, .ellipse:
+            drawStroke(item)
         case .text(let item):
             drawText(item)
         case .marker(let item):
@@ -205,6 +199,20 @@ enum EditorImageRenderer {
             drawImage(image, in: rect)
         case .erase(let rect):
             drawErase(rect)
+        }
+    }
+
+    private static func drawStroke(_ item: EditorDrawing.Item) {
+        switch item {
+        case .pen(let points, let color, let lineWidth):
+            drawPen(points: points, color: color, lineWidth: lineWidth, isPreview: false)
+        case .arrow(let start, let end, let color, let lineWidth):
+            drawArrow(from: start, to: end, color: color, lineWidth: lineWidth, isPreview: false)
+        case .rect(let rect, let color, let lineWidth):
+            drawRect(rect, color: color, lineWidth: lineWidth, isPreview: false)
+        case .ellipse(let rect, let color, let lineWidth):
+            drawEllipse(rect, color: color, lineWidth: lineWidth, isPreview: false)
+        default: break
         }
     }
 
@@ -433,17 +441,13 @@ enum EditorImageRenderer {
         case .arrow(let start, let end, _, let lineWidth):
             guard distance(from: start, to: end) >= 2 else { return nil }
             return boundsForArrow(start: start, end: end, lineWidth: lineWidth)
-        case .rect(let rect, _, let lineWidth):
-            return rect.insetBy(dx: -lineWidth / 2, dy: -lineWidth / 2)
-        case .ellipse(let rect, _, let lineWidth):
+        case .rect(let rect, _, let lineWidth), .ellipse(let rect, _, let lineWidth):
             return rect.insetBy(dx: -lineWidth / 2, dy: -lineWidth / 2)
         case .text(let textItem):
             return textBounds(for: textItem)
         case .marker(let markerItem):
             return markerBounds(for: markerItem)
-        case .image(_, let rect):
-            return rect
-        case .erase(let rect):
+        case .image(_, let rect), .erase(let rect):
             return rect
         }
     }
@@ -511,30 +515,40 @@ enum EditorImageRenderer {
     }
 
     static func shiftedItems(_ source: [EditorDrawing.Item], byX dx: CGFloat, byY dy: CGFloat) -> [EditorDrawing.Item] {
-        source.map { item in
-            switch item {
-            case .pen(let points, let color, let lineWidth):
-                return .pen(points: points.map { shiftedPoint($0, byX: dx, byY: dy) }, color: color, lineWidth: lineWidth)
-            case .arrow(let start, let end, let color, let lineWidth):
-                return .arrow(start: shiftedPoint(start, byX: dx, byY: dy),
-                              end: shiftedPoint(end, byX: dx, byY: dy),
-                              color: color,
-                              lineWidth: lineWidth)
-            case .rect(let rect, let color, let lineWidth):
-                return .rect(rect: shiftedRect(rect, byX: dx, byY: dy), color: color, lineWidth: lineWidth)
-            case .ellipse(let rect, let color, let lineWidth):
-                return .ellipse(rect: shiftedRect(rect, byX: dx, byY: dy), color: color, lineWidth: lineWidth)
-            case .text(var textItem):
-                textItem.origin = shiftedPoint(textItem.origin, byX: dx, byY: dy)
-                return .text(textItem)
-            case .marker(var markerItem):
-                markerItem.center = shiftedPoint(markerItem.center, byX: dx, byY: dy)
-                return .marker(markerItem)
-            case .image(let image, let rect):
-                return .image(image: image, rect: shiftedRect(rect, byX: dx, byY: dy))
-            case .erase(let rect):
-                return .erase(rect: shiftedRect(rect, byX: dx, byY: dy))
-            }
+        source.map { shiftedItem($0, byX: dx, byY: dy) }
+    }
+
+    static func shiftedItem(_ item: EditorDrawing.Item, byX dx: CGFloat, byY dy: CGFloat) -> EditorDrawing.Item {
+        switch item {
+        case .pen, .arrow, .rect, .ellipse:
+            return shiftedStroke(item, byX: dx, byY: dy)
+        case .text(var textItem):
+            textItem.origin = shiftedPoint(textItem.origin, byX: dx, byY: dy)
+            return .text(textItem)
+        case .marker(var markerItem):
+            markerItem.center = shiftedPoint(markerItem.center, byX: dx, byY: dy)
+            return .marker(markerItem)
+        case .image(let image, let rect):
+            return .image(image: image, rect: shiftedRect(rect, byX: dx, byY: dy))
+        case .erase(let rect):
+            return .erase(rect: shiftedRect(rect, byX: dx, byY: dy))
+        }
+    }
+
+    private static func shiftedStroke(_ item: EditorDrawing.Item, byX dx: CGFloat, byY dy: CGFloat) -> EditorDrawing.Item {
+        switch item {
+        case .pen(let points, let color, let lineWidth):
+            return .pen(points: points.map { shiftedPoint($0, byX: dx, byY: dy) }, color: color, lineWidth: lineWidth)
+        case .arrow(let start, let end, let color, let lineWidth):
+            return .arrow(start: shiftedPoint(start, byX: dx, byY: dy),
+                          end: shiftedPoint(end, byX: dx, byY: dy),
+                          color: color,
+                          lineWidth: lineWidth)
+        case .rect(let rect, let color, let lineWidth):
+            return .rect(rect: shiftedRect(rect, byX: dx, byY: dy), color: color, lineWidth: lineWidth)
+        case .ellipse(let rect, let color, let lineWidth):
+            return .ellipse(rect: shiftedRect(rect, byX: dx, byY: dy), color: color, lineWidth: lineWidth)
+        default: return item
         }
     }
 
@@ -548,14 +562,9 @@ enum EditorImageRenderer {
 extension EditorDrawing.Item {
     init?(stateItem: EditorCanvasState.Item) {
         switch stateItem {
-        case .pen(let points, let color, let lineWidth):
-            self = .pen(points: points.map(\.nsPoint), color: color.nsColor, lineWidth: lineWidth)
-        case .arrow(let start, let end, let color, let lineWidth):
-            self = .arrow(start: start.nsPoint, end: end.nsPoint, color: color.nsColor, lineWidth: lineWidth)
-        case .rect(let rect, let color, let lineWidth):
-            self = .rect(rect: rect.nsRect, color: color.nsColor, lineWidth: lineWidth)
-        case .ellipse(let rect, let color, let lineWidth):
-            self = .ellipse(rect: rect.nsRect, color: color.nsColor, lineWidth: lineWidth)
+        case .pen, .arrow, .rect, .ellipse:
+            guard let stroke = Self.restoreStroke(stateItem) else { return nil }
+            self = stroke
         case .text(let text):
             let item = EditorDrawing.TextItem(text: text.text,
                                               origin: text.origin.nsPoint,
@@ -575,7 +584,42 @@ extension EditorDrawing.Item {
         }
     }
 
+    private static func restoreStroke(_ state: EditorCanvasState.Item) -> EditorDrawing.Item? {
+        switch state {
+        case .pen(let points, let color, let lineWidth):
+            return .pen(points: points.map(\.nsPoint), color: color.nsColor, lineWidth: lineWidth)
+        case .arrow(let start, let end, let color, let lineWidth):
+            return .arrow(start: start.nsPoint, end: end.nsPoint, color: color.nsColor, lineWidth: lineWidth)
+        case .rect(let rect, let color, let lineWidth):
+            return .rect(rect: rect.nsRect, color: color.nsColor, lineWidth: lineWidth)
+        case .ellipse(let rect, let color, let lineWidth):
+            return .ellipse(rect: rect.nsRect, color: color.nsColor, lineWidth: lineWidth)
+        default: return nil
+        }
+    }
+
     var stateItem: EditorCanvasState.Item? {
+        switch self {
+        case .pen, .arrow, .rect, .ellipse:
+            return strokeState
+        case .text(let text):
+            return .text(EditorCanvasState.Text(text: text.text,
+                                                origin: EditorCanvasState.Point(text.origin),
+                                                color: EditorCanvasState.Color(text.color),
+                                                fontSize: text.fontSize))
+        case .marker(let marker):
+            return .marker(EditorCanvasState.Marker(number: marker.number,
+                                                    center: EditorCanvasState.Point(marker.center),
+                                                    color: EditorCanvasState.Color(marker.color),
+                                                    diameter: marker.diameter))
+        case .image(let image, let rect):
+            guard let pngData = ImageEncoding.pngData(from: image) else { return nil }
+            return .image(pngData: pngData, rect: EditorCanvasState.Rect(rect))
+        case .erase(let rect):
+            return .erase(rect: EditorCanvasState.Rect(rect))
+        }
+    }
+    private var strokeState: EditorCanvasState.Item? {
         switch self {
         case .pen(let points, let color, let lineWidth):
             return .pen(points: points.map(EditorCanvasState.Point.init),
@@ -594,21 +638,8 @@ extension EditorDrawing.Item {
             return .ellipse(rect: EditorCanvasState.Rect(rect),
                             color: EditorCanvasState.Color(color),
                             lineWidth: lineWidth)
-        case .text(let text):
-            return .text(EditorCanvasState.Text(text: text.text,
-                                                origin: EditorCanvasState.Point(text.origin),
-                                                color: EditorCanvasState.Color(text.color),
-                                                fontSize: text.fontSize))
-        case .marker(let marker):
-            return .marker(EditorCanvasState.Marker(number: marker.number,
-                                                    center: EditorCanvasState.Point(marker.center),
-                                                    color: EditorCanvasState.Color(marker.color),
-                                                    diameter: marker.diameter))
-        case .image(let image, let rect):
-            guard let pngData = ImageEncoding.pngData(from: image) else { return nil }
-            return .image(pngData: pngData, rect: EditorCanvasState.Rect(rect))
-        case .erase(let rect):
-            return .erase(rect: EditorCanvasState.Rect(rect))
+        default: return nil
         }
     }
+
 }

@@ -14,6 +14,8 @@ final class VideoRenameWorkflowController {
     private let clipboardService: ClipboardService
     private let errorPresenter: ErrorPresenter
     private let deleteConfirmer: DeleteConfirmer
+    private let presentPanel: (RenamePanelController) -> Void
+    private let removeFile: (URL) throws -> Void
 
     private var renameController: RenamePanelController?
     private var hasFinished = false
@@ -32,11 +34,15 @@ final class VideoRenameWorkflowController {
          errorPresenter: @escaping ErrorPresenter = { title, message in
              AlertPresenter.presentWarning(title: title, message: message)
          },
-         deleteConfirmer: DeleteConfirmer? = nil) {
+         deleteConfirmer: DeleteConfirmer? = nil,
+         removeFile: @escaping (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) },
+         presentPanel: @escaping (RenamePanelController) -> Void = { $0.show() }) {
         self.fileURL = fileURL
         self.settingsStore = settingsStore
         self.clipboardService = clipboardService
         self.errorPresenter = errorPresenter
+        self.removeFile = removeFile
+        self.presentPanel = presentPanel
         let store = settingsStore
         self.deleteConfirmer = deleteConfirmer ?? {
             VideoRenameWorkflowController.defaultDeleteConfirmation(
@@ -74,7 +80,7 @@ final class VideoRenameWorkflowController {
         renameController = controller
         centerOnScreenUnderMouse(controller.window)
         // Same as the image flow: avoid activating the app or switching Spaces.
-        controller.show()
+        presentPanel(controller)
     }
 
     private func centerOnScreenUnderMouse(_ window: NSWindow?) {
@@ -95,56 +101,42 @@ final class VideoRenameWorkflowController {
     func handleRenameAction(_ action: RenamePanelAction) {
         guard !hasFinished else { return }
 
+        // Video has no note panel, so navigation has no completion to perform.
+        guard let completion = action.completion else { return }
+        if let name = completion.newName, !applyRenameIfNeeded(newName: name) { return }
+        guard performCompletion(completion.action) else { return }
+        closeAndFinish()
+    }
+
+    private func performCompletion(_ action: ScreenshotFinalAction) -> Bool {
         switch action {
-        case .save(let newName):
-            guard applyRenameIfNeeded(newName: newName) else { return }
-            closeAndFinish()
-
-        case .copyAndSave(let newName):
-            guard applyRenameIfNeeded(newName: newName) else { return }
-            // The save already stands; warn and stay open so the user can retry.
-            guard clipboardService.copyFile(at: fileURL, useCache: false) != nil else {
-                presentError(
-                    title: "Copy failed",
-                    message: "Zoomies couldn't copy the recording to the clipboard, but your save was kept. You can try Copy + Save again."
-                )
-                return
-            }
-            closeAndFinish()
-
-        case .copyAndDelete(let newName):
-            guard applyRenameIfNeeded(newName: newName) else { return }
-            if let published = publishedCopyAndDeleteURL,
-               FileManager.default.fileExists(atPath: published.path) {
-                guard deleteRecording() else { return }
-                closeAndFinish()
-                return
-            }
-            // Confirm the cached copy and clipboard operation succeeded
-            // before deleting the original.
-            guard let published = clipboardService.copyFile(at: fileURL, useCache: true) else {
-                presentError(
-                    title: "Copy failed",
-                    message: "Zoomies couldn’t copy the recording to the clipboard, so the original file was left in place. You can try Copy + Delete again."
-                )
-                return
-            }
-            publishedCopyAndDeleteURL = published
-            guard deleteRecording() else { return }
-            closeAndFinish()
-
-        case .delete:
-            guard deleteConfirmer() else { return }
-            guard deleteRecording() else { return }
-            closeAndFinish()
-
-        case .close:
-            closeAndFinish()
-
-        case .goToNote:
-            // Note navigation is disabled for video; ignore defensively.
-            break
+        case .saveOnly, .closeOnly: return true
+        case .copyAndSave: return copyRecording(useCache: false)
+        case .copyAndDelete: return copyRecordingForDeletion() && deleteRecording()
+        case .deleteOnly: return deleteConfirmer() && deleteRecording()
         }
+    }
+
+    /// Retain a published cache URL across deletion retries so a successful
+    /// clipboard handoff is not replaced with duplicate cached files.
+    private func copyRecordingForDeletion() -> Bool {
+        if let published = publishedCopyAndDeleteURL,
+           FileManager.default.fileExists(atPath: published.path) {
+            return true
+        }
+        return copyRecording(useCache: true)
+    }
+
+    private func copyRecording(useCache: Bool) -> Bool {
+        guard let published = clipboardService.copyFile(at: fileURL, useCache: useCache) else {
+            let message = useCache
+                ? "Zoomies couldn’t copy the recording to the clipboard, so the original file was left in place. You can try Copy + Delete again."
+                : "Zoomies couldn't copy the recording to the clipboard, but your save was kept. You can try Copy + Save again."
+            presentError(title: "Copy failed", message: message)
+            return false
+        }
+        if useCache { publishedCopyAndDeleteURL = published }
+        return true
     }
 
     private func applyRenameIfNeeded(newName: String) -> Bool {
@@ -195,7 +187,7 @@ final class VideoRenameWorkflowController {
     private func deleteRecording() -> Bool {
         if FileManager.default.fileExists(atPath: fileURL.path) {
             do {
-                try FileManager.default.removeItem(at: fileURL)
+                try removeFile(fileURL)
             } catch {
                 presentError(
                     title: "Couldn't delete recording",

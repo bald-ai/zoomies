@@ -56,14 +56,24 @@ struct EditorShortcutHoldState {
 final class EditorShortcutOverlayController {
     private weak var window: NSWindow?
     private let hints: () -> [EditorShortcutHint]
+    private let isActive: () -> Bool
+    private let clock: () -> TimeInterval
+    private let schedule: (TimeInterval, DispatchWorkItem) -> Void
     private var state = EditorShortcutHoldState()
     private var timer: DispatchWorkItem?
     private var observers: [NSObjectProtocol] = []
     private(set) var overlayView: NSView?
 
-    init(window: NSWindow, hints: @escaping () -> [EditorShortcutHint]) {
+    init(window: NSWindow,
+         isActive: (() -> Bool)? = nil,
+         clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         schedule: @escaping (TimeInterval, DispatchWorkItem) -> Void = { delay, work in DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work) },
+         hints: @escaping () -> [EditorShortcutHint]) {
         self.window = window
         self.hints = hints
+        self.isActive = isActive ?? { [weak window] in window?.isKeyWindow == true && window?.isVisible == true }
+        self.clock = clock
+        self.schedule = schedule
         for name in [NSWindow.didResignKeyNotification, NSWindow.willCloseNotification,
                      NSWindow.didMiniaturizeNotification, NSWindow.didResizeNotification] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
@@ -71,7 +81,7 @@ final class EditorShortcutOverlayController {
             })
         }
         observers.append(NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
-            self?.state.focusGained(flags: NSEvent.modifierFlags, now: ProcessInfo.processInfo.systemUptime)
+            self?.state.focusGained(flags: NSEvent.modifierFlags, now: self?.clock() ?? 0)
             self?.update()
         })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -87,14 +97,14 @@ final class EditorShortcutOverlayController {
 
     /// Called by the editor's existing local monitor BEFORE its shortcut routing.
     func handle(_ event: NSEvent) {
-        guard window?.isKeyWindow == true, window?.isVisible == true else {
+        guard isActive() else {
             cancel()
             return
         }
         if event.type == .keyDown {
             state.keyPressed()
         } else if event.type == .flagsChanged {
-            state.modifiersChanged(event.modifierFlags, now: ProcessInfo.processInfo.systemUptime)
+            state.modifiersChanged(event.modifierFlags, now: clock())
         } else {
             return
         }
@@ -117,12 +127,12 @@ final class EditorShortcutOverlayController {
         }
         guard let deadline = state.deadline else { return }
         let task = DispatchWorkItem { [weak self] in
-            guard let self, self.window?.isKeyWindow == true, self.window?.isVisible == true else { return }
-            self.state.advance(to: ProcessInfo.processInfo.systemUptime)
+            guard let self, self.isActive() else { return }
+            self.state.advance(to: self.clock())
             self.update()
         }
         timer = task
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, deadline - ProcessInfo.processInfo.systemUptime), execute: task)
+        schedule(max(0, deadline - clock()), task)
     }
 
     func refreshLabels() {

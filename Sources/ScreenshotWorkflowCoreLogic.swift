@@ -60,6 +60,10 @@ enum WorkflowTextWrapLogic {
             .map(String.init)
         guard !words.isEmpty else { return [""] }
 
+        return wrapWords(words, maxWidth: maxWidth, measure: measure)
+    }
+
+    private static func wrapWords(_ words: [String], maxWidth: CGFloat, measure: (String) -> CGFloat) -> [String] {
         var lines: [String] = []
         var currentLine = ""
 

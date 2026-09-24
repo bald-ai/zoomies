@@ -64,30 +64,25 @@ enum EditorWindowLayoutLogic {
                                 input.maxContentSize.height)
         let contentSize = NSSize(width: contentWidth, height: contentHeight)
 
-        var defaultUserZoomFactor: CGFloat = 1.0
-        let unclampedWidth = input.imagePointSize.width * fitScale + totalPadding + input.chromeSize.width
-        let unclampedHeight = input.imagePointSize.height * fitScale + totalPadding + input.chromeSize.height
-        let hasExtraSlack = (contentWidth > unclampedWidth + 1.0) || (contentHeight > unclampedHeight + 1.0)
-
-        if hasExtraSlack {
-            let canvasWidth = contentWidth - input.chromeSize.width
-            let canvasHeight = contentHeight - input.chromeSize.height
-            let imageWidthAtFit = input.imagePointSize.width * fitScale
-            let imageHeightAtFit = input.imagePointSize.height * fitScale
-
-            if canvasWidth > 0, canvasHeight > 0, imageWidthAtFit > 0, imageHeightAtFit > 0 {
-                let candidate = min((canvasWidth * input.autoZoomFillRatio) / imageWidthAtFit,
-                                    (canvasHeight * input.autoZoomFillRatio) / imageHeightAtFit)
-                if candidate.isFinite {
-                    defaultUserZoomFactor = max(1.0, min(input.maxAutoUserZoom, candidate))
-                }
-            }
-        }
-
+        let defaultUserZoomFactor = automaticZoom(input, contentSize: contentSize,
+                                                   fitScale: fitScale, padding: totalPadding)
         return EditorWindowLayoutResult(totalPadding: totalPadding,
                                         fitScale: fitScale,
                                         contentSize: contentSize,
                                         defaultUserZoomFactor: defaultUserZoomFactor)
+    }
+
+    private static func automaticZoom(_ input: EditorWindowLayoutInput, contentSize: NSSize,
+                                       fitScale: CGFloat, padding: CGFloat) -> CGFloat {
+        let imageWidth = input.imagePointSize.width * fitScale
+        let imageHeight = input.imagePointSize.height * fitScale
+        let canvasWidth = contentSize.width - input.chromeSize.width
+        let canvasHeight = contentSize.height - input.chromeSize.height
+        let hasExtraSlack = canvasWidth > imageWidth + padding + 1 || canvasHeight > imageHeight + padding + 1
+        guard hasExtraSlack, canvasWidth > 0, canvasHeight > 0, imageWidth > 0, imageHeight > 0 else { return 1 }
+        let candidate = min(canvasWidth * input.autoZoomFillRatio / imageWidth,
+                            canvasHeight * input.autoZoomFillRatio / imageHeight)
+        return candidate.isFinite ? max(1, min(input.maxAutoUserZoom, candidate)) : 1
     }
 
     private static func calculatePadding(imagePointSize: NSSize,

@@ -79,7 +79,7 @@ extension Settings {
         }
 
         // Only 30, 60, and 120 fps are supported; invalid values fall back to 30.
-        if copy.recordingFrameRate != 30 && copy.recordingFrameRate != 60 && copy.recordingFrameRate != 120 {
+        if ![30, 60, 120].contains(copy.recordingFrameRate) {
             copy.recordingFrameRate = 30
             repairedInvalidFields = true
         }
@@ -132,26 +132,20 @@ extension Settings {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.maxWidth = try container.decodeIfPresent(Int.self, forKey: .maxWidth)
-            ?? Settings.default.maxWidth
-        self.confirmBeforeClosing = try container.decodeIfPresent(Bool.self, forKey: .confirmBeforeClosing)
-            ?? Settings.default.confirmBeforeClosing
-        self.notePrefixEnabled = try container.decodeIfPresent(Bool.self, forKey: .notePrefixEnabled)
-            ?? Settings.default.notePrefixEnabled
-        self.notePrefix = try container.decodeIfPresent(String.self, forKey: .notePrefix)
-            ?? Settings.default.notePrefix
-        self.filenameTemplate = try container.decodeIfPresent(FilenameTemplate.self, forKey: .filenameTemplate)
-            ?? Settings.default.filenameTemplate
-        self.shortcuts = try container.decodeIfPresent(Shortcuts.self, forKey: .shortcuts)
-            ?? Settings.default.shortcuts
-        self.shortcutsCustomized = try container.decodeIfPresent(Bool.self, forKey: .shortcutsCustomized)
-            ?? false
-        self.screenshotCounter = try container.decodeIfPresent(Int.self, forKey: .screenshotCounter)
-            ?? Settings.default.screenshotCounter
-        self.editorColorIDs = try container.decodeIfPresent([String].self, forKey: .editorColorIDs) ?? EditorPalette.defaultIDs
-        let rawFrameRate = try container.decodeIfPresent(Int.self, forKey: .recordingFrameRate)
-            ?? Settings.default.recordingFrameRate
-        self.recordingFrameRate = (rawFrameRate == 30 || rawFrameRate == 60 || rawFrameRate == 120)
+        func decode<T: Decodable>(_ type: T.Type, key: CodingKeys, fallback: T) throws -> T {
+            try container.decodeIfPresent(type, forKey: key) ?? fallback
+        }
+        self.maxWidth = try decode(Int.self, key: .maxWidth, fallback: Settings.default.maxWidth)
+        self.confirmBeforeClosing = try decode(Bool.self, key: .confirmBeforeClosing, fallback: Settings.default.confirmBeforeClosing)
+        self.notePrefixEnabled = try decode(Bool.self, key: .notePrefixEnabled, fallback: Settings.default.notePrefixEnabled)
+        self.notePrefix = try decode(String.self, key: .notePrefix, fallback: Settings.default.notePrefix)
+        self.filenameTemplate = try decode(FilenameTemplate.self, key: .filenameTemplate, fallback: Settings.default.filenameTemplate)
+        self.shortcuts = try decode(Shortcuts.self, key: .shortcuts, fallback: Settings.default.shortcuts)
+        self.shortcutsCustomized = try decode(Bool.self, key: .shortcutsCustomized, fallback: false)
+        self.screenshotCounter = try decode(Int.self, key: .screenshotCounter, fallback: Settings.default.screenshotCounter)
+        self.editorColorIDs = try decode([String].self, key: .editorColorIDs, fallback: EditorPalette.defaultIDs)
+        let rawFrameRate = try decode(Int.self, key: .recordingFrameRate, fallback: Settings.default.recordingFrameRate)
+        self.recordingFrameRate = [30, 60, 120].contains(rawFrameRate)
             ? rawFrameRate
             : Settings.default.recordingFrameRate
     }
@@ -290,17 +284,16 @@ extension Shortcuts {
             modifierFlags: UInt32(controlKey | shiftKey)
         )
 
-        if screenshotArea == retiredArea || screenshotArea == retiredCommandShiftArea {
+        if [retiredArea, retiredCommandShiftArea].contains(screenshotArea) {
             screenshotArea = Shortcuts.default.screenshotArea
         }
-        if screenshotFull == retiredFull || screenshotFull == retiredCommandShiftFull {
+        if [retiredFull, retiredCommandShiftFull].contains(screenshotFull) {
             screenshotFull = Shortcuts.default.screenshotFull
         }
-        if reopenFinderSelection == retiredReopenFinderSelection
-            || reopenFinderSelection == retiredCommandShiftReopenFinderSelection {
+        if [retiredReopenFinderSelection, retiredCommandShiftReopenFinderSelection].contains(reopenFinderSelection) {
             reopenFinderSelection = Shortcuts.default.reopenFinderSelection
         }
-        if openScratchpad == retiredOpenScratchpad || openScratchpad == retiredOptionShiftScratchpad {
+        if [retiredOpenScratchpad, retiredOptionShiftScratchpad].contains(openScratchpad) {
             openScratchpad = Shortcuts.default.openScratchpad
         }
         if openScratchpad == temporaryOpenScratchpad {
@@ -431,27 +424,7 @@ extension FilenameTemplate {
     /// The counter here is the logical counter value (e.g. 1, 2, 3) – collision
     /// handling ("_2", "_3", ...) is owned by `ScreenshotService`.
     func makeFilenameComponents(date: Date, counter: Int) -> [String] {
-        var components: [String] = []
-
-        for block in blocks where block.isEnabled {
-            switch block.kind {
-            case .staticText:
-                if let text = block.text, !text.isEmpty {
-                    components.append(text)
-                }
-            case .date:
-                let format = (block.format?.isEmpty == false ? block.format : nil) ?? "yyyy-MM-dd"
-                components.append(FilenameDateFormatterCache.string(from: date, format: format))
-            case .time:
-                let format = (block.format?.isEmpty == false ? block.format : nil) ?? "HH.mm.ss"
-                components.append(FilenameDateFormatterCache.string(from: date, format: format))
-            case .counter:
-                // Always include counter when the block is enabled.
-                components.append(String(counter))
-            }
-        }
-
-        return components
+        blocks.filter(\.isEnabled).compactMap { $0.filenameComponent(date: date, counter: counter) }
     }
 
     /// Convenience for building the final filename string (without extension).
@@ -459,6 +432,27 @@ extension FilenameTemplate {
         let components = makeFilenameComponents(date: date, counter: counter)
         guard !components.isEmpty else { return "Screenshot" }
         return components.joined(separator: "_")
+    }
+}
+
+private extension FilenameTemplate.Block {
+    func filenameComponent(date: Date, counter: Int) -> String? {
+        switch kind {
+        case .staticText:
+            guard let text, !text.isEmpty else { return nil }
+            return text
+        case .date:
+            return FilenameDateFormatterCache.string(from: date, format: dateFormat(fallback: "yyyy-MM-dd"))
+        case .time:
+            return FilenameDateFormatterCache.string(from: date, format: dateFormat(fallback: "HH.mm.ss"))
+        case .counter:
+            return String(counter)
+        }
+    }
+
+    private func dateFormat(fallback: String) -> String {
+        guard let format, !format.isEmpty else { return fallback }
+        return format
     }
 }
 

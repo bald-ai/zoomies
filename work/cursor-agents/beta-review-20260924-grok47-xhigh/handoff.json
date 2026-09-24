@@ -1,0 +1,62 @@
+{
+  "outcome": "complete",
+  "summary": "The campaign is incomplete against the stated targets and needs one production fix. Saved and recomputed metrics agree: one Zoomies app component, line coverage 61.57% to 75.77%, branch coverage unverified at 0 counters, max complexity 20 with 48 bodies over 8, max line-based CRAP 72 with 108 bodies over 8, 997 bodies and 0 unmapped. Final XCTest evidence is 361 passed, 0 failed, 0 skipped, plus 1 excluded visible-window test and 3 passing measurement tests. The new file-size check uses a 32-bit NSNumber conversion on the image safety gate.",
+  "findings": [
+    "Defect: Sources/ImageSafety.swift:110-112 replaced 64-bit URL.fileSize with NSNumber.intValue, which is Int32. A file whose size does not fit in Int32 is measured incorrectly. If the low 32 bits are positive and no greater than the 256MB cap at Sources/ImageSafety.swift:34, inspectFile and boundedFileData can treat a multi-gigabyte file as small enough to open. Use int64Value or an unsigned 64-bit size, and reject when the attribute is missing or does not fit.",
+    "Unreported behavior change: full-screen capture no longer reports a missing display ID. The old captureRegion path presented \"Screenshot failed\" / \"Unable to determine display ID.\" Sources/ScreenshotService.swift:326-333 now returns nil when displayID is missing, and captureFullScreen at lines 119-120 returns without an alert. Area capture was already silent in that case.",
+    "Evidence limitation, not a restored-source test failure: 12 of 31 distinct mutations were run against file bytes that are not the final checkout, including every ScreenRecordingService trial and the stale-URL-size trial. Each mutated snippet still occurs once in the final file, and each trial restored its own pre-mutation bytes, but those logs do not prove the final files. The later symlink-size mutation does match final ImageSafety.swift.",
+    "No false completion claim. The gate exit is 1, targets_met is false, branch percent is null, and CRAP exceptions are empty. LLVM region kinds in the final export are only code (0) and skipped (2); there are no branch regions. Whole-app line totals recomputed from coverage.json are 8603/11354. CRAP matches C\u00b2*(1-coverage)\u00b3+C on every scored body. Declaration-only files are NotePanelLayout.swift and ScreenshotFinalAction.swift. All 55 handwritten Sources files are in the inventory.",
+    "Recording destination-failure preservation in the final source is coherent. ScreenRecordingService.swift:267-271 deletes the temp file only when not publishing. publishSession at lines 342-347 keeps it when the move fails. The final test at Tests/ZoomiesTests/ScreenRecordingServiceTests.swift:199-222 asserts that. Its mutation log predates the final file bytes.",
+    "Final ordinary tests were rerun after the mutation log. tests.log ends with Executed 361 tests, 0 failures, and contains no skip. tool-tests.log is 3 tests, OK. The two initial mutation errors are signal 5 / a nil unwrap in RenameInputContractTests and were not counted as detections; attempt 2 of each was detected. Source SHA-256 files saved at 21:01 match the current tree. HEAD is still 65024113deefe947b11ebda0a2d4dc0419cb8084; the campaign is uncommitted."
+  ],
+  "changes": [],
+  "decisions": [
+    "Reviewed only the checkpoint diff, current untracked production/tests/tooling, and Dev/quality-campaign evidence. Did not read work/cursor-agents or run tests, builds, or mutations.",
+    "Treated the campaign's own incomplete status as accurate. The Int32 size conversion is a separate product defect, not a metric-reporting error.",
+    "Did not treat hash-stale mutation logs as survivors or as final-source kills."
+  ],
+  "evidence": [
+    "Dev/quality-campaign/REPORT.md lines 7-15 and 19-25; Dev/quality-campaign/summary.json lines 1-103",
+    "Dev/quality-campaign/evidence/final/metrics.json coverage and summary; evidence/final/coverage.json region kinds {0: 8154, 2: 4}",
+    "Dev/quality-campaign/evidence/final/tests.log line 948; tests.exit 0; gate.exit 1; tool-tests.exit 0; build.exit 0; final-verification.exit 1",
+    "Dev/quality-campaign/evidence/mutations/results.json: 33 records, 31 detected, 2 errored; rename-save-becomes-copy.log line 9 signal 5 and line 14 Fatal error",
+    "Sources/ImageSafety.swift:15-34 and 108-143",
+    "Sources/ScreenshotService.swift:108-124 and 326-333 versus the removed display-ID alert in the diff from 65024113",
+    "Sources/ScreenRecordingService.swift:252-348",
+    "scripts/quality/metrics.py:38-106; scripts/quality/functions.swift:13-26 counts every switch label, while scripts/quality/README.md:29 says non-default cases. That can only raise complexity, and the gate still fails."
+  ],
+  "checks": [
+    {
+      "check": "git rev-parse HEAD, git status, git diff --stat 65024113deefe947b11ebda0a2d4dc0419cb8084",
+      "result": "passed",
+      "detail": "HEAD is the checkpoint. Production and test edits are uncommitted; Dev/quality-campaign and scripts/quality are untracked."
+    },
+    {
+      "check": "Recompute line, branch, CRAP, and unmapped counts from evidence/final/coverage.json, functions.json, and metrics.json",
+      "result": "passed",
+      "detail": "Matches the report: lines 8603/11354 = 75.77065351418003%, branches 0/0 unverified, 997 bodies, 0 unmapped, max complexity 20, 48 over 8, max CRAP 72, 108 over 8, formula mismatches 0."
+    },
+    {
+      "check": "Compare evidence/final/source-sha256.json to the current tree and to mutation restored hashes",
+      "result": "failed",
+      "detail": "Current tree matches the saved final hashes. 12 mutation restored hashes do not match those final file hashes. Trial-local before/after restoration still matches inside each mutation record."
+    },
+    {
+      "check": "Read final tests.log, tool-tests.log, mutation outcomes, and exit files",
+      "result": "passed",
+      "detail": "361 passed, 0 failed, no skip text; 3 tool tests OK; gate and final-verification exit 1 because targets_met is false; build exit 0."
+    }
+  ],
+  "open_issues": [
+    "Branch coverage remains unverified because the saved LLVM export has zero branch counters. Line coverage must not be used as a substitute.",
+    "Whole-component targets are missed: about 14.2 points of line coverage, all 48 complexity-over-8 bodies, and all 108 CRAP-over-8 bodies. No exemptions were accepted.",
+    "Native capture, recording, Finder, clipboard destination apps, and visible settings layout were not exercised, by the user's restriction. The excluded test is EditorWindowControllerTests.testApplicationKeyDispatchRoutesUndoToVisibleEditor.",
+    "Whether NSNumber.intValue clamps or wraps on this OS was not executed. The type is wide enough to mis-measure files above 2GiB either way; wrapping to a small positive value is the bypass case."
+  ],
+  "next_steps": [
+    "Replace currentFileSize with a 64-bit file size before manual testing of large or replaced images.",
+    "Re-run the 12 hash-stale mutations on the final files if those kills are going to be cited. Do not rerun merely to recount the 361 tests.",
+    "Continue the campaign until line coverage is at least 90%, branch coverage is actually measured at 85% or explicitly left unverified, and every body is CRAP 8 or less. The largest untouched gaps are zero-coverage UI entry points such as toggleRecording, currentCaptureScreen, and the EditorWindowController closure at line 240.",
+    "User manual checklist, still unverified here: capture area and full screen, including cancel and a screen with no display ID; rename, annotate, undo/redo, notes, save, and reopen; Copy+Save and Copy+Delete, deletion cancel, and original preservation; record, stop, quit, monitor change, and a failed destination save whose warning names the kept temp file; Settings layout and real global shortcuts; reopen a file larger than 2GiB and a file replaced at the same path, including through a symlink."
+  ]
+}

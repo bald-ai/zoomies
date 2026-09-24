@@ -3,6 +3,36 @@ import AppKit
 @testable import Zoomies
 
 final class ImageSafetyTests: XCTestCase {
+    func testReusedURLInspectsCurrentFileSizeAfterReplacement() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let file = root.appendingPathComponent("replaced.png")
+        try Data().write(to: file)
+        XCTAssertEqual(ImageSafety.inspectFile(at: file), .notAnImage)
+        let image = try TestSupport.noiseImagePNGData(width: 16, height: 12)
+        try image.write(to: file)
+        XCTAssertEqual(ImageSafety.inspectFile(at: file), .safe)
+        var limits = ImageSafetyLimits.runtime
+        limits.maxFileBytes = image.count - 1
+        XCTAssertEqual(ImageSafety.inspectFile(at: file, limits: limits), .tooLarge)
+        XCTAssertNil(ImageSafety.boundedFileData(at: file, limits: limits))
+    }
+
+    func testFileSizeLimitFollowsSymbolicLinkTarget() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let target = root.appendingPathComponent("target.png")
+        let link = root.appendingPathComponent("link.png")
+        let data = try TestSupport.noiseImagePNGData(width: 32, height: 24)
+        try data.write(to: target)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        var limits = ImageSafetyLimits.runtime
+        limits.maxFileBytes = data.count - 1
+        XCTAssertEqual(ImageSafety.inspectFile(at: link, limits: limits), .tooLarge)
+        XCTAssertNil(ImageSafety.boundedFileData(at: link, limits: limits))
+        XCTAssertEqual(ImageSafety.inspectFile(at: link), .safe)
+    }
+
     func testPixelCountReportsOverflowInsteadOfWrapping() {
         XCTAssertNil(ImageSafety.pixelCount(width: Int.max, height: 2))
         XCTAssertEqual(ImageSafety.pixelCount(width: 3200, height: 1800), 5_760_000)

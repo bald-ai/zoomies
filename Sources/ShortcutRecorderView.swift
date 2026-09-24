@@ -22,6 +22,8 @@ final class ShortcutRecorderView: NSControl {
 
     /// Called whenever the user successfully records a new shortcut.
     var onChange: ((RecordedShortcut) -> Void)?
+    var requestFocus: ((ShortcutRecorderView) -> Void)?
+    var rejectKey: () -> Void = { NSSound.beep() }
 
     private var layoutObservation: KeyboardLayoutObservation?
 
@@ -48,13 +50,17 @@ final class ShortcutRecorderView: NSControl {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if let requestFocus { requestFocus(self) } else { focusForRecording() }
+        isRecording = true
+        needsDisplay = true
+    }
+
+    private func focusForRecording() {
         let didBecomeFirstResponder = window?.makeFirstResponder(self) ?? false
         if !didBecomeFirstResponder {
             window?.makeKeyAndOrderFront(nil)
             _ = window?.makeFirstResponder(self)
         }
-        isRecording = true
-        needsDisplay = true
     }
 
     override func resignFirstResponder() -> Bool {
@@ -81,7 +87,7 @@ final class ShortcutRecorderView: NSControl {
 
         // Require at least one standard modifier (cmd/opt/ctrl/shift/caps).
         if carbonFlags == 0 {
-            NSSound.beep()
+            rejectKey()
             return
         }
 
@@ -89,7 +95,7 @@ final class ShortcutRecorderView: NSControl {
 
         // Only accept keys from the supported set.
         guard HotKeyService.isAllowedKeyCode(keyCode) else {
-            NSSound.beep()
+            rejectKey()
             return
         }
 

@@ -1,6 +1,6 @@
 import AppKit
 
-enum KeyCommand {
+enum KeyCommand: Hashable {
     case enter
     case commandEnter
     case commandShiftEnter
@@ -15,9 +15,7 @@ func interpretKeyCommand(from event: NSEvent) -> KeyCommand? {
 
     switch event.keyCode {
     case 36, 76:
-        if flags.contains(.command) && flags.contains(.shift) { return .commandShiftEnter }
-        if flags.contains(.command) { return .commandEnter }
-        return .enter
+        return enterKeyCommand(flags: flags)
     case 51:
         return flags.contains(.command) ? .commandBackspace : nil
     case 53:
@@ -27,6 +25,11 @@ func interpretKeyCommand(from event: NSEvent) -> KeyCommand? {
     default:
         return nil
     }
+}
+
+private func enterKeyCommand(flags: NSEvent.ModifierFlags) -> KeyCommand {
+    guard flags.contains(.command) else { return .enter }
+    return flags.contains(.shift) ? .commandShiftEnter : .commandEnter
 }
 
 final class CommandAwareTextField: NSTextField, NSTextFieldDelegate {

@@ -3,6 +3,62 @@ import XCTest
 @testable import Zoomies
 
 final class EditorShortcutOverlayTests: XCTestCase {
+    private final class HoverEvent: NSEvent {
+        var area: NSTrackingArea?
+        override var trackingArea: NSTrackingArea? { area }
+    }
+    func testControllerSchedulesAndCancelsHelpInHiddenWindowWithInjectedFocusAndClock() throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: .borderless, backing: .buffered, defer: false)
+        let host = try XCTUnwrap(window.contentView)
+        let control = NSButton(frame: NSRect(x: 40, y: 40, width: 50, height: 24))
+        host.addSubview(control)
+        var active = true
+        var now: TimeInterval = 100
+        var scheduled: [(TimeInterval, DispatchWorkItem)] = []
+        let overlay = EditorShortcutOverlayController(window: window, isActive: { active }, clock: { now },
+            schedule: { scheduled.append(($0, $1)) }, hints: { [.init(view: control, key: "W", label: "Pen")] })
+        func event(_ type: NSEvent.EventType, flags: NSEvent.ModifierFlags) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: 0,
+                windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 0))
+        }
+        overlay.handle(try event(.flagsChanged, flags: .command))
+        XCTAssertEqual(scheduled.first?.0, 0.5)
+        XCTAssertNil(overlay.overlayView)
+        now += 0.5
+        try XCTUnwrap(scheduled.last).1.perform()
+        let first = try XCTUnwrap(overlay.overlayView)
+        XCTAssertTrue(first.superview === host)
+        XCTAssertFalse(window.isVisible)
+        first.updateTrackingAreas()
+        XCTAssertEqual(first.trackingAreas.count, 1)
+        let hover = HoverEvent()
+        hover.area = first.trackingAreas.first
+        first.mouseEntered(with: hover)
+        let help = try XCTUnwrap(first.subviews.last?.subviews.first as? NSTextField)
+        XCTAssertEqual(help.stringValue, "Pen: W")
+        hover.area = nil
+        first.mouseEntered(with: hover)
+        XCTAssertEqual(help.stringValue, "Pen: W")
+        first.updateTrackingAreas()
+        XCTAssertEqual(first.trackingAreas.count, 1)
+        overlay.refreshLabels()
+        XCTAssertFalse(overlay.overlayView === first)
+        overlay.handle(try event(.keyDown, flags: .command))
+        XCTAssertNil(overlay.overlayView)
+        overlay.handle(try event(.flagsChanged, flags: []))
+        overlay.handle(try event(.flagsChanged, flags: .command))
+        let pending = try XCTUnwrap(scheduled.last).1
+        active = false
+        now += 1
+        pending.perform()
+        XCTAssertNil(overlay.overlayView)
+        overlay.handle(try event(.flagsChanged, flags: []))
+        XCTAssertNil(overlay.overlayView)
+        NotificationCenter.default.post(name: NSWindow.didResizeNotification, object: window)
+        XCTAssertNil(overlay.overlayView)
+    }
+
     func testHoldDelayAndImmediateRelease() {
         var state = EditorShortcutHoldState()
         state.modifiersChanged(.command, now: 10)

@@ -3,6 +3,47 @@ import AppKit
 @testable import Zoomies
 
 final class ScreenshotWorkflowControllerTests: XCTestCase {
+    func testCloseAfterClipboardFailureRestoresOriginalBytesAndRemovesConvertedOutput() throws {
+        for ext in ["png", "jpg"] {
+            let root = try TestSupport.makeTemporaryDirectory()
+            defer { TestSupport.removeIfExists(root) }
+            let original = root.appendingPathComponent("original.\(ext)")
+            let bytes: Data
+            if ext == "jpg" {
+                bytes = try XCTUnwrap(ImageEncoding.bitmapRepresentation(from: TestSupport.solidImage(width: 30, height: 20))?.representation(using: .jpeg, properties: [:]))
+            } else { bytes = try TestSupport.noiseImagePNGData(width: 30, height: 20) }
+            try bytes.write(to: original)
+            var finishes = 0
+            var errors: [String] = []
+            let backup = BackupService(backupsDirectory: root.appendingPathComponent("backup"))
+            let clipboard = ClipboardService(cacheDirectory: root.appendingPathComponent("cache"), pasteboardWriter: { _ in false })
+            let workflow = try makeWorkflow(root: root, fileURL: original, clipboardDirectory: root.appendingPathComponent("cache"),
+                writeOriginalFile: false, clipboardService: clipboard, customBackupService: backup,
+                errorPresenter: { title, _ in errors.append(title) })
+            workflow.onFinish = { finishes += 1 }
+            workflow.handleNoteAction(.copyAndSave(text: "temporary annotation"))
+            XCTAssertEqual(errors, ["Copy failed"])
+            XCTAssertEqual(finishes, 0)
+            let converted = root.appendingPathComponent("original.png")
+            let saved = try Data(contentsOf: converted)
+            XCTAssertNotEqual(saved, bytes)
+            XCTAssertEqual(PNGMetadata.extract(fromPNG: saved)?.prompt, "temporary annotation")
+            XCTAssertGreaterThan(try XCTUnwrap(PNGMetadata.pixelDimensions(ofPNG: saved)).height,
+                                 try XCTUnwrap(NSBitmapImageRep(data: bytes)).pixelsHigh)
+            // Retrying the same note must not burn another strip onto the image.
+            workflow.handleNoteAction(.copyAndSave(text: "temporary annotation"))
+            XCTAssertEqual(try Data(contentsOf: converted), saved)
+            workflow.handleNoteAction(.close)
+            XCTAssertEqual(finishes, 1)
+            XCTAssertEqual(try Data(contentsOf: original), bytes)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: backup.backupURL(forOriginalURL: original).path))
+            if ext == "jpg" { XCTAssertFalse(FileManager.default.fileExists(atPath: converted.path)) }
+            workflow.handleRenameAction(.delete)
+            XCTAssertEqual(finishes, 1)
+            XCTAssertEqual(try Data(contentsOf: original), bytes)
+        }
+    }
+
     func testHandleEditorCompletionSaveOnlyPersistsEditedImage() throws {
         let root = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(root) }
@@ -310,35 +351,57 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
         XCTAssertEqual(extracted.items, state.items)
     }
 
-    func testReopenedNonPNGSaveConvertsToPNGWithoutCrashing() throws {
-        // PNG-only: reopening a foreign JPEG and saving rewrites it as .png and
-        // removes the original. (A plain reopened JPEG has no embedded baseline,
-        // so no round-trip metadata is added — but it must not crash.)
-        let root = try TestSupport.makeTemporaryDirectory()
-        defer { TestSupport.removeIfExists(root) }
+    func testJPEGNoteSaveReopensEditableAndReplacesWithoutAddingAnotherStrip() throws {
+        // Exercise both note encoding paths, including saving a carried note
+        // from the rename panel, without presenting any windows.
+        for route in ["note", "rename", "editor"] {
+            let root = try TestSupport.makeTemporaryDirectory()
+            defer { TestSupport.removeIfExists(root) }
+            let jpegURL = root.appendingPathComponent("shot.jpg")
+            try TestSupport.solidImageJPEGData(width: 80, height: 40).write(to: jpegURL)
+            let baseImage = try XCTUnwrap(NSImage(contentsOf: jpegURL))
+            let expectedBaseline = try XCTUnwrap(ImageEncoding.pngData(from: baseImage))
+            let cache = root.appendingPathComponent("clipboard")
+            let first = try makeWorkflow(root: root, fileURL: jpegURL,
+                                         clipboardDirectory: cache, writeOriginalFile: false)
+            let saved = expectation(description: "JPEG saved through \(route)")
+            first.onFinish = { saved.fulfill() }
+            first.pendingNoteText = "First"
+            switch route {
+            case "note": first.handleNoteAction(.save(text: "First"))
+            case "rename": first.handleRenameAction(.save(newName: "shot.jpg"))
+            default: first.handleEditorCompletion(editedImage: baseImage, action: .saveOnly)
+            }
+            wait(for: [saved], timeout: 2)
 
-        let fileURL = root.appendingPathComponent("shot.jpg")
-        let jpeg = try TestSupport.solidImageJPEGData(width: 80, height: 40)
-        try jpeg.write(to: fileURL, options: .atomic)
+            let pngURL = root.appendingPathComponent("shot.png")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: jpegURL.path))
+            let firstBytes = try Data(contentsOf: pngURL)
+            let firstMetadata = try XCTUnwrap(PNGMetadata.extract(fromPNG: firstBytes), route)
+            XCTAssertEqual(firstMetadata.prompt, "First", route)
+            XCTAssertEqual(firstMetadata.originalPNG, expectedBaseline, route)
+            let originalSize = try XCTUnwrap(PNGMetadata.pixelDimensions(ofPNG: expectedBaseline))
+            let firstSize = try XCTUnwrap(PNGMetadata.pixelDimensions(ofPNG: firstBytes))
+            XCTAssertGreaterThan(firstSize.height, originalSize.height, route)
 
-        let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
-        let workflow = try makeWorkflow(root: root,
-                                        fileURL: fileURL,
-                                        clipboardDirectory: clipboardDirectory,
-                                        writeOriginalFile: false)
-
-        let done = expectation(description: "saved")
-        workflow.onFinish = { done.fulfill() }
-        workflow.pendingNoteText = "note on a jpeg"
-        workflow.handleRenameAction(.save(newName: fileURL.lastPathComponent))
-        wait(for: [done], timeout: 2.0)
-
-        // The .jpg is gone; a valid .png was written in its place.
-        let pngURL = root.appendingPathComponent("shot.png")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: pngURL.path))
-        let data = try Data(contentsOf: pngURL)
-        XCTAssertTrue(PNGMetadata.isPNG(data))
+            let reopened = try makeWorkflow(root: root, fileURL: pngURL,
+                                            clipboardDirectory: cache, writeOriginalFile: false)
+            XCTAssertEqual(reopened.pendingNoteText, "First", route)
+            let replaced = expectation(description: "Note replaced after \(route)")
+            reopened.onFinish = { replaced.fulfill() }
+            reopened.handleNoteAction(.save(text: "Other"))
+            wait(for: [replaced], timeout: 2)
+            let secondBytes = try Data(contentsOf: pngURL)
+            let secondMetadata = try XCTUnwrap(PNGMetadata.extract(fromPNG: secondBytes))
+            XCTAssertEqual(secondMetadata.prompt, "Other", route)
+            XCTAssertEqual(secondMetadata.originalPNG, expectedBaseline, route)
+            let secondSize = try XCTUnwrap(PNGMetadata.pixelDimensions(ofPNG: secondBytes))
+            XCTAssertEqual(secondSize.width, firstSize.width, route)
+            XCTAssertEqual(secondSize.height, firstSize.height, "Replacing the note must not append another strip: \(route)")
+            let again = try makeWorkflow(root: root, fileURL: pngURL,
+                                        clipboardDirectory: cache, writeOriginalFile: false)
+            XCTAssertEqual(again.pendingNoteText, "Other", route)
+        }
     }
 
     func testCopyAndDeleteIgnoresDuplicateFinalAction() throws {
@@ -923,7 +986,7 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
         let backupService = customBackupService ?? BackupService(fileManager: .default,
                                           backupsDirectory: root.appendingPathComponent("backups", isDirectory: true))
         let resolvedClipboard = clipboardService ?? ClipboardService(fileManager: .default,
-                                                                     cacheDirectory: clipboardDirectory)
+                                                                     cacheDirectory: clipboardDirectory, pasteboardWriter: { _ in true })
 
         return ScreenshotWorkflowController(fileURL: fileURL,
                                             initialImage: initialImage,

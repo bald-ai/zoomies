@@ -5,7 +5,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: TrayService!
     private var settingsWindowController: SettingsWindowController?
 
-    private let settingsStore = SettingsStore()
+    private let settingsStore: SettingsStore
+    private let makeServices: @MainActor (SettingsStore) -> Services
+    private let presentation: Presentation
+    private let finderSelection: FinderSelectionLookupCoordinator.SelectionRunner
     private var hotKeyService: HotKeyService!
     private var screenshotService: ScreenshotService!
     private var recordingService: ScreenRecordingService!
@@ -13,30 +16,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var clipboardService: ClipboardService!
     private var scratchpadService: ScratchpadService!
     private var backupService: BackupService!
-    private let screenshotSoundPlayer = ScreenshotSoundPlayer()
-    private var userCommandGate = UserCommandGate()
+    private var screenshotSoundPlayer: ScreenshotSoundPlayer!
     private let finderSelectionLookup = FinderSelectionLookupCoordinator()
+
+    struct Services {
+        let backup: BackupService
+        let clipboard: ClipboardService
+        let screenshot: ScreenshotService
+        let scratchpad: ScratchpadService
+        let hotKeys: HotKeyService
+        let recording: ScreenRecordingService
+        let sound: ScreenshotSoundPlayer
+    }
+
+    struct Presentation {
+        var tray: @MainActor (@escaping () -> Void) -> TrayService = { TrayService(onShowSettings: $0) }
+        var welcome: @MainActor (NSAlert) -> Void = { _ = $0.runModal() }
+        var video: @MainActor (VideoRenameWorkflowController) -> Void = { $0.start() }
+        var settings: @MainActor (SettingsWindowController) -> Void = { controller in
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            controller.showWindow(nil)
+            controller.window?.makeKeyAndOrderFront(nil)
+        }
+        var terminationReply: @MainActor (Bool) -> Void = { NSApp.reply(toApplicationShouldTerminate: $0) }
+    }
+
+    override convenience init() {
+        self.init(settingsStore: SettingsStore())
+    }
+
+    init(settingsStore: SettingsStore,
+         makeServices: @escaping @MainActor (SettingsStore) -> Services = AppDelegate.makeNativeServices,
+         presentation: Presentation = Presentation(),
+         finderSelection: @escaping FinderSelectionLookupCoordinator.SelectionRunner = { try FinderSelectionService.selection() }) {
+        self.settingsStore = settingsStore
+        self.makeServices = makeServices
+        self.presentation = presentation
+        self.finderSelection = finderSelection
+        super.init()
+    }
+
+    private static func makeNativeServices(settings: SettingsStore) -> Services {
+        let backup = BackupService()
+        let clipboard = ClipboardService()
+        let sound = ScreenshotSoundPlayer()
+        return Services(backup: backup, clipboard: clipboard,
+                        screenshot: ScreenshotService(settingsStore: settings, backupService: backup,
+                                                      clipboardService: clipboard, soundPlayer: sound),
+                        scratchpad: ScratchpadService(clipboardService: clipboard), hotKeys: HotKeyService(),
+                        recording: ScreenRecordingService(), sound: sound)
+    }
+
+    private lazy var commands = ApplicationCommands(state: { [unowned self] in
+        ApplicationCommands.State(
+            recordingShortcut: settingsWindowController?.isRecordingAnyShortcut == true,
+            videoRenameBusy: isVideoRenameBusy,
+            scratchpadBusy: scratchpadService.isBusyForUserCommands,
+            screenshotBusy: screenshotService.isBusyForUserCommands,
+            finderLookupBusy: finderSelectionLookup.isLookupInProgress,
+            recordingBusy: recordingService.isBusyForUserCommands,
+            stopAvailable: recordingService.isStopAvailable)
+    }, actions: .init(
+        area: { [unowned self] in screenshotService.captureArea() },
+        fullScreen: { [unowned self] in screenshotService.captureFullScreen() },
+        reopenFinder: { [unowned self] in
+            finderSelectionLookup.requestSelection(runSelection: finderSelection) { [weak self] in self?.handleFinderSelectionResult($0) }
+        },
+        scratchpad: { [unowned self] in scratchpadService.open() },
+        startRecording: { [unowned self] in recordingService.start(frameRate: settingsStore.settings.recordingFrameRate) },
+        stopRecording: { [unowned self] in recordingService.stop() }))
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         settingsStore.load()
 
-        backupService = BackupService()
-        clipboardService = ClipboardService()
-        
-        // Intentional: clipboard cache is only needed to keep Cmd+Delete paste working
-        // within the current app session. Purging on launch prevents stale cached files
-        // from accumulating indefinitely across launches.
+        let services = makeServices(settingsStore)
+        backupService = services.backup
+        clipboardService = services.clipboard
+        screenshotService = services.screenshot
+        scratchpadService = services.scratchpad
+        hotKeyService = services.hotKeys
+        recordingService = services.recording
+        screenshotSoundPlayer = services.sound
+
+        // Cached clipboard files and backups belong to the previous session.
         backupService.purgeAllBackups()
         clipboardService.purgeAllCachedFiles()
-
-        screenshotService = ScreenshotService(settingsStore: settingsStore,
-                                             backupService: backupService,
-                                             clipboardService: clipboardService,
-                                             soundPlayer: screenshotSoundPlayer)
         screenshotSoundPlayer.prewarmCaptureSound()
-        scratchpadService = ScratchpadService(clipboardService: clipboardService)
-        hotKeyService = HotKeyService()
-        recordingService = ScreenRecordingService()
         recordingService.onUpdate = { [weak self] in
             self?.refreshRecordingUI()
         }
@@ -44,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.openVideoRename(for: url)
         }
 
-        statusItemController = TrayService(onShowSettings: { [weak self] in
+        statusItemController = presentation.tray( { [weak self] in
             self?.showSettings()
         })
         refreshRecordingUI()
@@ -55,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showWelcomeInfo() {
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [presentation] in
             // Keep the welcome and shortcut setup tips visible on launch.
             let alert = NSAlert()
             alert.alertStyle = .informational
@@ -77,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             On your first capture, allow Screen Recording when macOS asks. You can also enable it later in System Settings → Privacy & Security → Screen Recording.
             """
             alert.addButton(withTitle: "OK")
-            alert.runModal()
+            presentation.welcome(alert)
         }
     }
     
@@ -91,8 +157,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Request stop and let the recording finalize before quitting.
         // The service bounds the wait so termination never hangs forever.
-        recordingService.stopForAppTermination {
-            NSApp.reply(toApplicationShouldTerminate: true)
+        recordingService.stopForAppTermination { [presentation] in
+            presentation.terminationReply(true)
         }
         return .terminateLater
     }
@@ -140,26 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// available while recording; startup is rejected while screenshot,
     /// note, Finder-reopen, or video-rename work is active or opening.
     private func toggleRecording() {
-        if settingsWindowController?.isRecordingAnyShortcut == true {
-            return
-        }
-        if recordingService.isStopAvailable {
-            recordingService.stop()
-            return
-        }
-        if isVideoRenameBusy {
-            return
-        }
-        if isScratchpadBusyOrOpening {
-            return
-        }
-        if screenshotService.isBusyForUserCommands {
-            return
-        }
-        if finderSelectionLookup.isLookupInProgress {
-            return
-        }
-        recordingService.start(frameRate: settingsStore.settings.recordingFrameRate)
+        commands.perform(.toggleRecording)
     }
 
     /// Opens the rename panel for a successfully saved recording. The
@@ -176,141 +223,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.videoRenameController = nil
         }
         videoRenameController = controller
-        controller.start()
+        presentation.video(controller)
     }
 
     private var isVideoRenameBusy: Bool {
         videoRenameController?.isBusyForUserCommands == true
     }
 
-    private func triggerAreaScreenshot() {
-        if settingsWindowController?.isRecordingAnyShortcut == true {
-            return
-        }
-        if isVideoRenameBusy {
-            return
-        }
-        if isScratchpadBusyOrOpening {
-            return
-        }
-        if recordingService.isBusyForUserCommands {
-            return
-        }
-        screenshotService.captureArea()
-    }
+    private func triggerAreaScreenshot() { commands.perform(.area) }
 
-    private func triggerFullScreenshot() {
-        if settingsWindowController?.isRecordingAnyShortcut == true {
-            return
-        }
-        if isVideoRenameBusy {
-            return
-        }
-        if isScratchpadBusyOrOpening {
-            return
-        }
-        if recordingService.isBusyForUserCommands {
-            return
-        }
-        screenshotService.captureFullScreen()
-    }
+    private func triggerFullScreenshot() { commands.perform(.fullScreen) }
 
-    private func triggerReopenFinderSelection() {
-        if settingsWindowController?.isRecordingAnyShortcut == true {
-            return
-        }
-        if isVideoRenameBusy {
-            return
-        }
-        if isScratchpadBusyOrOpening {
-            return
-        }
-        if recordingService.isBusyForUserCommands {
-            return
-        }
-        if screenshotService.isBusyForUserCommands {
-            return
-        }
-
-        finderSelectionLookup.requestSelection { [weak self] result in
-            self?.handleFinderSelectionResult(result)
-        }
-    }
+    private func triggerReopenFinderSelection() { commands.perform(.reopenFinder) }
 
     private func handleFinderSelectionResult(_ result: Result<FinderSelectionService.Selection, Error>) {
-        switch result {
-        case .success(let selection):
-            let url: URL
-            switch selection {
-            case .none:
-                presentError(title: "No Finder Selection", message: "Select an image file in Finder, then press the shortcut again.")
-                return
-            case .multiple(let count):
-                presentError(title: "Multiple Finder Items Selected", message: "Select exactly 1 image file in Finder (you selected \(count)), then press the shortcut again.")
-                return
-            case .single(let selectedURL):
-                url = selectedURL
-            }
-            switch ImageSafety.inspectFile(at: url) {
-            case .tooLarge:
-                presentError(
-                    title: "Image is too large",
-                    message: "This image is too large to open safely. Choose a smaller screenshot and try again."
-                )
-                return
-            case .notAnImage:
-                presentError(title: "Not an Image", message: "The selected Finder item is not a readable image.")
-                return
-            case .safe:
-                break
-            }
-
+        switch FinderReopenLogic.resolve(result) {
+        case .open(let url):
             screenshotService.beginPostCaptureFlow(forExistingFileAt: url, on: nil, escapeKeyDeletesFile: false)
-        case .failure(let error):
-            let nsError = error as NSError
-            if nsError.domain == "FinderSelectionService" && nsError.code == -2 {
-                AlertPresenter.presentWarningWithSettingsButton(
-                    title: "Automation Permission Required",
-                    message: "Zoomies needs permission to communicate with Finder.\n\nOpen System Settings → Privacy & Security → Automation, and enable Finder under Zoomies.",
-                    settingsURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
-                )
-            } else if nsError.domain == "FinderSelectionService" && nsError.code == -3 {
-                presentError(title: "Finder didn’t respond", message: nsError.localizedDescription)
+        case .warning(let title, let message, let settingsURL):
+            if let settingsURL {
+                AlertPresenter.presentWarningWithSettingsButton(title: title, message: message, settingsURL: settingsURL)
             } else {
-                presentError(title: "Finder Error", message: error.localizedDescription)
+                presentError(title: title, message: message)
             }
         }
     }
 
-    private func triggerOpenScratchpad() {
-        guard userCommandGate.beginScratchpadOpenRequest() else { return }
-
-        // Menu-item actions run while NSMenu is tracking; defer opening the
-        // scratchpad to the next runloop turn so the menu can dismiss first.
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            defer { self.userCommandGate.finishScratchpadOpenRequest() }
-            if self.settingsWindowController?.isRecordingAnyShortcut == true {
-                return
-            }
-            if self.isVideoRenameBusy {
-                return
-            }
-            if self.recordingService.isBusyForUserCommands {
-                return
-            }
-            if self.screenshotService.isBusyForUserCommands {
-                return
-            }
-            self.scratchpadService.open()
-        }
-    }
-
-    private var isScratchpadBusyOrOpening: Bool {
-        !userCommandGate.canStartScreenshot(
-            scratchpadIsBusy: scratchpadService.isBusyForUserCommands
-        )
-    }
+    private func triggerOpenScratchpad() { commands.perform(.scratchpad) }
 
     private func showSettings() {
         // Menu-item actions run while NSMenu is tracking; defer opening the window
@@ -318,10 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             let settingsWindowController = self.settingsWindowControllerOrCreate()
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            settingsWindowController.showWindow(nil)
-            settingsWindowController.window?.makeKeyAndOrderFront(nil)
+            self.presentation.settings(settingsWindowController)
         }
     }
 

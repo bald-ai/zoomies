@@ -3,12 +3,36 @@ import AppKit
 @testable import Zoomies
 
 final class ClipboardServiceTests: XCTestCase {
+    func testImagePublicationUsesTIFFFallbackOnlyAfterObjectRejection() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let image = try XCTUnwrap(NSImage(data: TestSupport.noiseImagePNGData(width: 12, height: 8)))
+        var accepted = true
+        var images: [NSImage] = []
+        var tiffs: [Data] = []
+        let service = ClipboardService(cacheDirectory: root, pasteboardWriter: { objects in
+            images += objects.compactMap { $0 as? NSImage }
+            return accepted
+        }, tiffWriter: { tiffs.append($0) })
+        service.writeImage(image)
+        XCTAssertTrue(images.first === image)
+        XCTAssertTrue(tiffs.isEmpty)
+        accepted = false
+        service.writeImage(image)
+        XCTAssertEqual(images.count, 2)
+        let fallback = try XCTUnwrap(NSBitmapImageRep(data: XCTUnwrap(tiffs.first)))
+        XCTAssertEqual(fallback.pixelsWide, 12)
+        XCTAssertEqual(fallback.pixelsHigh, 8)
+        let original = try XCTUnwrap(NSBitmapImageRep(data: XCTUnwrap(image.tiffRepresentation)))
+        XCTAssertEqual(fallback.colorAt(x: 5, y: 3), original.colorAt(x: 5, y: 3))
+    }
+
     func testPurgeAllCachedFilesRemovesExistingFiles() throws {
         let root = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(root) }
         let cache = root.appendingPathComponent("clipboard", isDirectory: true)
 
-        let service = ClipboardService(fileManager: .default, cacheDirectory: cache)
+        let service = ClipboardService(fileManager: .default, cacheDirectory: cache, pasteboardWriter: { _ in true })
         try Data("a".utf8).write(to: cache.appendingPathComponent("a.txt"), options: .atomic)
         try Data("b".utf8).write(to: cache.appendingPathComponent("b.txt"), options: .atomic)
 
@@ -24,7 +48,7 @@ final class ClipboardServiceTests: XCTestCase {
         let source = root.appendingPathComponent("image.png")
         try TestSupport.writeSolidImagePNG(to: source)
 
-        let service = ClipboardService(fileManager: .default, cacheDirectory: cache)
+        let service = ClipboardService(fileManager: .default, cacheDirectory: cache, pasteboardWriter: { _ in true })
         service.copyFile(at: source, useCache: true)
 
         let cached = try FileManager.default.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)
@@ -39,7 +63,7 @@ final class ClipboardServiceTests: XCTestCase {
         let source = root.appendingPathComponent("image.png")
         try TestSupport.writeSolidImagePNG(to: source)
 
-        let service = ClipboardService(fileManager: .default, cacheDirectory: cache)
+        let service = ClipboardService(fileManager: .default, cacheDirectory: cache, pasteboardWriter: { _ in true })
         service.copyFile(at: source, useCache: false)
 
         let cached = try FileManager.default.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)
@@ -53,7 +77,7 @@ final class ClipboardServiceTests: XCTestCase {
         let source = root.appendingPathComponent("image.png")
         try TestSupport.writeSolidImagePNG(to: source)
 
-        let service = ClipboardService(fileManager: .default, cacheDirectory: cache)
+        let service = ClipboardService(fileManager: .default, cacheDirectory: cache, pasteboardWriter: { _ in true })
         service.copyFile(at: source, useCache: true)
         service.copyFile(at: source, useCache: true)
 
@@ -69,7 +93,7 @@ final class ClipboardServiceTests: XCTestCase {
         let cache = root.appendingPathComponent("clipboard", isDirectory: true)
         let source = root.appendingPathComponent("missing.png")
 
-        let service = ClipboardService(fileManager: .default, cacheDirectory: cache)
+        let service = ClipboardService(fileManager: .default, cacheDirectory: cache, pasteboardWriter: { _ in true })
         service.copyFile(at: source, useCache: true)
 
         let cached = try FileManager.default.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)

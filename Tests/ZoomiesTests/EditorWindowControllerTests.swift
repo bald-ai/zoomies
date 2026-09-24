@@ -4,6 +4,89 @@ import XCTest
 @testable import Zoomies
 
 final class EditorWindowControllerTests: XCTestCase {
+    func testScrollIsLockedWhenCanvasFitsAndZoomedViewportCanPan() throws {
+        _ = NSApplication.shared
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let controller = EditorWindowController(image: TestSupport.solidImage(width: 100, height: 80),
+            settingsStore: SettingsStore(fileURL: root.appendingPathComponent("settings.json")))
+        defer { controller.dismissWithoutCompletion() }
+        let canvas = try XCTUnwrap(findCanvas(in: controller.window?.contentView))
+        let scroll = try XCTUnwrap(canvas.enclosingScrollView)
+        let cg = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -40, wheel2: 0, wheel3: 0))
+        let event = try XCTUnwrap(NSEvent(cgEvent: cg))
+        let initial = scroll.contentView.bounds.origin
+        scroll.scrollWheel(with: event)
+        XCTAssertEqual(scroll.contentView.bounds.origin, initial)
+        let initialMagnification = scroll.magnification
+        for _ in 0..<10 { canvas.onKeyCommand?(.zoomIn) }
+        XCTAssertGreaterThan(scroll.magnification, initialMagnification)
+        let zoomed = scroll.contentView.bounds.origin
+        scroll.scrollWheel(with: event)
+        XCTAssertGreaterThanOrEqual(scroll.contentView.bounds.origin.y, zoomed.y)
+        XCTAssertFalse(try XCTUnwrap(controller.window).isVisible)
+    }
+
+    func testEditorFinalActionsDeliverImageAndEditableStateOnlyForSavingActions() throws {
+        for action: ScreenshotFinalAction in [.saveOnly, .copyAndSave, .copyAndDelete, .deleteOnly, .closeOnly] {
+            let root = try TestSupport.makeTemporaryDirectory()
+            defer { TestSupport.removeIfExists(root) }
+            let store = SettingsStore(fileURL: root.appendingPathComponent("settings.json"))
+            store.update { $0.confirmBeforeClosing = true }
+            let controller = EditorWindowController(image: TestSupport.solidImage(width: 100, height: 80), settingsStore: store)
+            let canvas = try XCTUnwrap(findCanvas(in: controller.window?.contentView))
+            drawStroke(on: canvas, from: NSPoint(x: 10, y: 20), to: NSPoint(x: 70, y: 20))
+            var confirmed = false
+            controller.onConfirmDelete = { confirmed }
+            controller.onConfirmClose = { confirmed }
+            var delivered: [ScreenshotFinalAction] = []
+            controller.onComplete = { image, result, state in
+                delivered.append(result)
+                if result == .deleteOnly || result == .closeOnly {
+                    XCTAssertNil(image)
+                    XCTAssertNil(state)
+                } else {
+                    XCTAssertNotNil(image)
+                    XCTAssertEqual(state?.items.count, 1)
+                }
+            }
+            if action == .deleteOnly || action == .closeOnly {
+                canvas.onKeyCommand?(.finalAction(action))
+                XCTAssertTrue(delivered.isEmpty)
+                XCTAssertEqual(controller.currentEditableState()?.items.count, 1)
+            }
+            confirmed = true
+            canvas.onKeyCommand?(.finalAction(action))
+            XCTAssertEqual(delivered, [action])
+            XCTAssertFalse(try XCTUnwrap(controller.window).isVisible)
+        }
+    }
+
+    func testMonitorUndoRedoOnlyConsumesEditorCommandKeysInItsOwnWindow() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let controller = EditorWindowController(image: TestSupport.solidImage(width: 100, height: 80),
+            settingsStore: SettingsStore(fileURL: root.appendingPathComponent("settings.json")))
+        defer { controller.dismissWithoutCompletion() }
+        let canvas = try XCTUnwrap(findCanvas(in: controller.window?.contentView))
+        drawStroke(on: canvas, from: NSPoint(x: 10, y: 20), to: NSPoint(x: 70, y: 20))
+        let undo = try keyEvent(keyCode: UInt16(kVK_ANSI_Z), modifierFlags: [.command], characters: "z")
+        XCTAssertTrue(controller.handleMonitoredEvent(undo, isKeyWindow: false, isEditingText: false) === undo)
+        XCTAssertTrue(controller.handleMonitoredEvent(undo, isKeyWindow: true, isEditingText: true) === undo)
+        XCTAssertEqual(controller.currentEditableState()?.items.count, 1)
+        XCTAssertNil(controller.handleMonitoredEvent(undo, isKeyWindow: true, isEditingText: false))
+        XCTAssertEqual(controller.currentEditableState()?.items.count, 0)
+        let redo = try keyEvent(keyCode: UInt16(kVK_ANSI_Z), modifierFlags: [.command, .shift], characters: "Z")
+        XCTAssertNil(controller.handleMonitoredEvent(redo, isKeyWindow: true, isEditingText: false))
+        XCTAssertEqual(controller.currentEditableState()?.items.count, 1)
+        for event in [try keyEvent(keyCode: UInt16(kVK_ANSI_Z), modifierFlags: [], characters: "z"),
+                      try keyEvent(keyCode: UInt16(kVK_ANSI_A), modifierFlags: [.command], characters: "a")] {
+            XCTAssertTrue(controller.handleMonitoredEvent(event, isKeyWindow: true, isEditingText: false) === event)
+        }
+        XCTAssertEqual(controller.currentEditableState()?.items.count, 1)
+        XCTAssertFalse(try XCTUnwrap(controller.window).isVisible)
+    }
+
     func testWindowCommandUndoRedoAndNewStrokeInvalidatesRedo() throws {
         let directory = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(directory) }

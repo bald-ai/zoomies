@@ -34,6 +34,12 @@ enum NativeAreaCapture {
             }
         }
 
+        return try readCaptureResult(imageURL: imageURL, errorURL: errorURL, status: status,
+                                     hasScreenCaptureAccess: hasScreenCaptureAccess)
+    }
+
+    private static func readCaptureResult(imageURL: URL, errorURL: URL, status: Int32,
+                                          hasScreenCaptureAccess: () -> Bool) throws -> CGImage? {
         let diagnostic = (try? String(contentsOf: errorURL, encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let hasImage = FileManager.default.fileExists(atPath: imageURL.path)
@@ -42,14 +48,22 @@ enum NativeAreaCapture {
             return nil
         }
         guard status == 0, hasImage else {
-            // Let macOS own the permission prompt; the first request may exit before access is granted.
-            if !hasImage && !hasScreenCaptureAccess() {
-                return nil
-            }
-            throw NSError(domain: "NativeAreaCapture", code: Int(status), userInfo: [
-                NSLocalizedDescriptionKey: diagnostic.isEmpty ? "macOS could not complete the screenshot." : diagnostic
-            ])
+            return try handleCaptureFailure(status: status, diagnostic: diagnostic, hasImage: hasImage,
+                                            hasScreenCaptureAccess: hasScreenCaptureAccess)
         }
+        return try decodeCapture(at: imageURL)
+    }
+
+    private static func handleCaptureFailure(status: Int32, diagnostic: String, hasImage: Bool,
+                                              hasScreenCaptureAccess: () -> Bool) throws -> CGImage? {
+        // macOS owns permission prompting; a first request may exit before access is granted.
+        if !hasImage && !hasScreenCaptureAccess() { return nil }
+        throw NSError(domain: "NativeAreaCapture", code: Int(status), userInfo: [
+            NSLocalizedDescriptionKey: diagnostic.isEmpty ? "macOS could not complete the screenshot." : diagnostic
+        ])
+    }
+
+    private static func decodeCapture(at imageURL: URL) throws -> CGImage {
         guard let source = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, [
                 kCGImageSourceShouldCacheImmediately: true

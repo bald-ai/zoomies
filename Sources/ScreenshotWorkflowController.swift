@@ -11,6 +11,13 @@ final class ScreenshotWorkflowController {
     typealias FileRemover = (_ url: URL) throws -> Void
     typealias DeleteConfirmer = () -> Bool
 
+    struct Presentation {
+        var rename: (RenamePanelController) -> Void = { $0.show() }
+        var note: (ScreenshotNotePanelController) -> Void = { $0.show() }
+        var editor: (EditorWindowController) -> Void = { $0.show() }
+    }
+    private let presentation: Presentation
+
     private var fileURL: URL
     private var initialImage: NSImage?
     private var initialFilePersistence: Task<URL, Error>?
@@ -78,7 +85,9 @@ final class ScreenshotWorkflowController {
          removeFile: @escaping FileRemover = { url in
              try FileManager.default.removeItem(at: url)
          },
-         deleteConfirmer: DeleteConfirmer? = nil) {
+         deleteConfirmer: DeleteConfirmer? = nil,
+         presentation: Presentation = Presentation()) {
+        self.presentation = presentation
         self.fileURL = fileURL
         self.initialFilePersistence = initialFilePersistence
         self.initialScreenshotCounter = initialScreenshotCounter
@@ -155,7 +164,7 @@ final class ScreenshotWorkflowController {
         // Do NOT activate or change activation policy here.
         // Activating the app can yank the user out of their current Space/fullscreen app
         // (it often looks like being “sent to Desktop”). We want a Spotlight-like panel.
-        controller.show()
+        presentation.rename(controller)
     }
 
     private func presentNotePanel(existingText: String = "") {
@@ -168,7 +177,7 @@ final class ScreenshotWorkflowController {
         noteController = controller
         center(controller.window, on: sourceScreen)
         // Same rationale as rename: avoid activating the app (Space/Desktop jump).
-        controller.show()
+        presentation.note(controller)
     }
 
     private func center(_ window: NSWindow?, on screen: NSScreen?) {
@@ -190,43 +199,20 @@ final class ScreenshotWorkflowController {
     func handleRenameAction(_ action: RenamePanelAction) {
         guard !hasFinished, !isFinalActionInProgress else { return }
 
-        // Carry any text typed in the Note panel across a Shift+Tab return to Rename,
-        // so saving from Rename still burns the pending note onto the screenshot.
-        let carriedNote = pendingNoteText.isEmpty ? nil : pendingNoteText
-
-        switch action {
-        case .save(let newName):
-            guard applyRenameIfNeeded(newName: newName) else {
-                return
-            }
-            complete(action: .saveOnly, note: carriedNote)
-
-        case .copyAndSave(let newName):
-            guard applyRenameIfNeeded(newName: newName) else {
-                return
-            }
-            complete(action: .copyAndSave, note: carriedNote)
-
-        case .copyAndDelete(let newName):
-            guard applyRenameIfNeeded(newName: newName) else {
-                return
-            }
-            complete(action: .copyAndDelete, note: carriedNote)
-
-        case .delete:
-            complete(action: .deleteOnly, note: nil)
-
-        case .close:
-            closeWorkflowWithoutDeleting()
-
-        case .goToNote(let newName):
-            guard applyRenameIfNeeded(newName: newName) else {
-                return
-            }
-            presentNotePanel(existingText: pendingNoteText)
-            renameController?.close()
-            renameController = nil
+        if let completion = action.completion {
+            if let name = completion.newName, !applyRenameIfNeeded(newName: name) { return }
+            let carriedNote = pendingNoteText.isEmpty ? nil : pendingNoteText
+            complete(action: completion.action, note: carriedNote)
+        } else if case .goToNote(let name) = action {
+            openNote(newName: name)
         }
+    }
+
+    private func openNote(newName: String) {
+        guard applyRenameIfNeeded(newName: newName) else { return }
+        presentNotePanel(existingText: pendingNoteText)
+        renameController?.close()
+        renameController = nil
     }
 
     private func applyRenameIfNeeded(newName: String) -> Bool {
@@ -296,22 +282,11 @@ final class ScreenshotWorkflowController {
     func handleNoteAction(_ action: NotePanelAction) {
         guard !hasFinished, !isFinalActionInProgress else { return }
 
+        if let completion = action.completion {
+            complete(action: completion.action, note: completion.note)
+            return
+        }
         switch action {
-        case .save(let text):
-            complete(action: .saveOnly, note: text)
-
-        case .copyAndSave(let text):
-            complete(action: .copyAndSave, note: text)
-
-        case .copyAndDelete(let text):
-            complete(action: .copyAndDelete, note: text)
-
-        case .delete:
-            complete(action: .deleteOnly, note: nil)
-
-        case .close:
-            closeWorkflowWithoutDeleting()
-
         case .backToRename(let text):
             pendingNoteText = text
             // Open the destination panel first, then close the source panel.
@@ -323,6 +298,7 @@ final class ScreenshotWorkflowController {
         case .goToEditor(let text):
             pendingNoteText = text
             openEditor(withNote: text)
+        default: break
         }
     }
 
@@ -386,7 +362,7 @@ final class ScreenshotWorkflowController {
         }
 
         editorController = editor
-        editor.show()
+        presentation.editor(editor)
     }
 
     private func returnToNoteFromEditor() {
@@ -399,105 +375,100 @@ final class ScreenshotWorkflowController {
         presentNotePanel(existingText: pendingNoteText)
     }
 
+    private struct PreparedOutput {
+        var image: NSImage
+        var baselinePNG: Data?
+        var prompt: String?
+        var editorState: EditorCanvasState?
+    }
+
     func handleEditorCompletion(editedImage: NSImage?, action: ScreenshotFinalAction, editorState: EditorCanvasState? = nil) {
         guard !hasFinished, !isFinalActionInProgress else { return }
-
         pendingEditedImage = editedImage
         pendingEditorState = editorState
-        let shouldReopenEditorOnFailure = editorController != nil
-
-        if action != .closeOnly && isWaitingForInitialFilePersistence {
-            isFinalActionInProgress = true
-            waitForInitialFilePersistence { [weak self] ready in
-                guard let self else { return }
-                self.isFinalActionInProgress = false
-                guard ready else {
-                    self.reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
-                    return
-                }
-                self.handleEditorCompletion(editedImage: editedImage, action: action, editorState: editorState)
-            }
-            return
-        }
-
+        let reopenOnFailure = editorController != nil
+        if deferEditorCompletion(editedImage: editedImage, action: action,
+                                 editorState: editorState, reopenOnFailure: reopenOnFailure) { return }
         isFinalActionInProgress = true
-        guard retryInitialCapturePersistenceIfNeeded() else {
+        guard finishEditorAction(image: editedImage, action: action, editorState: editorState) else {
             isFinalActionInProgress = false
-            reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
-            return
-        }
-
-        editorController?.dismissWithoutCompletion()
-        editorController = nil
-
-        if action == .closeOnly {
-            // Cancel/close: do not write to disk or composite discarded edits.
-            guard restoreOriginalFromBackupIfAvailable() else {
-                isFinalActionInProgress = false
-                reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
-                return
-            }
-            removeBackupIfNeeded()
-            clearPendingEditorState()
-            finishWorkflow()
-            return
-        }
-
-        if action == .deleteOnly {
-            guard deleteSourceFileAndBackup() else {
-                isFinalActionInProgress = false
-                reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
-                return
-            }
-            clearPendingEditorState()
-            finishWorkflow()
-            return
-        }
-
-        var finalImage: NSImage?
-        var baselinePNG: Data?
-        var embedPrompt: String?
-        var embedEditorState: EditorCanvasState?
-        if let image = editedImage {
-            // Editor returns a flattened image. If there's a pending note, burn it once
-            // right before saving/copying so it never stacks/duplicates.
-            if let preparedNote = WorkflowNoteRenderer.prepareNoteText(pendingNoteText, settings: settingsStore.settings),
-               let noted = WorkflowNoteRenderer.burn(note: preparedNote.rendered, into: image) {
-                finalImage = noted
-                burnedNoteText = preparedNote.identity
-                // Editor edits become the new clean baseline; only the note is round-tripped.
-                baselinePNG = baselinePNGForEmbedding(preNoteImage: image)
-                embedPrompt = preparedNote.identity
-                embedEditorState = editorState
-            } else {
-                finalImage = image
-                burnedNoteText = ""
-                embedEditorState = editorState
-            }
-        }
-
-        if let finalImage,
-           (action == .saveOnly || action == .copyAndSave) {
-            // Save the final (possibly noted) image to disk.
-            guard saveEditedImage(finalImage,
-                                  baselinePNG: baselinePNG,
-                                  prompt: embedPrompt,
-                                  editorState: embedEditorState) else {
-                isFinalActionInProgress = false
-                reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
-                return
-            }
-            // Workflow finished normally: remove backup if one was created.
-            removeBackupIfNeeded()
-        }
-
-        guard performFinalActionEffects(action, copyAndDeleteImage: finalImage) else {
-            isFinalActionInProgress = false
-            reopenEditorIfNeeded(afterFailure: shouldReopenEditorOnFailure)
+            reopenEditorIfNeeded(afterFailure: reopenOnFailure)
             return
         }
         clearPendingEditorState()
         finishWorkflow()
+    }
+
+    private func deferEditorCompletion(editedImage: NSImage?, action: ScreenshotFinalAction,
+                                       editorState: EditorCanvasState?, reopenOnFailure: Bool) -> Bool {
+        guard action != .closeOnly, isWaitingForInitialFilePersistence else { return false }
+        isFinalActionInProgress = true
+        waitForInitialFilePersistence { [weak self] ready in
+            guard let self else { return }
+            self.isFinalActionInProgress = false
+            guard ready else {
+                self.reopenEditorIfNeeded(afterFailure: reopenOnFailure)
+                return
+            }
+            self.handleEditorCompletion(editedImage: editedImage, action: action, editorState: editorState)
+        }
+        return true
+    }
+
+    private func finishEditorAction(image: NSImage?, action: ScreenshotFinalAction,
+                                    editorState: EditorCanvasState?) -> Bool {
+        guard retryInitialCapturePersistenceIfNeeded() else { return false }
+        editorController?.dismissWithoutCompletion()
+        editorController = nil
+        switch action {
+        case .closeOnly:
+            // Closing discards changes and restores any original backup.
+            guard restoreOriginalFromBackupIfAvailable() else { return false }
+            removeBackupIfNeeded()
+            return true
+        case .deleteOnly:
+            return deleteSourceFileAndBackup()
+        case .saveOnly, .copyAndSave, .copyAndDelete:
+            let output = image.flatMap {
+                prepareOutput(image: $0, editorState: editorState, note: pendingNoteText, requireNoteRendering: false)
+            }
+            guard saveEditorOutputIfNeeded(output, action: action) else { return false }
+            return performFinalActionEffects(action, copyAndDeleteImage: output?.image)
+        }
+    }
+
+    private func saveEditorOutputIfNeeded(_ output: PreparedOutput?, action: ScreenshotFinalAction) -> Bool {
+        guard let output, action == .saveOnly || action == .copyAndSave else { return true }
+        guard saveEditedImage(output.image, baselinePNG: output.baselinePNG,
+                              prompt: output.prompt, editorState: output.editorState) else { return false }
+        removeBackupIfNeeded()
+        return true
+    }
+
+    /// Carry edits as a clean baseline and burn a note exactly once. The editor
+    /// historically keeps its image if a note cannot render; the input-panel
+    /// save instead reports that failure and stays open for retry.
+    private func prepareOutput(image: NSImage, editorState: EditorCanvasState?, note: String?,
+                               requireNoteRendering: Bool) -> PreparedOutput? {
+        var output = PreparedOutput(image: image, editorState: editorState)
+        guard let note, let prepared = WorkflowNoteRenderer.prepareNoteText(note, settings: settingsStore.settings) else {
+            burnedNoteText = ""
+            return output
+        }
+        guard let noted = WorkflowNoteRenderer.burn(note: prepared.rendered, into: image) else {
+            if requireNoteRendering {
+                presentError(title: "Failed to apply note", message: "Could not render the note text.")
+                return nil
+            }
+            burnedNoteText = ""
+            return output
+        }
+        output.image = noted
+        // Saved output is always PNG, including when the source was a JPEG.
+        output.baselinePNG = ImageEncoding.pngData(from: image)
+        output.prompt = prepared.identity
+        burnedNoteText = prepared.identity
+        return output
     }
 
     private func saveEditedImage(_ image: NSImage,
@@ -510,13 +481,6 @@ final class ScreenshotWorkflowController {
                                    prompt: prompt,
                                    editorState: editorState,
                                    errorTitle: "Failed to save image")
-    }
-
-    /// Returns the PNG bytes to embed as the round-trip original for an image the
-    /// note will be burned onto, or nil when the output is not a PNG.
-    private func baselinePNGForEmbedding(preNoteImage: NSImage) -> Data? {
-        guard fileURL.pathExtension.lowercased() == "png" else { return nil }
-        return ImageEncoding.pngData(from: preNoteImage)
     }
 
     private func encodeAndWriteImage(_ image: NSImage,
@@ -669,12 +633,10 @@ final class ScreenshotWorkflowController {
 
     private func complete(action: ScreenshotFinalAction, note: String?) {
         guard !hasFinished, !isFinalActionInProgress else { return }
-
         if action == .closeOnly {
             closeWorkflowWithoutDeleting()
             return
         }
-
         if isWaitingForInitialFilePersistence {
             isFinalActionInProgress = true
             waitForInitialFilePersistence { [weak self] ready in
@@ -685,92 +647,44 @@ final class ScreenshotWorkflowController {
             }
             return
         }
-
         isFinalActionInProgress = true
-        guard retryInitialCapturePersistenceIfNeeded() else {
+        guard retryInitialCapturePersistenceIfNeeded(), finishInputAction(action, note: note) else {
             isFinalActionInProgress = false
             return
         }
-
-        if action == .deleteOnly {
-            guard deleteConfirmer() else {
-                isFinalActionInProgress = false
-                return
-            }
-            guard deleteSourceFileAndBackup() else {
-                isFinalActionInProgress = false
-                return
-            }
-            closeInputControllers()
-            clearPendingEditorState()
-            finishWorkflow()
-            return
-        }
-
-        let pendingImage: NSImage? = {
-            if let editor = editorController {
-                let image = editor.currentCompositeImage()
-                pendingEditorState = editor.currentEditableState()
-                editor.dismissWithoutCompletion()
-                editorController = nil
-                return image
-            }
-            return pendingEditedImage
-        }()
-
-        let imageToPersist: NSImage?
-        var baselinePNG: Data?
-        var embedPrompt: String?
-        var embedEditorState: EditorCanvasState?
-        if let pendingImage {
-            var finalImage = pendingImage
-            if let note,
-               let preparedNote = WorkflowNoteRenderer.prepareNoteText(note, settings: settingsStore.settings) {
-                guard let noted = WorkflowNoteRenderer.burn(note: preparedNote.rendered, into: finalImage) else {
-                    presentError(title: "Failed to apply note", message: "Could not render the note text.")
-                    isFinalActionInProgress = false
-                    return
-                }
-                finalImage = noted
-                burnedNoteText = preparedNote.identity
-                // Carried editor edits become the new baseline; only the note round-trips.
-                baselinePNG = baselinePNGForEmbedding(preNoteImage: pendingImage)
-                embedPrompt = preparedNote.identity
-                embedEditorState = pendingEditorState
-            } else {
-                burnedNoteText = ""
-                embedEditorState = pendingEditorState
-            }
-            imageToPersist = finalImage
-        } else {
-            imageToPersist = nil
-            if let note {
-                guard applyNoteIfNeeded(note) else {
-                    isFinalActionInProgress = false
-                    return
-                }
-            }
-        }
-
-        guard persistImageIfNeeded(imageToPersist,
-                                   for: action,
-                                   baselinePNG: baselinePNG,
-                                   prompt: embedPrompt,
-                                   editorState: embedEditorState) else {
-            isFinalActionInProgress = false
-            return
-        }
-        guard performFinalActionEffects(action, copyAndDeleteImage: nil) else {
-            isFinalActionInProgress = false
-            return
-        }
-        if action == .saveOnly || action == .copyAndSave {
-            removeBackupIfNeeded()
-        }
-
         closeInputControllers()
         clearPendingEditorState()
         finishWorkflow()
+    }
+
+    private func finishInputAction(_ action: ScreenshotFinalAction, note: String?) -> Bool {
+        if action == .deleteOnly {
+            return deleteConfirmer() && deleteSourceFileAndBackup()
+        }
+        guard persistPendingOutput(action: action, note: note) else { return false }
+        guard performFinalActionEffects(action, copyAndDeleteImage: nil) else { return false }
+        if action == .saveOnly || action == .copyAndSave { removeBackupIfNeeded() }
+        return true
+    }
+
+    private func takePendingImage() -> NSImage? {
+        guard let editor = editorController else { return pendingEditedImage }
+        let image = editor.currentCompositeImage()
+        pendingEditorState = editor.currentEditableState()
+        editor.dismissWithoutCompletion()
+        editorController = nil
+        return image
+    }
+
+    private func persistPendingOutput(action: ScreenshotFinalAction, note: String?) -> Bool {
+        guard let image = takePendingImage() else {
+            if let note, !applyNoteIfNeeded(note) { return false }
+            return persistImageIfNeeded(nil, for: action, baselinePNG: nil, prompt: nil, editorState: nil)
+        }
+        guard let output = prepareOutput(image: image, editorState: pendingEditorState,
+                                         note: note, requireNoteRendering: true) else { return false }
+        return persistImageIfNeeded(output.image, for: action, baselinePNG: output.baselinePNG,
+                                    prompt: output.prompt, editorState: output.editorState)
     }
 
     private func deleteSourceFileAndBackup() -> Bool {
@@ -805,14 +719,7 @@ final class ScreenshotWorkflowController {
 
         // Prefer the recovered clean original so re-saving a reopened Zoomies PNG
         // never bakes a note on top of an already-burned image.
-        guard let base = initialImage ?? NSImage(contentsOf: fileURL) else {
-            presentError(title: "Failed to apply note", message: "Could not read the screenshot image.")
-            return false
-        }
-        // A reopened annotated file carries its drawings in initialEditorState
-        // while initialImage is the bare base. Composite first so a note-only
-        // save keeps the visible drawings instead of flattening over the base.
-        let image = annotatedBaseImage(from: base)
+        guard let image = loadNoteBaseImage() else { return false }
         guard let updated = WorkflowNoteRenderer.burn(note: preparedNote.rendered, into: image) else {
             presentError(title: "Failed to apply note", message: "Could not render the note text.")
             return false
@@ -821,7 +728,7 @@ final class ScreenshotWorkflowController {
         // Editor-state-only reopens have no recovered clean original; fall back
         // to the composited pre-note image so the prompt still embeds and
         // round-trips instead of being silently dropped.
-        let baseline = cleanOriginalPNG ?? baselinePNGForEmbedding(preNoteImage: image)
+        let baseline = cleanOriginalPNG ?? ImageEncoding.pngData(from: image)
         guard encodeAndWriteImage(updated,
                                   baselinePNG: baseline,
                                   prompt: preparedNote.identity,
@@ -831,6 +738,14 @@ final class ScreenshotWorkflowController {
         }
         burnedNoteText = preparedNote.identity
         return true
+    }
+
+    private func loadNoteBaseImage() -> NSImage? {
+        guard let base = initialImage ?? NSImage(contentsOf: fileURL) else {
+            presentError(title: "Failed to apply note", message: "Could not read the screenshot image.")
+            return nil
+        }
+        return annotatedBaseImage(from: base)
     }
 
     /// Rebuilds the visible annotated image for a note-only save on a reopened
@@ -865,43 +780,38 @@ final class ScreenshotWorkflowController {
 
     private func performFinalActionEffects(_ action: ScreenshotFinalAction, copyAndDeleteImage: NSImage?) -> Bool {
         switch action {
-        case .saveOnly:
-            break
-        case .copyAndSave:
-            // The save already persisted above, so the save stands; warn and
-            // stay open so the user can retry the copy.
-            guard clipboardService.copyFile(at: fileURL, useCache: false) != nil else {
-                presentError(
-                    title: "Copy failed",
-                    message: "Zoomies couldn't copy the screenshot to the clipboard, but your save was kept. You can try Copy + Save again."
-                )
-                return false
-            }
-        case .copyAndDelete:
-            if let published = publishedCopyAndDeleteURL,
-               FileManager.default.fileExists(atPath: published.path) {
-                return deleteSourceFileAndBackup()
-            }
-            let published: URL?
-            if let copyAndDeleteImage {
-                published = clipboardService.copyImageAsFile(copyAndDeleteImage, fileName: fileURL.lastPathComponent)
-            } else {
-                published = clipboardService.copyFile(at: fileURL, useCache: true)
-            }
-            guard let published else {
-                presentError(
-                    title: "Copy failed",
-                    message: "Zoomies couldn’t copy the screenshot to the clipboard, so the original file was left in place. You can try Copy + Delete again."
-                )
-                return false
-            }
-            publishedCopyAndDeleteURL = published
-            return deleteSourceFileAndBackup()
-        case .deleteOnly:
-            return deleteSourceFileAndBackup()
-        case .closeOnly:
+        case .saveOnly: return true
+        case .copyAndSave: return copySavedScreenshot()
+        case .copyAndDelete: return copyScreenshotForDeletion(copyAndDeleteImage) && deleteSourceFileAndBackup()
+        case .deleteOnly: return deleteSourceFileAndBackup()
+        case .closeOnly: return false
+        }
+    }
+
+    private func copySavedScreenshot() -> Bool {
+        guard clipboardService.copyFile(at: fileURL, useCache: false) != nil else {
+            presentError(title: "Copy failed",
+                         message: "Zoomies couldn't copy the screenshot to the clipboard, but your save was kept. You can try Copy + Save again.")
             return false
         }
+        return true
+    }
+
+    private func copyScreenshotForDeletion(_ image: NSImage?) -> Bool {
+        if let published = publishedCopyAndDeleteURL,
+           FileManager.default.fileExists(atPath: published.path) { return true }
+        let published: URL?
+        if let image {
+            published = clipboardService.copyImageAsFile(image, fileName: fileURL.lastPathComponent)
+        } else {
+            published = clipboardService.copyFile(at: fileURL, useCache: true)
+        }
+        guard let published else {
+            presentError(title: "Copy failed",
+                         message: "Zoomies couldn’t copy the screenshot to the clipboard, so the original file was left in place. You can try Copy + Delete again.")
+            return false
+        }
+        publishedCopyAndDeleteURL = published
         return true
     }
 

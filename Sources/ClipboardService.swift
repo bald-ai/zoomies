@@ -14,12 +14,15 @@ final class ClipboardService {
     private let cacheDirectory: URL
     private let fileManager: FileManager
     private let pasteboardWriter: PasteboardWriter
+    private let tiffWriter: (Data) -> Void
 
     init(fileManager: FileManager = .default,
          cacheDirectory: URL? = nil,
-         pasteboardWriter: PasteboardWriter? = nil) {
+         pasteboardWriter: PasteboardWriter? = nil,
+         tiffWriter: @escaping (Data) -> Void = ClipboardService.writeTIFFToGeneralPasteboard) {
         self.fileManager = fileManager
         self.pasteboardWriter = pasteboardWriter ?? ClipboardService.writeToGeneralPasteboard
+        self.tiffWriter = tiffWriter
 
         if let cacheDirectory {
             self.cacheDirectory = cacheDirectory
@@ -51,8 +54,7 @@ final class ClipboardService {
 
         // Fallback for targets that expect explicit TIFF data.
         if let tiffData = image.tiffRepresentation {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setData(tiffData, forType: .tiff)
+            tiffWriter(tiffData)
         }
     }
 
@@ -136,5 +138,10 @@ final class ClipboardService {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         return pasteboard.writeObjects(objects)
+    }
+
+    private static func writeTIFFToGeneralPasteboard(_ data: Data) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setData(data, forType: .tiff)
     }
 }

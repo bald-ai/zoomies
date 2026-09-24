@@ -47,7 +47,7 @@ final class EditorWindowController: NSWindowController {
 
     private let canvasView: EditorCanvasView
     private let scrollView = EditorScrollView()
-    private let clipboardService = ClipboardService()
+    private let clipboardService: ClipboardService
     private let settingsStore: SettingsStore
     private let notePreviewRaw: String?
     private let targetScreen: NSScreen?
@@ -165,7 +165,8 @@ final class EditorWindowController: NSWindowController {
          notePreview: String? = nil,
          targetScreen: NSScreen? = nil,
          escapeKeyDeletesFile: Bool = true,
-         initialState: EditorCanvasState? = nil) {
+         initialState: EditorCanvasState? = nil,
+         clipboardService: ClipboardService = ClipboardService()) {
         let escapeFinal: ScreenshotFinalAction = escapeKeyDeletesFile ? .deleteOnly : .closeOnly
         // The canvas validates and restores editable state through EditorDrawing,
         // using the supplied image as the fallback when restoration is unavailable.
@@ -174,6 +175,7 @@ final class EditorWindowController: NSWindowController {
             escapeFinalAction: escapeFinal,
             initialState: initialState
         )
+        self.clipboardService = clipboardService
         self.settingsStore = settingsStore
         self.paletteIDs = EditorPalette.normalized(settingsStore.settings.editorColorIDs)
         self.colors = EditorPalette.colors(for: paletteIDs).map(\.color)
@@ -238,24 +240,29 @@ final class EditorWindowController: NSWindowController {
     private func installKeyDownMonitor() {
         guard keyDownMonitor == nil else { return }
         keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
-            guard let self, self.window?.isKeyWindow == true else { return event }
-            self.shortcutOverlay?.handle(event)
-            guard event.type == .keyDown else { return event }
-            // Inline annotation text uses the standard NSTextView undo manager.
-            guard !(self.window?.firstResponder is NSTextView) else { return event }
-
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            guard event.charactersIgnoringModifiers?.lowercased() == "z" else { return event }
-            if flags == [.command] {
-                self.canvasView.undo()
-                return nil
-            }
-            if flags == [.command, .shift] {
-                self.canvasView.redo()
-                return nil
-            }
-            return event
+            guard let self else { return event }
+            return self.handleMonitoredEvent(event, isKeyWindow: self.window?.isKeyWindow == true,
+                                             isEditingText: self.window?.firstResponder is NSTextView)
         }
+    }
+
+    /// Event decision used by the local monitor; explicit context keeps hidden
+    /// component fixtures independent of focus and the application's event loop.
+    func handleMonitoredEvent(_ event: NSEvent, isKeyWindow: Bool, isEditingText: Bool) -> NSEvent? {
+        guard isKeyWindow else { return event }
+        shortcutOverlay?.handle(event)
+        guard event.type == .keyDown, !isEditingText else { return event }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard event.charactersIgnoringModifiers?.lowercased() == "z" else { return event }
+        if flags == [.command] {
+            canvasView.undo()
+            return nil
+        }
+        if flags == [.command, .shift] {
+            canvasView.redo()
+            return nil
+        }
+        return event
     }
 
     private func removeKeyDownMonitor() {
@@ -767,30 +774,42 @@ final class EditorWindowController: NSWindowController {
 
     private func handleKeyCommand(_ command: EditorCanvasView.KeyCommand) {
         switch command {
-        case .finalAction(let action):
-            finish(with: action)
+        case .finalAction(let action): finish(with: action)
+        case .zoomIn: setZoom(userZoomFactor * 1.2)
+        case .zoomOut: setZoom(userZoomFactor / 1.2)
+        case .zoomReset: setZoom(defaultUserZoomFactor)
+        case .backToNote:
+            closeColorPicker()
+            onBackToNote?()
+            window?.orderOut(nil)
+        case .selectTool(let tool): selectTool(tool)
+        default: handleEditingCommand(command)
+        }
+    }
 
-        case .zoomIn:
-            setZoom(userZoomFactor * 1.2)
-        case .zoomOut:
-            setZoom(userZoomFactor / 1.2)
-        case .zoomReset:
-            setZoom(defaultUserZoomFactor)
+    private func handleEditingCommand(_ command: EditorCanvasView.KeyCommand) {
+        switch command {
         case .undo:
             canvasView.undo()
         case .redo:
             canvasView.redo()
         case .clear:
             canvasView.clearAll()
+        case .copyToClipboard:
+            copySelectionOrEditedImageToClipboard()
+        case .cutSelectionToClipboard:
+            cutSelectionToClipboard()
+        case .pasteSelectionInCanvas:
+            pasteSelectionInCanvas()
+        default: handlePaletteCommand(command)
+        }
+    }
+
+    private func handlePaletteCommand(_ command: EditorCanvasView.KeyCommand) {
+        switch command {
         case .selectColor(let index):
             selectColor(index: index)
             closeColorPicker()
-        case .backToNote:
-            closeColorPicker()
-            onBackToNote?()
-            window?.orderOut(nil)
-        case .selectTool(let tool):
-            selectTool(tool)
         case .cycleColor:
             selectColor(index: (selectedColorIndex + 1) % colors.count)
             closeColorPicker()
@@ -805,12 +824,7 @@ final class EditorWindowController: NSWindowController {
             closeColorPicker()
         case .colorPickerClose:
             closeColorPicker()
-        case .copyToClipboard:
-            copySelectionOrEditedImageToClipboard()
-        case .cutSelectionToClipboard:
-            cutSelectionToClipboard()
-        case .pasteSelectionInCanvas:
-            pasteSelectionInCanvas()
+        default: break
         }
     }
 
@@ -839,6 +853,10 @@ final class EditorWindowController: NSWindowController {
         updateScrollLockAndRecentering()
     }
 
+    private var layoutVisibleFrame: NSRect? {
+        targetScreen?.visibleFrame ?? window?.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+    }
+
     private func sizeWindowToImage() {
         guard let window else { return }
         window.contentView?.layoutSubtreeIfNeeded()
@@ -860,7 +878,7 @@ final class EditorWindowController: NSWindowController {
         let chromeH: CGFloat = 24.0 + toolbarH + 10.0 + (noteH > 0 ? (10.0 + noteH) : 0.0)
         let minContentSize = NSSize(width: minW, height: minH)
         let maxContentSize = EditorWindowLayoutLogic.maximumContentSize(
-            visibleFrame: targetScreen?.visibleFrame ?? window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame,
+            visibleFrame: layoutVisibleFrame,
             minContentSize: minContentSize
         )
 

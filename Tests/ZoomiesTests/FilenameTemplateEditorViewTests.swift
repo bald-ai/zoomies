@@ -3,6 +3,53 @@ import AppKit
 @testable import Zoomies
 
 final class FilenameTemplateEditorViewTests: XCTestCase {
+    func testReorderRejectsInvalidPayloadAndMovesStableBlockIdentityInBothDirections() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let store = SettingsStore(fileURL: root.appendingPathComponent("settings.json"))
+        let view = FilenameTemplateEditorView(settingsStore: store)
+        let ids = store.settings.filenameTemplate.blocks.map(\.id)
+        for invalid in [nil, "bad UUID", UUID().uuidString] {
+            XCTAssertFalse(view.moveBlock(fromPasteboardString: invalid, toRow: 0))
+            XCTAssertEqual(store.settings.filenameTemplate.blocks.map(\.id), ids)
+        }
+        let payload = try XCTUnwrap(view.tableView(view.tableView, pasteboardWriterForRow: 0) as? NSPasteboardItem)
+        XCTAssertEqual(payload.string(forType: .init("com.zoomies.filenameTemplate.block")), ids[0].uuidString)
+        XCTAssertTrue(view.moveBlock(fromPasteboardString: ids[0].uuidString, toRow: ids.count))
+        XCTAssertEqual(store.settings.filenameTemplate.blocks.map(\.id), Array(ids.dropFirst()) + [ids[0]])
+        XCTAssertTrue(view.moveBlock(fromPasteboardString: ids[0].uuidString, toRow: 0))
+        XCTAssertEqual(store.settings.filenameTemplate.blocks.map(\.id), ids)
+    }
+
+    func testDateAndTimeControlsPersistFormatsAndResetRestoresDefaults() throws {
+        _ = NSApplication.shared
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let store = SettingsStore(fileURL: root.appendingPathComponent("settings.json"))
+        let view = FilenameTemplateEditorView(settingsStore: store)
+        view.frame = NSRect(x: 0, y: 0, width: 600, height: 220)
+        view.layoutSubtreeIfNeeded()
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let dateRow = try XCTUnwrap(store.settings.filenameTemplate.blocks.firstIndex { $0.kind == .date })
+        let dateCell = try XCTUnwrap(view.tableView(view.tableView, viewFor: nil, row: dateRow))
+        let segments = try XCTUnwrap(descendants(dateCell).compactMap { $0 as? NSSegmentedControl }.first)
+        for enabled in [[true, false, false], [false, true, true], [true, true, true], [false, false, false]] {
+            for index in 0..<3 { segments.setSelected(enabled[index], forSegment: index) }
+            XCTAssertTrue(segments.sendAction(try XCTUnwrap(segments.action), to: segments.target))
+            let expected = zip(enabled, ["yyyy", "MM", "dd"]).filter(\.0).map(\.1).joined(separator: "-")
+            XCTAssertEqual(store.settings.filenameTemplate.blocks[dateRow].format, expected)
+        }
+        let timeRow = try XCTUnwrap(store.settings.filenameTemplate.blocks.firstIndex { $0.kind == .time })
+        let timeCell = try XCTUnwrap(view.tableView(view.tableView, viewFor: nil, row: timeRow))
+        let timeField = try XCTUnwrap(findEditableField(in: timeCell))
+        timeField.stringValue = "HH"
+        timeField.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: timeField))
+        XCTAssertEqual(store.settings.filenameTemplate.blocks[timeRow].format, "HH")
+        let reset = try XCTUnwrap(descendants(view).compactMap { $0 as? NSButton }.first { $0.title == "Reset to Defaults" })
+        reset.performClick(nil)
+        XCTAssertEqual(store.settings.filenameTemplate.blocks.map(\.format), FilenameTemplate.defaultTemplate.blocks.map(\.format))
+    }
+
     func testTextKeystrokeDoesNotRebuildCells() throws {
         let directory = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(directory) }

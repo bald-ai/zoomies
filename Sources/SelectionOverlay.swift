@@ -12,12 +12,17 @@ final class SelectionOverlay: NSObject {
 
     private var screen: NSScreen?
     private var window: SelectionOverlayWindow?
-    private var selectionView: SelectionOverlayView?
+    private(set) var selectionView: SelectionOverlayView?
     private var screenParametersObserver: NSObjectProtocol?
+    private let screenProvider: () -> NSScreen?
+    private let presenter: (SelectionOverlayWindow, SelectionOverlayView) -> Void
 
     private(set) var isActive = false
 
-    override init() {
+    init(screenProvider: @escaping () -> NSScreen? = SelectionOverlay.screenUnderMouse,
+         presenter: @escaping (SelectionOverlayWindow, SelectionOverlayView) -> Void = SelectionOverlay.present) {
+        self.screenProvider = screenProvider
+        self.presenter = presenter
         super.init()
 
         screenParametersObserver = NotificationCenter.default.addObserver(
@@ -47,9 +52,7 @@ final class SelectionOverlay: NSObject {
             return
         }
 
-        guard let targetScreen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) })
-            ?? NSScreen.main
-            ?? NSScreen.screens.first else {
+        guard let targetScreen = screenProvider() else {
             return
         }
 
@@ -62,11 +65,20 @@ final class SelectionOverlay: NSObject {
         overlayWindow.setFrame(targetScreen.frame, display: false)
         selectionView.frame = CGRect(origin: .zero, size: targetScreen.frame.size)
         selectionView.prepareForSelection(backingScaleFactor: targetScreen.backingScaleFactor)
-        selectionView.pushCursorIfNeeded()
-        overlayWindow.orderFront(nil)
-        overlayWindow.makeKey()
-        overlayWindow.makeFirstResponder(selectionView)
+        presenter(overlayWindow, selectionView)
         isActive = true
+    }
+
+    private static func screenUnderMouse() -> NSScreen? {
+        NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) })
+            ?? NSScreen.main ?? NSScreen.screens.first
+    }
+
+    private static func present(_ window: SelectionOverlayWindow, _ view: SelectionOverlayView) {
+        view.pushCursorIfNeeded()
+        window.orderFront(nil)
+        window.makeKey()
+        window.makeFirstResponder(view)
     }
 
     func cancelSelection() {
@@ -164,7 +176,7 @@ final class SelectionOverlayWindow: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-private final class SelectionOverlayView: NSView {
+final class SelectionOverlayView: NSView {
     var onComplete: ((CGRect?) -> Void)?
     var backingScaleFactor: CGFloat = 1
 
@@ -223,7 +235,7 @@ private final class SelectionOverlayView: NSView {
 
         if let rect = currentSelectionRect {
             NSColor.clear.setFill()
-            rect.fill(using: .destinationOut)
+            rect.fill(using: .clear)
 
             NSColor.white.setStroke()
             let path = NSBezierPath(rect: rect)

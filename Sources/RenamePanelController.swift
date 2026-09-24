@@ -7,6 +7,18 @@ enum RenamePanelAction {
     case delete
     case close
     case goToNote(newName: String)
+
+    /// A completion carries the requested filename only when renaming applies.
+    var completion: (action: ScreenshotFinalAction, newName: String?)? {
+        switch self {
+        case .save(let name): return (.saveOnly, name)
+        case .copyAndSave(let name): return (.copyAndSave, name)
+        case .copyAndDelete(let name): return (.copyAndDelete, name)
+        case .delete: return (.deleteOnly, nil)
+        case .close: return (.closeOnly, nil)
+        case .goToNote: return nil
+        }
+    }
 }
 
 final class RenamePanelController: NSWindowController {
@@ -52,6 +64,22 @@ final class RenamePanelController: NSWindowController {
         originalBaseName = ns.deletingPathExtension
     }
 
+    private func handleKeyCommand(_ command: KeyCommand) {
+        let sanitized = sanitizedFilename(from: textField.stringValue)
+        textField.stringValue = WorkflowFilenameLogic.editableFilename(sanitized)
+        let name = textField.stringValue
+        let actions: [KeyCommand: RenamePanelAction?] = [
+            .enter: .save(newName: name),
+            .commandEnter: .copyAndSave(newName: name),
+            .commandShiftEnter: .copyAndSave(newName: name),
+            .commandBackspace: showsCopyAndDiscard ? .copyAndDelete(newName: name) : nil,
+            .escape: escapeKeyDeletesFile ? .delete : .close,
+            .tab: allowsNoteNavigation ? .goToNote(newName: name) : nil,
+            .shiftTab: nil
+        ]
+        if let action = actions[command] ?? nil { onAction?(action) }
+    }
+
     private func configureUI(initialFilename: String) {
         guard let contentView = window?.contentView else { return }
 
@@ -70,37 +98,7 @@ final class RenamePanelController: NSWindowController {
         textField.backgroundColor = .textBackgroundColor
         textField.textColor = .textColor
 
-        textField.keyCommandHandler = { [weak self] command in
-            guard let self = self else {
-                return
-            }
-            let rawValue = self.textField.stringValue
-            let sanitized = self.sanitizedFilename(from: rawValue)
-            self.textField.stringValue = WorkflowFilenameLogic.editableFilename(sanitized)
-
-            switch command {
-            case .enter:
-                self.onAction?(.save(newName: self.textField.stringValue))
-            case .commandEnter, .commandShiftEnter:
-                self.onAction?(.copyAndSave(newName: self.textField.stringValue))
-            case .commandBackspace:
-                if self.showsCopyAndDiscard {
-                    self.onAction?(.copyAndDelete(newName: self.textField.stringValue))
-                }
-            case .escape:
-                if self.escapeKeyDeletesFile {
-                    self.onAction?(.delete)
-                } else {
-                    self.onAction?(.close)
-                }
-            case .tab:
-                if self.allowsNoteNavigation {
-                    self.onAction?(.goToNote(newName: self.textField.stringValue))
-                }
-            case .shiftTab:
-                break
-            }
-        }
+        textField.keyCommandHandler = { [weak self] command in self?.handleKeyCommand(command) }
 
         let escapeLabel = escapeKeyDeletesFile ? "Delete" : "Close"
         var shortcutParts = ["Enter: Save", "⌘↩: Copy+Save"]
