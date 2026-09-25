@@ -62,6 +62,60 @@ final class EditorWindowControllerTests: XCTestCase {
         }
     }
 
+    func testCanvasKeyCommandsReachTheirEditorActions() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let controller = EditorWindowController(image: TestSupport.solidImage(width: 100, height: 80),
+            settingsStore: SettingsStore(fileURL: root.appendingPathComponent("settings.json")))
+        defer { controller.dismissWithoutCompletion() }
+        let canvas = try XCTUnwrap(findCanvas(in: controller.window?.contentView))
+        let scroll = try XCTUnwrap(canvas.enclosingScrollView)
+        let colors = EditorPalette.colors(for: EditorPalette.defaultIDs).map(\.color)
+        let send = { (command: EditorCanvasView.KeyCommand) in canvas.onKeyCommand?(command) }
+
+        send(.selectTool(.rectangle))
+        XCTAssertEqual(canvas.currentTool, .rectangle)
+
+        send(.selectColor(index: 2))
+        XCTAssertEqual(canvas.currentColor, colors[2])
+        send(.cycleColor)
+        XCTAssertEqual(canvas.currentColor, colors[3])
+        send(.toggleColorPicker)
+        XCTAssertTrue(canvas.isColorPickerOpen)
+        // Focus starts on the selected color (3); moving by one and choosing selects 4.
+        send(.colorPickerMove(direction: 1))
+        send(.colorPickerSelect)
+        XCTAssertEqual(canvas.currentColor, colors[4])
+        XCTAssertFalse(canvas.isColorPickerOpen)
+        send(.toggleColorPicker)
+        send(.colorPickerClose)
+        XCTAssertFalse(canvas.isColorPickerOpen)
+        XCTAssertEqual(canvas.currentColor, colors[4])
+
+        drawStroke(on: canvas, from: NSPoint(x: 10, y: 20), to: NSPoint(x: 70, y: 20))
+        XCTAssertEqual(controller.currentEditableState()?.items.count, 1)
+        send(.undo)
+        XCTAssertEqual(controller.currentEditableState()?.items.count, 0)
+        send(.redo)
+        XCTAssertEqual(controller.currentEditableState()?.items.count, 1)
+        send(.clear)
+        XCTAssertEqual(controller.currentEditableState()?.items.count, 0)
+
+        let initialMagnification = scroll.magnification
+        for _ in 0..<3 { send(.zoomIn) }
+        let zoomedIn = scroll.magnification
+        XCTAssertGreaterThan(zoomedIn, initialMagnification)
+        send(.zoomOut)
+        XCTAssertLessThan(scroll.magnification, zoomedIn)
+        send(.zoomReset)
+        XCTAssertEqual(scroll.magnification, initialMagnification, accuracy: 0.001)
+
+        var backToNoteCount = 0
+        controller.onBackToNote = { backToNoteCount += 1 }
+        send(.backToNote)
+        XCTAssertEqual(backToNoteCount, 1)
+    }
+
     func testMonitorUndoRedoOnlyConsumesEditorCommandKeysInItsOwnWindow() throws {
         let root = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(root) }

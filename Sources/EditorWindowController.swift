@@ -780,12 +780,6 @@ final class EditorWindowController: NSWindowController {
             onBackToNote?()
             window?.orderOut(nil)
         case .selectTool(let tool): selectTool(tool)
-        default: handleEditingCommand(command)
-        }
-    }
-
-    private func handleEditingCommand(_ command: EditorCanvasView.KeyCommand) {
-        switch command {
         case .undo:
             canvasView.undo()
         case .redo:
@@ -798,12 +792,6 @@ final class EditorWindowController: NSWindowController {
             cutSelectionToClipboard()
         case .pasteSelectionInCanvas:
             pasteSelectionInCanvas()
-        default: handlePaletteCommand(command)
-        }
-    }
-
-    private func handlePaletteCommand(_ command: EditorCanvasView.KeyCommand) {
-        switch command {
         case .selectColor(let index):
             selectColor(index: index)
             closeColorPicker()
@@ -821,7 +809,6 @@ final class EditorWindowController: NSWindowController {
             closeColorPicker()
         case .colorPickerClose:
             closeColorPicker()
-        default: break
         }
     }
 

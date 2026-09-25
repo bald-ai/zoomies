@@ -189,24 +189,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         hotKeyService.registerShortcuts(settings: settingsStore.settings,
-                                        areaHandler: { [weak self] in self?.triggerAreaScreenshot() },
-                                        fullHandler: { [weak self] in self?.triggerFullScreenshot() },
-                                        reopenFinderSelectionHandler: { [weak self] in self?.triggerReopenFinderSelection() },
-                                        openScratchpadHandler: { [weak self] in self?.triggerOpenScratchpad() },
-                                        toggleRecordingHandler: { [weak self] in self?.toggleRecording() })
+                                        areaHandler: { [weak self] in self?.commands.perform(.area) },
+                                        fullHandler: { [weak self] in self?.commands.perform(.fullScreen) },
+                                        reopenFinderSelectionHandler: { [weak self] in self?.commands.perform(.reopenFinder) },
+                                        openScratchpadHandler: { [weak self] in self?.commands.perform(.scratchpad) },
+                                        toggleRecordingHandler: { [weak self] in self?.commands.perform(.toggleRecording) })
     }
 
     private func refreshRecordingUI() {
         statusItemController.updateRecording(state: recordingService.state,
                                              elapsed: recordingService.elapsed)
-    }
-
-    /// Single entry point for the recording menu command and shortcut.
-    /// A stop request is honored before any busy-state checks so Stop stays
-    /// available while recording; startup is rejected while screenshot,
-    /// note, Finder-reopen, or video-rename work is active or opening.
-    private func toggleRecording() {
-        commands.perform(.toggleRecording)
     }
 
     /// Opens the rename panel for a successfully saved recording. The
@@ -230,12 +222,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         videoRenameController?.isBusyForUserCommands == true
     }
 
-    private func triggerAreaScreenshot() { commands.perform(.area) }
-
-    private func triggerFullScreenshot() { commands.perform(.fullScreen) }
-
-    private func triggerReopenFinderSelection() { commands.perform(.reopenFinder) }
-
     private func handleFinderSelectionResult(_ result: Result<FinderSelectionService.Selection, Error>) {
         switch FinderReopenLogic.resolve(result) {
         case .open(let url):
@@ -248,8 +234,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-
-    private func triggerOpenScratchpad() { commands.perform(.scratchpad) }
 
     private func showSettings() {
         // Menu-item actions run while NSMenu is tracking; defer opening the window

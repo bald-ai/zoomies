@@ -428,21 +428,22 @@ final class ScreenshotWorkflowController {
             return true
         case .deleteOnly:
             return deleteSourceFileAndBackup()
-        case .saveOnly, .copyAndSave, .copyAndDelete:
+        case .saveOnly, .copyAndSave:
+            if let output = image.flatMap({
+                prepareOutput(image: $0, editorState: editorState, note: pendingNoteText, requireNoteRendering: false)
+            }) {
+                guard saveEditedImage(output.image, baselinePNG: output.baselinePNG,
+                                      prompt: output.prompt, editorState: output.editorState) else { return false }
+                removeBackupIfNeeded()
+            }
+            return performFinalActionEffects(action, copyAndDeleteImage: nil)
+        case .copyAndDelete:
+            // Copy + Delete never rewrites the original; it only copies the edited image.
             let output = image.flatMap {
                 prepareOutput(image: $0, editorState: editorState, note: pendingNoteText, requireNoteRendering: false)
             }
-            guard saveEditorOutputIfNeeded(output, action: action) else { return false }
             return performFinalActionEffects(action, copyAndDeleteImage: output?.image)
         }
-    }
-
-    private func saveEditorOutputIfNeeded(_ output: PreparedOutput?, action: ScreenshotFinalAction) -> Bool {
-        guard let output, action == .saveOnly || action == .copyAndSave else { return true }
-        guard saveEditedImage(output.image, baselinePNG: output.baselinePNG,
-                              prompt: output.prompt, editorState: output.editorState) else { return false }
-        removeBackupIfNeeded()
-        return true
     }
 
     /// Carry edits as a clean baseline and burn a note exactly once. The editor
@@ -648,7 +649,10 @@ final class ScreenshotWorkflowController {
             return
         }
         isFinalActionInProgress = true
-        guard retryInitialCapturePersistenceIfNeeded(), finishInputAction(action, note: note) else {
+        guard retryInitialCapturePersistenceIfNeeded(),
+              action == .deleteOnly
+                ? deleteConfirmer() && deleteSourceFileAndBackup()
+                : finishInputAction(action, note: note) else {
             isFinalActionInProgress = false
             return
         }
@@ -657,11 +661,17 @@ final class ScreenshotWorkflowController {
         finishWorkflow()
     }
 
+    /// Saves the pending edited image (or burns the note into the file on disk),
+    /// then runs the save, copy or copy-and-delete effects.
     private func finishInputAction(_ action: ScreenshotFinalAction, note: String?) -> Bool {
-        if action == .deleteOnly {
-            return deleteConfirmer() && deleteSourceFileAndBackup()
+        if let image = takePendingImage() {
+            guard let output = prepareOutput(image: image, editorState: pendingEditorState,
+                                             note: note, requireNoteRendering: true),
+                  persistImageIfNeeded(output.image, for: action, baselinePNG: output.baselinePNG,
+                                       prompt: output.prompt, editorState: output.editorState) else { return false }
+        } else if let note, !applyNoteIfNeeded(note) {
+            return false
         }
-        guard persistPendingOutput(action: action, note: note) else { return false }
         guard performFinalActionEffects(action, copyAndDeleteImage: nil) else { return false }
         if action == .saveOnly || action == .copyAndSave { removeBackupIfNeeded() }
         return true
@@ -674,17 +684,6 @@ final class ScreenshotWorkflowController {
         editor.dismissWithoutCompletion()
         editorController = nil
         return image
-    }
-
-    private func persistPendingOutput(action: ScreenshotFinalAction, note: String?) -> Bool {
-        guard let image = takePendingImage() else {
-            if let note, !applyNoteIfNeeded(note) { return false }
-            return persistImageIfNeeded(nil, for: action, baselinePNG: nil, prompt: nil, editorState: nil)
-        }
-        guard let output = prepareOutput(image: image, editorState: pendingEditorState,
-                                         note: note, requireNoteRendering: true) else { return false }
-        return persistImageIfNeeded(output.image, for: action, baselinePNG: output.baselinePNG,
-                                    prompt: output.prompt, editorState: output.editorState)
     }
 
     private func deleteSourceFileAndBackup() -> Bool {

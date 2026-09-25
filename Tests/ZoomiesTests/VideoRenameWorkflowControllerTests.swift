@@ -48,6 +48,7 @@ final class VideoRenameWorkflowControllerTests: XCTestCase {
         let bytes = Data("controlled video bytes".utf8)
         var published: [URL] = []
         var errors: [String] = []
+        var messages: [String] = []
         var finishes = 0
         var acceptsCopy = true
         var confirmsDelete = true
@@ -65,7 +66,10 @@ final class VideoRenameWorkflowControllerTests: XCTestCase {
             workflow = VideoRenameWorkflowController(fileURL: original,
                 settingsStore: SettingsStore(fileURL: root.appendingPathComponent("settings.json")),
                 clipboardService: clipboard,
-                errorPresenter: { [unowned self] title, _ in errors.append(title) },
+                errorPresenter: { [unowned self] title, message in
+                    errors.append(title)
+                    messages.append(message)
+                },
                 deleteConfirmer: { [unowned self] in confirmsDelete },
                 removeFile: { [unowned self] url in
                     if failsDelete { throw NSError(domain: "controlled delete", code: 1) }
@@ -117,6 +121,7 @@ final class VideoRenameWorkflowControllerTests: XCTestCase {
         let renamed = f.root.appendingPathComponent("renamed.mp4")
         XCTAssertEqual(try Data(contentsOf: renamed), f.bytes)
         XCTAssertEqual(f.errors, ["Copy failed"])
+        XCTAssertEqual(f.messages, ["Zoomies couldn't copy the recording to the clipboard, but your save was kept. You can try Copy + Save again."])
         XCTAssertEqual(f.finishes, 0)
         f.acceptsCopy = true
         f.workflow.handleRenameAction(.copyAndSave(newName: "renamed"))
@@ -132,6 +137,7 @@ final class VideoRenameWorkflowControllerTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: f.original), f.bytes)
         XCTAssertEqual(f.finishes, 0)
         XCTAssertEqual(f.errors, ["Copy failed"])
+        XCTAssertEqual(f.messages, ["Zoomies couldn’t copy the recording to the clipboard, so the original file was left in place. You can try Copy + Delete again."])
         f.acceptsCopy = true
         f.workflow.handleRenameAction(.copyAndDelete(newName: "original"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: f.original.path))

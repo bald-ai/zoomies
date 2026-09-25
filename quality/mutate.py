@@ -27,8 +27,8 @@ out.mkdir(parents=True, exist_ok=True)
 # name, file, unique original, replacement, XCTest filter
 trials = [
 ('video-copy-failure-deletes', 'VideoRenameWorkflowController.swift',
- 'presentError(title: "Copy failed", message: message)\n            return false',
- 'presentError(title: "Copy failed", message: message)\n            return true', 'VideoRenameWorkflowControllerTests'),
+ 'You can try Copy + Delete again.")\n            return false',
+ 'You can try Copy + Delete again.")\n            return true', 'VideoRenameWorkflowControllerTests'),
 ('video-delete-failure-finishes', 'VideoRenameWorkflowController.swift',
  'message: "The original file is still on disk. You can try again."\n                )\n                return false',
  'message: "The original file is still on disk. You can try again."\n                )\n                return true', 'VideoRenameWorkflowControllerTests'),
@@ -117,6 +117,23 @@ trials += [
 ('recording-skips-monitor-dwell', 'ScreenRecordingService.swift',
  'guard now - session.candidateSince >= Self.monitorDwellTime else { return }',
  'guard now - session.candidateSince >= 0 else { return }', 'ScreenRecordingServiceTests.testMonitorDwellCancelsCandidatesRetriesFailureAndIgnoresLateUpdates'),
+]
+trials += [
+('video-copy-and-save-failure-finishes', 'VideoRenameWorkflowController.swift',
+ 'You can try Copy + Save again.")\n                return false',
+ 'You can try Copy + Save again.")\n                return true', 'VideoRenameWorkflowControllerTests'),
+('state-encodes-ellipse-as-rect', 'EditorCanvasState.swift',
+ 'try container.encode(Kind.ellipse, forKey: .type)', 'try container.encode(Kind.rect, forKey: .type)', 'EditorStrokeStateTests'),
+('restore-leaves-rect-unshifted', 'EditorImageRenderer.swift',
+ 'return .rect(rect: shiftedRect(rect, byX: dx, byY: dy), color: color, lineWidth: lineWidth)',
+ 'return .rect(rect: rect, color: color, lineWidth: lineWidth)', 'EditorStrokeStateTests'),
+('screenshot-editor-save-keeps-backup', 'ScreenshotWorkflowController.swift',
+ 'removeBackupIfNeeded()\n            }\n            return performFinalActionEffects(action, copyAndDeleteImage: nil)',
+ '}\n            return performFinalActionEffects(action, copyAndDeleteImage: nil)', 'ScreenshotWorkflowControllerTests'),
+('screenshot-input-delete-skips-confirmation', 'ScreenshotWorkflowController.swift',
+ '? deleteConfirmer() && deleteSourceFileAndBackup()', '? deleteSourceFileAndBackup()', 'ScreenshotWorkflowControllerTests'),
+('screenshot-input-save-ignores-edited-image', 'ScreenshotWorkflowController.swift',
+ 'if let image = takePendingImage() {', 'if let image = Optional<NSImage>.none {', 'ScreenshotWorkflowControllerTests'),
 ]
 parser = argparse.ArgumentParser()
 parser.add_argument('--only')

@@ -111,7 +111,13 @@ final class VideoRenameWorkflowController {
     private func performCompletion(_ action: ScreenshotFinalAction) -> Bool {
         switch action {
         case .saveOnly, .closeOnly: return true
-        case .copyAndSave: return copyRecording(useCache: false)
+        case .copyAndSave:
+            guard clipboardService.copyFile(at: fileURL, useCache: false) != nil else {
+                presentError(title: "Copy failed",
+                             message: "Zoomies couldn't copy the recording to the clipboard, but your save was kept. You can try Copy + Save again.")
+                return false
+            }
+            return true
         case .copyAndDelete: return copyRecordingForDeletion() && deleteRecording()
         case .deleteOnly: return deleteConfirmer() && deleteRecording()
         }
@@ -124,18 +130,12 @@ final class VideoRenameWorkflowController {
            FileManager.default.fileExists(atPath: published.path) {
             return true
         }
-        return copyRecording(useCache: true)
-    }
-
-    private func copyRecording(useCache: Bool) -> Bool {
-        guard let published = clipboardService.copyFile(at: fileURL, useCache: useCache) else {
-            let message = useCache
-                ? "Zoomies couldn’t copy the recording to the clipboard, so the original file was left in place. You can try Copy + Delete again."
-                : "Zoomies couldn't copy the recording to the clipboard, but your save was kept. You can try Copy + Save again."
-            presentError(title: "Copy failed", message: message)
+        guard let published = clipboardService.copyFile(at: fileURL, useCache: true) else {
+            presentError(title: "Copy failed",
+                         message: "Zoomies couldn’t copy the recording to the clipboard, so the original file was left in place. You can try Copy + Delete again.")
             return false
         }
-        if useCache { publishedCopyAndDeleteURL = published }
+        publishedCopyAndDeleteURL = published
         return true
     }
 

@@ -948,6 +948,148 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
         XCTAssertGreaterThan(saved.size.height, 40, "The save must continue despite the backup failure.")
     }
 
+    func testEditorSaveActionsWriteEditedImageRemoveBackupAndCopyOnlyForCopyAndSave() throws {
+        for (action, expectedCopies) in [(ScreenshotFinalAction.saveOnly, 0), (.copyAndSave, 1)] {
+            let root = try TestSupport.makeTemporaryDirectory()
+            defer { TestSupport.removeIfExists(root) }
+            let fileURL = root.appendingPathComponent("shot.png")
+            let clipboardDirectory = root.appendingPathComponent("clipboard", isDirectory: true)
+            let backup = BackupService(backupsDirectory: root.appendingPathComponent("backups", isDirectory: true))
+            var copiedURLs: [URL] = []
+            let clipboard = ClipboardService(fileManager: .default, cacheDirectory: clipboardDirectory,
+                                             pasteboardWriter: { objects in
+                                                 copiedURLs += objects.compactMap { $0 as? URL }
+                                                 return true
+                                             })
+            let workflow = try makeWorkflow(root: root, fileURL: fileURL, clipboardDirectory: clipboardDirectory,
+                                            clipboardService: clipboard, customBackupService: backup)
+            let finished = expectation(description: "workflow finished")
+            workflow.onFinish = { finished.fulfill() }
+
+            workflow.handleEditorCompletion(editedImage: TestSupport.solidImage(width: 180, height: 90, color: .systemRed),
+                                            action: action)
+            wait(for: [finished], timeout: 2.0)
+
+            let saved = try XCTUnwrap(NSImage(contentsOf: fileURL))
+            XCTAssertEqual(saved.size.width, 180, accuracy: 1.0, "\(action)")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: backup.backupURL(forOriginalURL: fileURL).path),
+                           "\(action) must remove the backup made for the save")
+            XCTAssertEqual(copiedURLs.count, expectedCopies, "\(action)")
+            XCTAssertEqual(copiedURLs.first?.lastPathComponent, expectedCopies == 1 ? "shot.png" : nil)
+        }
+    }
+
+    func testEditorSaveActionsWithoutEditedImageLeaveFileUntouched() throws {
+        for action in [ScreenshotFinalAction.saveOnly, .copyAndSave] {
+            let root = try TestSupport.makeTemporaryDirectory()
+            defer { TestSupport.removeIfExists(root) }
+            let fileURL = root.appendingPathComponent("shot.png")
+            var writeCount = 0
+            let workflow = try makeWorkflow(root: root, fileURL: fileURL,
+                                            clipboardDirectory: root.appendingPathComponent("clipboard", isDirectory: true),
+                                            imageDataWriter: { data, outputURL, originalURL in
+                                                writeCount += 1
+                                                return try WorkflowImagePersistenceLogic.writeEncodedImageData(
+                                                    data, to: outputURL, originalURL: originalURL)
+                                            })
+            let original = try Data(contentsOf: fileURL)
+            let finished = expectation(description: "workflow finished")
+            workflow.onFinish = { finished.fulfill() }
+
+            workflow.handleEditorCompletion(editedImage: nil, action: action)
+            wait(for: [finished], timeout: 2.0)
+
+            XCTAssertEqual(writeCount, 0, "\(action)")
+            XCTAssertEqual(try Data(contentsOf: fileURL), original, "\(action)")
+        }
+    }
+
+    func testEditorCopyAndDeleteNeverRewritesTheOriginal() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let fileURL = root.appendingPathComponent("shot.png")
+        var writeCount = 0
+        let workflow = try makeWorkflow(root: root, fileURL: fileURL,
+                                        clipboardDirectory: root.appendingPathComponent("clipboard", isDirectory: true),
+                                        imageDataWriter: { data, outputURL, originalURL in
+                                            writeCount += 1
+                                            return try WorkflowImagePersistenceLogic.writeEncodedImageData(
+                                                data, to: outputURL, originalURL: originalURL)
+                                        })
+        let finished = expectation(description: "workflow finished")
+        workflow.onFinish = { finished.fulfill() }
+
+        workflow.handleEditorCompletion(editedImage: TestSupport.solidImage(width: 140, height: 70, color: .systemGreen),
+                                        action: .copyAndDelete)
+        wait(for: [finished], timeout: 2.0)
+
+        XCTAssertEqual(writeCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    func testRenameSaveUsesEditedImageLeftByFailedEditorSaveAndRemovesBackup() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let fileURL = root.appendingPathComponent("shot.png") // original is 80x40
+        let backup = BackupService(backupsDirectory: root.appendingPathComponent("backups", isDirectory: true))
+        var writeCount = 0
+        var errors: [String] = []
+        let workflow = try makeWorkflow(root: root, fileURL: fileURL,
+                                        clipboardDirectory: root.appendingPathComponent("clipboard", isDirectory: true),
+                                        customBackupService: backup,
+                                        imageDataWriter: { data, outputURL, originalURL in
+                                            writeCount += 1
+                                            if writeCount == 1 {
+                                                throw NSError(domain: "ZoomiesTests", code: 1)
+                                            }
+                                            return try WorkflowImagePersistenceLogic.writeEncodedImageData(
+                                                data, to: outputURL, originalURL: originalURL)
+                                        },
+                                        errorPresenter: { title, _ in errors.append(title) })
+        var finishCount = 0
+        workflow.onFinish = { finishCount += 1 }
+
+        workflow.handleEditorCompletion(editedImage: TestSupport.solidImage(width: 500, height: 90, color: .systemRed),
+                                        action: .saveOnly)
+        XCTAssertEqual(errors, ["Failed to save image"])
+        XCTAssertEqual(finishCount, 0)
+
+        workflow.pendingNoteText = "carried note"
+        workflow.handleRenameAction(.save(newName: fileURL.lastPathComponent))
+
+        XCTAssertEqual(finishCount, 1)
+        XCTAssertEqual(writeCount, 2)
+        let extracted = try XCTUnwrap(PNGMetadata.extract(fromPNG: try Data(contentsOf: fileURL)))
+        XCTAssertEqual(extracted.prompt, "carried note")
+        // The clean baseline under the burned note is the edited image, not the 80x40 original.
+        let baseline = try XCTUnwrap(NSImage(data: extracted.originalPNG))
+        XCTAssertEqual(baseline.size.width, 500, accuracy: 1.0)
+        XCTAssertEqual(baseline.size.height, 90, accuracy: 1.0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backup.backupURL(forOriginalURL: fileURL).path))
+    }
+
+    func testNoteSaveBurnsNoteAndRemovesBackup() throws {
+        for action in [NotePanelAction.save(text: "burned"), .copyAndSave(text: "burned")] {
+            let root = try TestSupport.makeTemporaryDirectory()
+            defer { TestSupport.removeIfExists(root) }
+            let fileURL = root.appendingPathComponent("shot.png")
+            let backup = BackupService(backupsDirectory: root.appendingPathComponent("backups", isDirectory: true))
+            let workflow = try makeWorkflow(root: root, fileURL: fileURL,
+                                            clipboardDirectory: root.appendingPathComponent("clipboard", isDirectory: true),
+                                            customBackupService: backup)
+            var finishCount = 0
+            workflow.onFinish = { finishCount += 1 }
+
+            workflow.handleNoteAction(action)
+
+            XCTAssertEqual(finishCount, 1, "\(action)")
+            let saved = try XCTUnwrap(NSImage(contentsOf: fileURL))
+            XCTAssertGreaterThan(saved.size.height, 40, "\(action)")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: backup.backupURL(forOriginalURL: fileURL).path),
+                           "\(action)")
+        }
+    }
+
     private func makeWorkflow(root: URL,
                               fileURL: URL,
                               clipboardDirectory: URL,

@@ -105,8 +105,23 @@ struct EditorCanvasState: Codable {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             let type = try container.decode(Kind.self, forKey: .type)
             switch type {
-            case .pen, .arrow, .rect, .ellipse:
-                self = try Self.decodeStroke(type, from: container)
+            case .pen:
+                self = .pen(points: try container.decode([Point].self, forKey: .points),
+                            color: try container.decode(Color.self, forKey: .color),
+                            lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
+            case .arrow:
+                self = .arrow(start: try container.decode(Point.self, forKey: .start),
+                              end: try container.decode(Point.self, forKey: .end),
+                              color: try container.decode(Color.self, forKey: .color),
+                              lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
+            case .rect:
+                self = .rect(rect: try container.decode(Rect.self, forKey: .rect),
+                             color: try container.decode(Color.self, forKey: .color),
+                             lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
+            case .ellipse:
+                self = .ellipse(rect: try container.decode(Rect.self, forKey: .rect),
+                                color: try container.decode(Color.self, forKey: .color),
+                                lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
             case .text:
                 self = .text(try container.decode(Text.self, forKey: .text))
             case .marker:
@@ -119,50 +134,8 @@ struct EditorCanvasState: Codable {
             }
         }
 
-        private static func decodeStroke(_ type: Kind, from container: KeyedDecodingContainer<CodingKeys>) throws -> Item {
-            switch type {
-            case .pen:
-                return .pen(points: try container.decode([Point].self, forKey: .points),
-                            color: try container.decode(Color.self, forKey: .color),
-                            lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
-            case .arrow:
-                return .arrow(start: try container.decode(Point.self, forKey: .start),
-                              end: try container.decode(Point.self, forKey: .end),
-                              color: try container.decode(Color.self, forKey: .color),
-                              lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
-            case .rect:
-                return .rect(rect: try container.decode(Rect.self, forKey: .rect),
-                             color: try container.decode(Color.self, forKey: .color),
-                             lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
-            case .ellipse:
-                return .ellipse(rect: try container.decode(Rect.self, forKey: .rect),
-                                color: try container.decode(Color.self, forKey: .color),
-                                lineWidth: try container.decode(CGFloat.self, forKey: .lineWidth))
-            default: throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "Expected a vector stroke")
-            }
-        }
-
         func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
-            switch self {
-            case .pen, .arrow, .rect, .ellipse:
-                try encodeStroke(to: &container)
-            case .text(let text):
-                try container.encode(Kind.text, forKey: .type)
-                try container.encode(text, forKey: .text)
-            case .marker(let marker):
-                try container.encode(Kind.marker, forKey: .type)
-                try container.encode(marker, forKey: .marker)
-            case .image(let pngData, let rect):
-                try container.encode(Kind.image, forKey: .type)
-                try container.encode(pngData, forKey: .pngData)
-                try container.encode(rect, forKey: .rect)
-            case .erase(let rect):
-                try container.encode(Kind.erase, forKey: .type)
-                try container.encode(rect, forKey: .rect)
-            }
-        }
-        private func encodeStroke(to container: inout KeyedEncodingContainer<CodingKeys>) throws {
             switch self {
             case .pen(let points, let color, let lineWidth):
                 try container.encode(Kind.pen, forKey: .type)
@@ -185,7 +158,19 @@ struct EditorCanvasState: Codable {
                 try container.encode(rect, forKey: .rect)
                 try container.encode(color, forKey: .color)
                 try container.encode(lineWidth, forKey: .lineWidth)
-            default: break
+            case .text(let text):
+                try container.encode(Kind.text, forKey: .type)
+                try container.encode(text, forKey: .text)
+            case .marker(let marker):
+                try container.encode(Kind.marker, forKey: .type)
+                try container.encode(marker, forKey: .marker)
+            case .image(let pngData, let rect):
+                try container.encode(Kind.image, forKey: .type)
+                try container.encode(pngData, forKey: .pngData)
+                try container.encode(rect, forKey: .rect)
+            case .erase(let rect):
+                try container.encode(Kind.erase, forKey: .type)
+                try container.encode(rect, forKey: .rect)
             }
         }
     }

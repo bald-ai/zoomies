@@ -1266,6 +1266,8 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     private func completedLine(from start: NSPoint, to point: NSPoint) -> EditorDrawing.Item? {
         guard EditorImageRenderer.distance(from: start, to: point) >= 2 else { return nil }
         if currentTool == .line {
+            // A two-point stroke is a straight line and already supports
+            // selection, moving, clipboard operations, and saved edit state.
             return .pen(points: [start, point], color: currentColor, lineWidth: annotationStrokeWidth)
         }
         return .arrow(start: start, end: point, color: currentColor, lineWidth: annotationStrokeWidth)
@@ -1637,9 +1639,12 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         if let index = Self.colorPickerKeyCodeToColorIndex[key] {
             return [.selectColor(index: index), .colorPickerClose]
         }
-        let navigation: [UInt16: KeyCommand] = [123: .colorPickerMove(direction: -1),
-            124: .colorPickerMove(direction: 1), 36: .colorPickerSelect,
-            76: .colorPickerSelect, 53: .colorPickerClose]
+        let navigation: [UInt16: KeyCommand] = [
+            123: .colorPickerMove(direction: -1), // left arrow
+            124: .colorPickerMove(direction: 1), // right arrow
+            36: .colorPickerSelect, 76: .colorPickerSelect, // enter
+            53: .colorPickerClose // escape
+        ]
         return navigation[key].map { [$0] }
     }
 
@@ -1697,7 +1702,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             onKeyCommand?(.finalAction(final))
             return true
         }
-        if event.keyCode == 48, flags.contains(.shift) {
+        if event.keyCode == 48, flags.contains(.shift) { // Shift+Tab
             onKeyCommand?(.backToNote)
             return true
         }

@@ -59,6 +59,10 @@ final class ApplicationCommands {
             && gate.canStartScreenshot(scratchpadIsBusy: current.scratchpadBusy)
     }
 
+    /// Single entry point for the recording menu command and shortcut.
+    /// A stop request is honored before any busy-state checks so Stop stays
+    /// available while recording; startup is rejected while screenshot,
+    /// note, Finder-reopen, or video-rename work is active or opening.
     private func toggleRecording() {
         let current = state()
         guard !current.recordingShortcut else { return }
