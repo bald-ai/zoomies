@@ -40,6 +40,9 @@ def run_session(commands, outputs, *, root=ROOT, coverage=False):
             env = {**os.environ, 'VERIFICATION_SESSION_ROOT': str(root),
                    'QUALITY_COVERAGE': '1' if coverage else '0',
                    'PYTHONDONTWRITEBYTECODE': '1'}
+            bundled_jdk = Path('/Applications/Android Studio.app/Contents/jbr/Contents/Home')
+            if not env.get('JAVA_HOME') and (bundled_jdk / 'bin/java').exists():
+                env['JAVA_HOME'] = str(bundled_jdk)
             for signum in (signal.SIGINT, signal.SIGTERM):
                 previous[signum] = signal.signal(signum, forward)
             for command in commands:

@@ -134,7 +134,6 @@ final class EditorWindowController: NSWindowController {
     private var shortcutHints: [EditorShortcutHint] = []
 
     private weak var toolbarBackgroundView: NSView?
-    private var toolbarMinimumWidth: CGFloat = 520.0
     private var toolbarMinimumHeight: CGFloat = 72.0
 
     // MARK: - Init
@@ -319,9 +318,7 @@ final class EditorWindowController: NSWindowController {
             toolbarStack.trailingAnchor.constraint(equalTo: toolbarBackground.trailingAnchor, constant: -8)
         ])
 
-        // Compute minimum toolbar size from intrinsic content (not from the provisional window width).
-        // This is the main fix for "small screenshots open huge".
-        toolbarMinimumWidth = max(420.0, toolbarStack.fittingSize.width + 16.0)
+        // Use intrinsic toolbar height when sizing the editor window.
         toolbarMinimumHeight = max(72.0, toolbarStack.fittingSize.height + 12.0)
 
         rootStack.addArrangedSubview(toolbarBackground)

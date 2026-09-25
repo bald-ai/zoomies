@@ -158,6 +158,7 @@ for name, file, before, after, suite in selected:
     command = ['swift', 'test', '--filter', suite]
     result = dict(name=name, attempt=attempt, log=str(log_path.relative_to(root)), file=str(path.relative_to(root)), original=before, mutation=after,
                   command=command, source_sha256_before=digest, input_manifest=str(manifest_path.relative_to(root)))
+    proc = None
     try:
         path.write_text(source.replace(before, after, 1))
         with log_path.open('w') as log:
@@ -186,6 +187,13 @@ for name, file, before, after, suite in selected:
                 result['outcome'] = 'errored'
         result['assertion_evidence'] = [l for l in log_text.splitlines() if ': error: -[' in l][:8]
     finally:
+        if proc is not None and proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
         path.write_bytes(original)
         result['source_sha256_restored'] = hashlib.sha256(path.read_bytes()).hexdigest()
         assert result['source_sha256_restored'] == digest
