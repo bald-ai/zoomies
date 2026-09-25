@@ -2,8 +2,7 @@ import Foundation
 
 enum DirectoryPurgeLogic {
     static func purgeContents(of directory: URL,
-                              fileManager: FileManager,
-                              label: String) {
+                              fileManager: FileManager) {
         do {
             let urls = try fileManager.contentsOfDirectory(at: directory,
                                                           includingPropertiesForKeys: nil,

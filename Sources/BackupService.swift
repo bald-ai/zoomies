@@ -31,7 +31,7 @@ final class BackupService {
     /// Removes all files under `~/Library/Caches/zoomies/backups`.
     /// Mirrors the legacy app behavior to avoid orphaned backups across dev sessions.
     func purgeAllBackups() {
-        DirectoryPurgeLogic.purgeContents(of: backupsDirectory, fileManager: fileManager, label: "backup cache")
+        DirectoryPurgeLogic.purgeContents(of: backupsDirectory, fileManager: fileManager)
     }
 
     /// Returns the backup URL corresponding to a given original screenshot

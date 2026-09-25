@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Explicit manual checks with disposable intermediate data and terminal results."""
-import json
 import os
 from pathlib import Path
 import shutil
@@ -10,7 +9,21 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = {'outputs': ['Dev/quality-campaign'], 'commands': {'metrics': [['bash', 'scripts/quality/run.sh']], 'mutations': [['python3', 'scripts/quality/mutate.py']], 'coverage': [['swift', 'test', '--enable-code-coverage', '--skip', 'EditorWindowControllerTests.testApplicationKeyDispatchRoutesUndoToVisibleEditor']]}}
+CONFIG = {
+    'outputs': ['Dev/quality-campaign'],
+    'commands': {
+        'metrics': [['bash', 'quality/run.sh']],
+        'mutations': [['python3', 'quality/mutate.py']],
+        'coverage': [
+            ['swift', 'test', '--enable-code-coverage', '--skip',
+             'EditorWindowControllerTests.testApplicationKeyDispatchRoutesUndoToVisibleEditor'],
+            ['xcrun', 'llvm-cov', 'report',
+             '.build/debug/ZoomiesTests.xctest/Contents/MacOS/ZoomiesTests',
+             '-instr-profile=.build/debug/codecov/default.profdata',
+             '-ignore-filename-regex=Tests/'],
+        ],
+    },
+}
 
 
 def run_session(commands, outputs, *, root=ROOT, coverage=False):
@@ -38,11 +51,7 @@ def run_session(commands, outputs, *, root=ROOT, coverage=False):
                 target.symlink_to(destination, target_is_directory=True)
                 links.append(target)
             env = {**os.environ, 'VERIFICATION_SESSION_ROOT': str(root),
-                   'QUALITY_COVERAGE': '1' if coverage else '0',
                    'PYTHONDONTWRITEBYTECODE': '1'}
-            bundled_jdk = Path('/Applications/Android Studio.app/Contents/jbr/Contents/Home')
-            if not env.get('JAVA_HOME') and (bundled_jdk / 'bin/java').exists():
-                env['JAVA_HOME'] = str(bundled_jdk)
             for signum in (signal.SIGINT, signal.SIGTERM):
                 previous[signum] = signal.signal(signum, forward)
             for command in commands:

@@ -21,7 +21,7 @@ final class FinderReopenLogicTests: XCTestCase {
             XCTAssertEqual(FinderReopenLogic.resolve(.success(.single(url: file))),
                            .warning(title: "Not an Image", message: "The selected Finder item is not a readable image.", settingsURL: nil))
         }
-        try XCTUnwrap(PNGMetadata.stubPNGDeclaringSize(width: 100_000, height: 100_000)).write(to: file)
+        try XCTUnwrap(TestSupport.stubPNGDeclaringSize(width: 100_000, height: 100_000)).write(to: file)
         guard case .warning(let title, _, nil) = FinderReopenLogic.resolve(.success(.single(url: file))) else {
             return XCTFail("Oversized image must be rejected before opening")
         }

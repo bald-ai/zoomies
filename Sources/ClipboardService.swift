@@ -42,7 +42,7 @@ final class ClipboardService {
     /// Removes all cached files under `~/Library/Caches/zoomies/clipboard`.
     /// This keeps paste behavior correct while preventing unbounded growth during frequent use.
     func purgeAllCachedFiles() {
-        DirectoryPurgeLogic.purgeContents(of: cacheDirectory, fileManager: fileManager, label: "clipboard cache")
+        DirectoryPurgeLogic.purgeContents(of: cacheDirectory, fileManager: fileManager)
     }
 
     /// Places an image on the general pasteboard. Used by the editor's Copy

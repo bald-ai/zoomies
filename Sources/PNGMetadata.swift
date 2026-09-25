@@ -196,26 +196,6 @@ enum PNGMetadata {
         return (Int(width), Int(height))
     }
 
-    /// Minimal PNG with a declared IHDR size and no pixel payload. Used to
-    /// inspect dimensions without allocating a decoded bitmap.
-    static func stubPNGDeclaringSize(width: Int, height: Int) -> Data? {
-        guard width > 0, height > 0,
-              width <= Int(UInt32.max), height <= Int(UInt32.max) else {
-            return nil
-        }
-        var ihdr = Data()
-        ihdr.append(contentsOf: bigEndianBytes(UInt32(width)))
-        ihdr.append(contentsOf: bigEndianBytes(UInt32(height)))
-        ihdr.append(contentsOf: [8, 2, 0, 0, 0]) // 8-bit truecolor, no interlace
-        let ihdrChunk = assembleChunk(type: "IHDR", payload: ihdr)
-        let iendChunk = assembleChunk(type: "IEND", payload: Data())
-
-        var png = Data(signature)
-        png.append(ihdrChunk)
-        png.append(iendChunk)
-        return png
-    }
-
     /// Indexes are absolute positions in `bytes`, so slices work unchanged.
     private static func isKeyword<Bytes: RandomAccessCollection>(_ keyword: String,
                                                                  in bytes: Bytes,

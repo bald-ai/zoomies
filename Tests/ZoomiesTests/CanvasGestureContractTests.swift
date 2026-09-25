@@ -60,6 +60,28 @@ final class CanvasGestureContractTests: XCTestCase {
         XCTAssertEqual(canvas.editableState()?.items, moved)
     }
 
+    func testTextToolDragsTopmostOverlappingTextAndUndoRestoresIt() throws {
+        let png = try TestSupport.noiseImagePNGData(width: 200, height: 120)
+        let origin = NSPoint(x: 30, y: 30)
+        let bottom = EditorCanvasState.Item.text(.init(text: "Bottom", origin: .init(origin),
+                                                       color: .init(.red), fontSize: 20))
+        let top = EditorCanvasState.Item.text(.init(text: "Top", origin: .init(origin),
+                                                    color: .init(.blue), fontSize: 20))
+        let canvas = EditorCanvasView(image: try XCTUnwrap(NSImage(data: png)),
+                                      initialState: EditorCanvasState(baseImagePNG: png, items: [bottom, top]))
+        canvas.setTool(.text)
+        drag(canvas, from: NSPoint(x: 32, y: 32), to: NSPoint(x: 42, y: 37))
+        let moved = try XCTUnwrap(canvas.editableState()).items
+        XCTAssertEqual(moved[0], bottom, "The text underneath must stay in place")
+        guard case .text(let text) = moved[1] else { return XCTFail("Expected text") }
+        XCTAssertEqual(text.text, "Top")
+        XCTAssertEqual(text.origin.nsPoint, NSPoint(x: 40, y: 35))
+        canvas.undo()
+        XCTAssertEqual(canvas.editableState()?.items, [bottom, top])
+        canvas.redo()
+        XCTAssertEqual(canvas.editableState()?.items, moved)
+    }
+
     private func event(_ type: NSEvent.EventType, canvas: EditorCanvasView, point: NSPoint) -> NSEvent {
         NSEvent.mouseEvent(with: type, location: canvas.convert(point, to: nil), modifierFlags: [], timestamp: 0,
                           windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 0)!

@@ -444,16 +444,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSTextField, field === notePrefixField else { return }
 
-        var text = field.stringValue
-        if text.count > 50 {
-            text = String(text.prefix(50))
-            field.stringValue = text
-        }
-        updateNotePrefixCountLabel(for: text)
-
-        settingsStore.update { settings in
-            settings.notePrefix = text
-        }
+        notePrefixFieldEdited(field)
     }
 
     // MARK: - NSWindowDelegate

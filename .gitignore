@@ -23,10 +23,6 @@ xcuserdata/
 .vscode/
 .idea/
 
-# Local AI agent instructions.
-AGENTS.md
-CLAUDE.md
-
 # Logs.
 *.log
 
@@ -43,3 +39,6 @@ __pycache__/
 /Dev/code-quality-metrics-local.json
 /.verification-session/
 /**/__pycache__/
+
+# Agent session scratch data stays local; existing curated notes remain tracked.
+/work/cursor-agents/

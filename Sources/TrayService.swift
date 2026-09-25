@@ -70,9 +70,7 @@ final class TrayService {
 
     private func restoreStatusImage() {
         guard let button else { return }
-        if #available(macOS 11.0, *) {
-            button.image = NSImage(systemSymbolName: "camera", accessibilityDescription: "Zoomies")
-        }
+        button.image = NSImage(systemSymbolName: "camera", accessibilityDescription: "Zoomies")
     }
 
     @objc private func didSelectSettings() {

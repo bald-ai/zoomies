@@ -1283,10 +1283,10 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     // MARK: - Text editing helpers
 
     private func hitTestText(at point: NSPoint) -> (Int, NSRect)? {
-        for (index, item) in items.enumerated() {
-            guard case let .text(textItem) = item else { continue }
-            let rect = EditorImageRenderer.textBounds(for: textItem).insetBy(dx: -4, dy: -4)
-            if rect.contains(point) {
+        for index in items.indices.reversed() {
+            guard case let .text(textItem) = items[index] else { continue }
+            let rect = EditorImageRenderer.textBounds(for: textItem)
+            if rect.insetBy(dx: -4, dy: -4).contains(point) {
                 return (index, rect)
             }
         }

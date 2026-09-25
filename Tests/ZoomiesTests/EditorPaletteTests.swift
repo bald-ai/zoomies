@@ -104,9 +104,5 @@ final class EditorPaletteTests: XCTestCase {
         XCTAssertEqual(store.settings.editorColorIDs[4], "purple")
         host.layoutSubtreeIfNeeded()
         XCTAssertLessThanOrEqual(view.frame.height, host.bounds.height - 20)
-        if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
-            host.cacheDisplay(in: host.bounds, to: rep)
-            try rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "/tmp/zoomies-palette-settings.png"))
-        }
     }
 }

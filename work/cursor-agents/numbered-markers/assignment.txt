@@ -1,1 +1,0 @@
-Implement the full accepted specification at /Users/applelevne/Documents/coding-projects/zoomies/work/cursor-agents/numbered-markers/spec.md. Read it first. Preserve existing edits. Do not delegate further.

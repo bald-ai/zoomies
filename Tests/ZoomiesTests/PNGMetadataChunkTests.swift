@@ -122,7 +122,7 @@ final class PNGMetadataChunkTests: XCTestCase {
         let stateOnly = try XCTUnwrap(PNGMetadata.embed(intoPNG: burned, editorState: state))
         try assertAllCRCsValid(stateOnly)
 
-        let stub = try XCTUnwrap(PNGMetadata.stubPNGDeclaringSize(width: 7, height: 9))
+        let stub = try XCTUnwrap(TestSupport.stubPNGDeclaringSize(width: 7, height: 9))
         try assertAllCRCsValid(stub)
     }
 

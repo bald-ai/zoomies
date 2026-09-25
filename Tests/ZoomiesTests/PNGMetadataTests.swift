@@ -4,7 +4,7 @@ import AppKit
 
 final class PNGMetadataTests: XCTestCase {
     func testPixelDimensionsRejectsWrongIHDRAndZeroDimensions() throws {
-        let png = try XCTUnwrap(PNGMetadata.stubPNGDeclaringSize(width: 12, height: 8))
+        let png = try XCTUnwrap(TestSupport.stubPNGDeclaringSize(width: 12, height: 8))
         var wrongType = png
         wrongType.replaceSubrange(12..<16, with: Data("TEXT".utf8))
         XCTAssertNil(PNGMetadata.pixelDimensions(ofPNG: wrongType))

@@ -46,7 +46,7 @@ final class ImageSafetyTests: XCTestCase {
     }
 
     func testStubPNGWithUnsafeDeclaredPixelAreaIsRejectedWithoutDecoding() throws {
-        let stub = try XCTUnwrap(PNGMetadata.stubPNGDeclaringSize(width: 32_768, height: 32_768))
+        let stub = try XCTUnwrap(TestSupport.stubPNGDeclaringSize(width: 32_768, height: 32_768))
         XCTAssertLessThan(stub.count, 128)
         XCTAssertEqual(ImageSafety.inspectData(stub), .tooLarge)
         XCTAssertNil(ImageSafety.loadImageIfSafe(stub))
@@ -109,7 +109,7 @@ final class ImageSafetyTests: XCTestCase {
         let root = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(root) }
         let url = root.appendingPathComponent("declared-huge.png")
-        let stub = try XCTUnwrap(PNGMetadata.stubPNGDeclaringSize(width: 100_000, height: 100_000))
+        let stub = try XCTUnwrap(TestSupport.stubPNGDeclaringSize(width: 100_000, height: 100_000))
         try stub.write(to: url, options: .atomic)
 
         XCTAssertEqual(ImageSafety.inspectFile(at: url), .tooLarge)
@@ -121,7 +121,7 @@ final class ImageSafetyTests: XCTestCase {
 
     func testInvalidLegacyOriginalFallsBackToSafeVisiblePNG() throws {
         let visible = try TestSupport.solidImagePNGData(width: 40, height: 20, color: .systemRed)
-        let unsafeOriginal = try XCTUnwrap(PNGMetadata.stubPNGDeclaringSize(width: 40_000, height: 40_000))
+        let unsafeOriginal = try XCTUnwrap(TestSupport.stubPNGDeclaringSize(width: 40_000, height: 40_000))
         let embedded = try XCTUnwrap(
             PNGMetadata.embed(intoPNG: visible, originalPNG: unsafeOriginal, prompt: "legacy")
         )

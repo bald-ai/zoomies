@@ -181,10 +181,6 @@ final class EditorShortcutOverlayTests: XCTestCase {
                     XCTAssertFalse(badge.frame.intersects(other.frame), "Badges must not overlap")
                 }
             }
-            if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
-                host.cacheDisplay(in: host.bounds, to: rep)
-                try rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "/tmp/zoomies-inline-shortcuts-\(Int(size.width)).png"))
-            }
             let redoPoint = view.convert(NSPoint(x: badges[10].frame.midX,
                                                   y: badges[10].frame.midY), to: nil)
             let hover = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved, location: redoPoint,

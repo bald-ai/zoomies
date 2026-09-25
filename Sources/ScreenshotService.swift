@@ -268,7 +268,7 @@ final class ScreenshotService: NSObject {
     }
 
     private func captureCGImage(rect: CGRect, on screen: ScreenSnapshot) async throws -> CGImage {
-        let contentTask = await shareableContentTask(trigger: "capture")
+        let contentTask = await shareableContentTask()
         let content = try await contentTask.value
         guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else {
             throw NSError(domain: "ScreenshotService",
@@ -462,7 +462,7 @@ final class ScreenshotService: NSObject {
         }
     }
 
-    private func shareableContentTask(trigger: String) async -> Task<SCShareableContent, Error> {
+    private func shareableContentTask() async -> Task<SCShareableContent, Error> {
         await MainActor.run {
             let cache = contentCache ?? CaptureContentCache(lifetime: 2)
             contentCache = cache
