@@ -42,3 +42,6 @@ __pycache__/
 
 # Agent session scratch data stays local; existing curated notes remain tracked.
 /work/cursor-agents/
+
+# Local promo video experiment.
+/promo/
