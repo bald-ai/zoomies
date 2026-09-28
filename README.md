@@ -86,8 +86,6 @@ the relevant shortcut code and build a new `.app` for you.
 | Flow | `Shift+Tab` | Previous step |
 | Edit | `W` / `D` / `A` / `R` / `E` / `T` / `F` / `S` | Pen / line / arrow / rectangle / ellipse / text / numbered marker / select |
 | Edit | `Q` | Next color in your palette |
-| Edit | `K` | Open colors |
-| Edit | `1-6` | Pick color |
 | Edit | `Cmd+Z` / `Cmd+Shift+Z` | Undo / redo |
 | Edit | `Option+Backspace` | Clear |
 | Edit | `Cmd+C` / `Cmd+X` / `Cmd+V` | Copy / cut / paste |
@@ -192,7 +190,7 @@ it does not make the app notarized for distribution.
 
 ## Editor colors
 
-Press **Q** to cycle to the next color. In **Settings → Colors**, choose 1–6 active colors from 15 options and use the up/down arrows to set their order. The last color wraps back to the first. Changes also apply to an already-open editor. Press **K** or click the color swatch to open the visual picker.
+Press **Q** or click the color swatch to cycle to the next color. In **Settings → Colors**, choose 1–6 active colors from 15 options and use the up/down arrows to set their order. The last color wraps back to the first. Changes also apply to an already-open editor.
 
 Standalone Markdown notes accept up to 100,000 characters. Image notes keep their 1,000-character limit. Input that would exceed the limit is rejected with a visible limit message, so an oversized paste does not silently lose its ending.
 

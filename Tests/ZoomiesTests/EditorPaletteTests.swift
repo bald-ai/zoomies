@@ -53,7 +53,6 @@ final class EditorPaletteTests: XCTestCase {
         for index in [1, 2, 0] {
             canvas.keyDown(with: try key(kVK_ANSI_Q, text: "q"))
             XCTAssertEqual(canvas.currentColor, expected[index])
-            XCTAssertFalse(canvas.isColorPickerOpen)
         }
         store.update { $0.editorColorIDs = ["white", "purple"] }
         XCTAssertEqual(canvas.currentColor, expected[0], "Keep selected color when reordering")
@@ -64,19 +63,35 @@ final class EditorPaletteTests: XCTestCase {
         XCTAssertEqual(canvas.currentColor, expected[1], "Single-color palette wraps safely")
     }
 
-    func testQAndKHaveSeparateCommandsAndModifiersDoNotCycle() throws {
+    func testOnlyUnmodifiedQCyclesColor() throws {
         let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80))
         var cycles = 0
-        var pickers = 0
         canvas.onKeyCommand = { command in
             if case .cycleColor = command { cycles += 1 }
-            if case .toggleColorPicker = command { pickers += 1 }
         }
         canvas.keyDown(with: try key(kVK_ANSI_Q, text: "q"))
         canvas.keyDown(with: try key(kVK_ANSI_K, text: "k"))
         canvas.keyDown(with: try key(kVK_ANSI_Q, text: "q", flags: .command))
         XCTAssertEqual(cycles, 1)
-        XCTAssertEqual(pickers, 1)
+    }
+
+    func testClickingColorSwatchCyclesColor() throws {
+        let directory = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(directory) }
+        let store = SettingsStore(fileURL: directory.appendingPathComponent("settings.json"))
+        let controller = EditorWindowController(image: TestSupport.solidImage(width: 200, height: 100), settingsStore: store)
+        defer { controller.dismissWithoutCompletion() }
+        let canvas = try XCTUnwrap(canvas(in: controller.window?.contentView))
+        let swatch = try XCTUnwrap(buttons(in: controller.window?.contentView).first { $0.toolTip == "Next color (Q)" })
+        let expected = EditorPalette.colors(for: store.settings.editorColorIDs).map(\.color)
+        swatch.performClick(nil)
+        XCTAssertEqual(canvas.currentColor, expected[1])
+    }
+
+    private func buttons(in view: NSView?) -> [NSButton] {
+        guard let view else { return [] }
+        let own = (view as? NSButton).map { [$0] } ?? []
+        return own + view.subviews.flatMap { buttons(in: $0) }
     }
 
     func testPaletteSettingsRemoveAddAndReorderAndRender() throws {

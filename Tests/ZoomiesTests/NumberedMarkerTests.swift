@@ -112,22 +112,6 @@ final class NumberedMarkerTests: XCTestCase {
         XCTAssertTrue(markerNumbers(canvas).isEmpty)
     }
 
-    func testEscapeClosesColorPickerBeforeExitingMarkerTool() throws {
-        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80))
-        canvas.setTool(.marker)
-        canvas.isColorPickerOpen = true
-        var closedColorPicker = false
-        canvas.onKeyCommand = { command in
-            if case .colorPickerClose = command { closedColorPicker = true }
-            else { XCTFail("Escape should close the color picker first") }
-        }
-
-        canvas.keyDown(with: try keyEvent(keyCode: 53))
-
-        XCTAssertTrue(closedColorPicker)
-        XCTAssertEqual(canvas.currentTool, .marker)
-    }
-
     func testClickingPlacesSequentiallyNumberedMarkersInCurrentColor() throws {
         let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80))
         canvas.setColor(.systemBlue)

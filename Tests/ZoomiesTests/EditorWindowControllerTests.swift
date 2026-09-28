@@ -76,21 +76,9 @@ final class EditorWindowControllerTests: XCTestCase {
         send(.selectTool(.rectangle))
         XCTAssertEqual(canvas.currentTool, .rectangle)
 
-        send(.selectColor(index: 2))
-        XCTAssertEqual(canvas.currentColor, colors[2])
+        XCTAssertEqual(canvas.currentColor, colors[0])
         send(.cycleColor)
-        XCTAssertEqual(canvas.currentColor, colors[3])
-        send(.toggleColorPicker)
-        XCTAssertTrue(canvas.isColorPickerOpen)
-        // Focus starts on the selected color (3); moving by one and choosing selects 4.
-        send(.colorPickerMove(direction: 1))
-        send(.colorPickerSelect)
-        XCTAssertEqual(canvas.currentColor, colors[4])
-        XCTAssertFalse(canvas.isColorPickerOpen)
-        send(.toggleColorPicker)
-        send(.colorPickerClose)
-        XCTAssertFalse(canvas.isColorPickerOpen)
-        XCTAssertEqual(canvas.currentColor, colors[4])
+        XCTAssertEqual(canvas.currentColor, colors[1])
 
         drawStroke(on: canvas, from: NSPoint(x: 10, y: 20), to: NSPoint(x: 70, y: 20))
         XCTAssertEqual(controller.currentEditableState()?.items.count, 1)

@@ -58,9 +58,6 @@ final class EditorWindowController: NSWindowController {
     private let escapeFinalAction: ScreenshotFinalAction
 
     private var toolButtons: [EditorTool: NSButton] = [:]
-    private var colorPickerButtons: [NSButton] = []
-    private var colorPickerPopover = NSPopover()
-    private var colorFocusIndex = 0
     private var selectedColorIndex = 0
 
     private let colorIndicatorButton = NSButton(frame: .zero)
@@ -87,23 +84,11 @@ final class EditorWindowController: NSWindowController {
             }
         }
         let next = HotKeyService.describeShortcut(keyCode: UInt32(kVK_ANSI_Q), carbonFlags: 0)
-        let palette = HotKeyService.describeShortcut(keyCode: UInt32(kVK_ANSI_K), carbonFlags: 0)
-        colorIndicatorButton.toolTip = "Next color: \(next) · Open palette: \(palette) or click"
+        colorIndicatorButton.toolTip = "Next color (\(next))"
         if let index = shortcutHints.firstIndex(where: { $0.view === colorIndicatorButton }) {
-            shortcutHints[index] = .init(view: colorIndicatorButton, key: next, label: "Next color (\(palette) opens palette)")
-        }
-        for (index, button) in colorPickerButtons.enumerated() {
-            for label in button.subviews.compactMap({ $0 as? NSTextField }) {
-                label.stringValue = paletteKeyLabel(at: index)
-            }
+            shortcutHints[index] = .init(view: colorIndicatorButton, key: next, label: "Next color")
         }
         shortcutOverlay?.refreshLabels()
-    }
-
-    private func paletteKeyLabel(at index: Int) -> String {
-        let codes = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6]
-        guard codes.indices.contains(index) else { return "\(index + 1)" }
-        return HotKeyService.describeShortcut(keyCode: UInt32(codes[index]), carbonFlags: 0)
     }
 
     // Match mac_screenshot behavior:
@@ -360,8 +345,6 @@ final class EditorWindowController: NSWindowController {
             self?.handleKeyCommand(command)
         }
 
-        setupColorPicker()
-
         selectTool(.pen)
         selectColor(index: 0)
     }
@@ -467,7 +450,7 @@ final class EditorWindowController: NSWindowController {
             .init(view: textButton, key: "T", label: "Text"),
             .init(view: markerButton, key: "F", label: "Numbered marker"),
             .init(view: selectionButton, key: "S", label: "Select"),
-            .init(view: colorIndicatorButton, key: "Q", label: "Next color (K opens palette)"),
+            .init(view: colorIndicatorButton, key: "Q", label: "Next color"),
             .init(view: undoButton, key: "⌘Z", label: "Undo"),
             .init(view: redoButton, key: "⌘⇧Z", label: "Redo"),
             .init(view: clearButton, key: "⌥⌫", label: "Clear annotations"),
@@ -570,7 +553,7 @@ final class EditorWindowController: NSWindowController {
         colorIndicatorButton.translatesAutoresizingMaskIntoConstraints = false
         colorIndicatorButton.widthAnchor.constraint(equalToConstant: 18).isActive = true
         colorIndicatorButton.heightAnchor.constraint(equalToConstant: 18).isActive = true
-        colorIndicatorButton.toolTip = "Next color: Q · Open palette: K or click"
+        colorIndicatorButton.toolTip = "Next color (Q)"
         colorIndicatorButton.target = self
         colorIndicatorButton.action = #selector(colorIndicatorPressed)
         colorIndicatorButton.title = ""
@@ -580,78 +563,10 @@ final class EditorWindowController: NSWindowController {
         let updated = EditorPalette.normalized(settingsStore.settings.editorColorIDs)
         guard updated != paletteIDs else { return }
         let selectedID = paletteIDs[selectedColorIndex]
-        closeColorPicker()
         paletteIDs = updated
         colors = EditorPalette.colors(for: updated).map(\.color)
         selectedColorIndex = updated.firstIndex(of: selectedID) ?? 0
-        colorFocusIndex = selectedColorIndex
-        colorPickerButtons.removeAll()
-        setupColorPicker()
         selectColor(index: selectedColorIndex)
-    }
-
-    private func setupColorPicker() {
-        let container = NSVisualEffectView()
-        MenuSurfaceMaterial.apply(to: container)
-        container.wantsLayer = true
-        container.layer?.cornerRadius = 16
-        container.layer?.borderWidth = 1
-        container.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.7).cgColor
-
-        let stack = NSStackView()
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 8
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        colors.enumerated().forEach { index, color in
-            let button = NSButton(frame: .zero)
-            button.isBordered = false
-            button.bezelStyle = .shadowlessSquare
-            button.refusesFirstResponder = true
-            button.wantsLayer = true
-            button.layer?.cornerRadius = 13
-            button.layer?.backgroundColor = color.cgColor
-            button.layer?.borderWidth = 2
-            button.layer?.borderColor = NSColor.clear.cgColor
-            button.translatesAutoresizingMaskIntoConstraints = false
-            button.widthAnchor.constraint(equalToConstant: 26).isActive = true
-            button.heightAnchor.constraint(equalToConstant: 26).isActive = true
-            button.tag = index
-            button.target = self
-            button.action = #selector(colorPickerButtonPressed(_:))
-            button.title = ""
-
-            let numberLabel = NSTextField(labelWithString: paletteKeyLabel(at: index))
-            numberLabel.font = NSFont.systemFont(ofSize: 9, weight: .bold)
-            numberLabel.textColor = color.isLight ? NSColor.black : NSColor.white
-            numberLabel.alignment = .center
-            numberLabel.translatesAutoresizingMaskIntoConstraints = false
-            button.addSubview(numberLabel)
-            NSLayoutConstraint.activate([
-                numberLabel.centerXAnchor.constraint(equalTo: button.centerXAnchor),
-                numberLabel.centerYAnchor.constraint(equalTo: button.centerYAnchor)
-            ])
-
-            colorPickerButtons.append(button)
-            stack.addArrangedSubview(button)
-        }
-
-        container.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
-            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
-            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14)
-        ])
-
-        let vc = NSViewController()
-        vc.view = container
-        colorPickerPopover.contentViewController = vc
-        colorPickerPopover.behavior = .transient
-        colorPickerPopover.delegate = self
-
-        updateColorPickerSelection()
     }
 
     // MARK: - Toolbar actions
@@ -673,12 +588,11 @@ final class EditorWindowController: NSWindowController {
     }
 
     @objc private func colorIndicatorPressed() {
-        toggleColorPicker()
+        cycleColor()
     }
 
-    @objc private func colorPickerButtonPressed(_ sender: NSButton) {
-        selectColor(index: sender.tag)
-        closeColorPicker()
+    private func cycleColor() {
+        selectColor(index: (selectedColorIndex + 1) % colors.count)
     }
 
     private func selectColor(index: Int) {
@@ -686,57 +600,6 @@ final class EditorWindowController: NSWindowController {
         selectedColorIndex = index
         canvasView.currentColor = colors[index]
         colorIndicatorButton.layer?.backgroundColor = colors[index].cgColor
-        updateColorPickerSelection()
-    }
-
-    private func updateColorPickerSelection() {
-        for (index, button) in colorPickerButtons.enumerated() {
-            let isSelected = index == selectedColorIndex
-            if isSelected {
-                button.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.95).cgColor
-            } else {
-                button.layer?.borderColor = NSColor.clear.cgColor
-            }
-        }
-        updateColorFocus()
-    }
-
-    private func toggleColorPicker() {
-        if colorPickerPopover.isShown {
-            closeColorPicker()
-        } else {
-            openColorPicker()
-        }
-    }
-
-    private func openColorPicker() {
-        colorFocusIndex = selectedColorIndex
-        updateColorFocus()
-        colorPickerPopover.show(relativeTo: colorIndicatorButton.bounds, of: colorIndicatorButton, preferredEdge: .maxY)
-        canvasView.isColorPickerOpen = true
-        colorIndicatorButton.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.75).cgColor
-        window?.makeFirstResponder(canvasView)
-    }
-
-    private func closeColorPicker() {
-        colorPickerPopover.performClose(nil)
-        canvasView.isColorPickerOpen = false
-        colorIndicatorButton.layer?.borderColor = NSColor.clear.cgColor
-    }
-
-    private func updateColorFocus() {
-        for (index, button) in colorPickerButtons.enumerated() {
-            if index == colorFocusIndex {
-                button.layer?.borderColor = NSColor.controlAccentColor.cgColor
-                button.layer?.borderWidth = 2
-            } else if index == selectedColorIndex {
-                button.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.95).cgColor
-                button.layer?.borderWidth = 2
-            } else {
-                button.layer?.borderColor = NSColor.clear.cgColor
-                button.layer?.borderWidth = 2
-            }
-        }
     }
 
     @objc private func undoPressed() {
@@ -776,7 +639,6 @@ final class EditorWindowController: NSWindowController {
         case .zoomOut: setZoom(userZoomFactor / 1.2)
         case .zoomReset: setZoom(defaultUserZoomFactor)
         case .backToNote:
-            closeColorPicker()
             onBackToNote?()
             window?.orderOut(nil)
         case .selectTool(let tool): selectTool(tool)
@@ -792,23 +654,8 @@ final class EditorWindowController: NSWindowController {
             cutSelectionToClipboard()
         case .pasteSelectionInCanvas:
             pasteSelectionInCanvas()
-        case .selectColor(let index):
-            selectColor(index: index)
-            closeColorPicker()
         case .cycleColor:
-            selectColor(index: (selectedColorIndex + 1) % colors.count)
-            closeColorPicker()
-        case .toggleColorPicker:
-            toggleColorPicker()
-        case .colorPickerMove(let direction):
-            let count = max(colorPickerButtons.count, 1)
-            colorFocusIndex = (colorFocusIndex + direction + count) % count
-            updateColorFocus()
-        case .colorPickerSelect:
-            selectColor(index: colorFocusIndex)
-            closeColorPicker()
-        case .colorPickerClose:
-            closeColorPicker()
+            cycleColor()
         }
     }
 
@@ -1040,13 +887,6 @@ extension EditorWindowController: NSWindowDelegate {
     }
 }
 
-extension EditorWindowController: NSPopoverDelegate {
-    func popoverDidClose(_ notification: Notification) {
-        canvasView.isColorPickerOpen = false
-        colorIndicatorButton.layer?.borderColor = NSColor.clear.cgColor
-    }
-}
-
 /// Centers the document view when it is smaller than the visible area.
 /// This matches the native screenshot editor feel (image stays centered while resizing).
 private final class CenteringClipView: NSClipView {
@@ -1083,15 +923,6 @@ private final class EditorScrollView: NSScrollView {
 }
 
 extension NSColor {
-    var isLight: Bool {
-        guard let rgbColor = usingColorSpace(.deviceRGB) else { return false }
-        let red = rgbColor.redComponent
-        let green = rgbColor.greenComponent
-        let blue = rgbColor.blueComponent
-        let brightness = ((red * 299) + (green * 587) + (blue * 114)) / 1000
-        return brightness > 0.5
-    }
-
     convenience init(hex: String) {
         var normalized = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         if normalized.count == 6 {

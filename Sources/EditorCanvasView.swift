@@ -34,14 +34,9 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         case undo
         case redo
         case clear
-        case selectColor(index: Int)
         case backToNote
         case selectTool(EditorTool)
         case cycleColor
-        case toggleColorPicker
-        case colorPickerMove(direction: Int)
-        case colorPickerSelect
-        case colorPickerClose
         case copyToClipboard
         case cutSelectionToClipboard
         case pasteSelectionInCanvas
@@ -62,7 +57,6 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         // preview in sync no matter which path assigns the color.
         didSet { invalidateMarkerCursorPreview() }
     }
-    var isColorPickerOpen: Bool = false
     /// Test/debug hook fired whenever the marker cursor preview is invalidated.
     var onMarkerCursorInvalidation: (() -> Void)?
     /// Test/debug hook fired with each partial (gesture-only) invalidation rect.
@@ -1625,8 +1619,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             return
         }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        // Order matters: picker Escape precedes selection Escape, and final
-        // actions (Cmd+Delete) precede deletion of an annotation.
+        // Order matters: final actions (Cmd+Delete) precede deletion of an annotation.
         let handlers = [handlePaletteShortcut, handleToolShortcut, handleEditingShortcut,
                         handleEscapeShortcut, handleWorkflowShortcut, handleDeletionShortcut]
         for handler in handlers {
@@ -1635,32 +1628,10 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         super.keyDown(with: event)
     }
 
-    private func openPickerCommands(for key: UInt16) -> [KeyCommand]? {
-        if let index = Self.colorPickerKeyCodeToColorIndex[key] {
-            return [.selectColor(index: index), .colorPickerClose]
-        }
-        let navigation: [UInt16: KeyCommand] = [
-            123: .colorPickerMove(direction: -1), // left arrow
-            124: .colorPickerMove(direction: 1), // right arrow
-            36: .colorPickerSelect, 76: .colorPickerSelect, // enter
-            53: .colorPickerClose // escape
-        ]
-        return navigation[key].map { [$0] }
-    }
-
     private func handlePaletteShortcut(_ event: NSEvent, _ flags: NSEvent.ModifierFlags) -> Bool {
         if event.keyCode == UInt16(kVK_ANSI_Q),
            flags.intersection([.command, .control, .option, .shift]).isEmpty {
             onKeyCommand?(.cycleColor)
-            return true
-        }
-        if isColorPickerOpen, let commands = openPickerCommands(for: event.keyCode) {
-            commands.forEach { onKeyCommand?($0) }
-            return true
-        }
-        if flags.intersection([.command, .control, .shift]).isEmpty,
-           Self.colorPickerToggleKeyCodes.contains(event.keyCode) {
-            if !isColorPickerOpen { onKeyCommand?(.toggleColorPicker) }
             return true
         }
         return false
@@ -1933,26 +1904,6 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
 
         return nil
     }
-
-    // Use hardware key codes so 1-6 selection works regardless of the active keyboard layout.
-    private static let colorPickerKeyCodeToColorIndex: [UInt16: Int] = [
-        UInt16(kVK_ANSI_1): 0,
-        UInt16(kVK_ANSI_2): 1,
-        UInt16(kVK_ANSI_3): 2,
-        UInt16(kVK_ANSI_4): 3,
-        UInt16(kVK_ANSI_5): 4,
-        UInt16(kVK_ANSI_6): 5,
-        UInt16(kVK_ANSI_Keypad1): 0,
-        UInt16(kVK_ANSI_Keypad2): 1,
-        UInt16(kVK_ANSI_Keypad3): 2,
-        UInt16(kVK_ANSI_Keypad4): 3,
-        UInt16(kVK_ANSI_Keypad5): 4,
-        UInt16(kVK_ANSI_Keypad6): 5
-    ]
-
-    private static let colorPickerToggleKeyCodes: Set<UInt16> = [
-        UInt16(kVK_ANSI_K)
-    ]
 
     private static let toolKeyCodeToTool: [UInt16: EditorTool] = [
         UInt16(kVK_ANSI_W): .pen,

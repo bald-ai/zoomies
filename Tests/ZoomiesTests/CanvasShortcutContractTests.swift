@@ -48,29 +48,16 @@ final class CanvasShortcutContractTests: XCTestCase {
         }
     }
 
-    func testPickerCommandsHavePriorityAndToggleDoesNotCloseOpenPicker() {
+    func testQCyclesColorAndPaletteKeysSendNothing() {
         let canvas = EditorCanvasView(image: TestSupport.solidImage())
         var received: [EditorCanvasView.KeyCommand] = []
         canvas.onKeyCommand = { received.append($0) }
-        canvas.keyDown(with: event(UInt16(kVK_ANSI_K)))
-        XCTAssertEqual(received, [.toggleColorPicker])
-        canvas.isColorPickerOpen = true
-        received = []
-        canvas.keyDown(with: event(UInt16(kVK_ANSI_K)))
-        XCTAssertTrue(received.isEmpty)
-        let cases: [(UInt16, [EditorCanvasView.KeyCommand])] = [
-            (18, [.selectColor(index: 0), .colorPickerClose]),
-            (22, [.selectColor(index: 5), .colorPickerClose]),
-            (83, [.selectColor(index: 0), .colorPickerClose]),
-            (88, [.selectColor(index: 5), .colorPickerClose]),
-            (123, [.colorPickerMove(direction: -1)]), (124, [.colorPickerMove(direction: 1)]),
-            (36, [.colorPickerSelect]), (76, [.colorPickerSelect]), (53, [.colorPickerClose]),
-            (12, [.cycleColor])
-        ]
-        for (key, expected) in cases {
+        canvas.keyDown(with: event(UInt16(kVK_ANSI_Q)))
+        XCTAssertEqual(received, [.cycleColor])
+        for key in [kVK_ANSI_K, kVK_ANSI_1, kVK_ANSI_6, kVK_ANSI_Keypad1] {
             received = []
-            canvas.keyDown(with: event(key))
-            XCTAssertEqual(received, expected)
+            canvas.keyDown(with: event(UInt16(key)))
+            XCTAssertTrue(received.isEmpty)
         }
     }
 }
