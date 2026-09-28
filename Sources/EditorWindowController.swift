@@ -5,7 +5,11 @@ import Carbon
 /// consume them. The canvas remains the first responder during normal editing;
 /// inline text editors intentionally keep their standard text undo manager.
 final class EditorWindow: NSWindow {
+    /// Consulted first; the marker note popover uses it to keep its shortcuts.
+    var keyEquivalentInterceptor: ((NSEvent) -> Bool)?
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if keyEquivalentInterceptor?(event) == true { return true }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let chars = event.charactersIgnoringModifiers?.lowercased()
 
@@ -40,6 +44,12 @@ final class EditorWindowController: NSWindowController {
     ///   - action: The requested final action.
     var onComplete: ((NSImage?, ScreenshotFinalAction, EditorCanvasState?) -> Void)?
     var onBackToNote: (() -> Void)?
+    /// Double-clicking a marker edits that marker's line in the note: the host
+    /// supplies its existing text and remaining character room, then applies the edit.
+    var markerNoteContext: ((Int) -> (text: String?, capacity: Int))?
+    var onMarkerNote: ((Int, String) -> Void)?
+    /// Current marker numbers whenever markers are added or removed.
+    var onMarkerNumbersChanged: ((Set<Int>) -> Void)?
     /// Confirmation callbacks for Esc/X paths. Cancelling keeps drawings intact.
     /// The setting gates both callbacks; nil proceeds without a prompt.
     var onConfirmDelete: (() -> Bool)?
@@ -49,7 +59,9 @@ final class EditorWindowController: NSWindowController {
     private let scrollView = EditorScrollView()
     private let clipboardService: ClipboardService
     private let settingsStore: SettingsStore
-    private let notePreviewRaw: String?
+    private var notePreviewRaw: String?
+    private weak var rootStackView: NSStackView?
+    private var markerNotePopover: NSPopover?
     private let targetScreen: NSScreen?
     private var notePreviewContainer: NSView?
     // Toolbar Cancel (X) and the red window close button mirror Escape:
@@ -233,7 +245,7 @@ final class EditorWindowController: NSWindowController {
     /// Event decision used by the local monitor; explicit context keeps hidden
     /// component fixtures independent of focus and the application's event loop.
     func handleMonitoredEvent(_ event: NSEvent, isKeyWindow: Bool, isEditingText: Bool) -> NSEvent? {
-        guard isKeyWindow else { return event }
+        guard isKeyWindow, markerNotePopover == nil else { return event }
         shortcutOverlay?.handle(event)
         guard event.type == .keyDown, !isEditingText else { return event }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -283,6 +295,7 @@ final class EditorWindowController: NSWindowController {
         rootStack.alignment = .centerX
         rootStack.translatesAutoresizingMaskIntoConstraints = false
         surfaceView.addSubview(rootStack)
+        rootStackView = rootStack
 
         NSLayoutConstraint.activate([
             rootStack.topAnchor.constraint(equalTo: surfaceView.safeAreaLayoutGuide.topAnchor, constant: 8),
@@ -344,17 +357,77 @@ final class EditorWindowController: NSWindowController {
         canvasView.onKeyCommand = { [weak self] command in
             self?.handleKeyCommand(command)
         }
+        canvasView.onMarkerNumbersChanged = { [weak self] numbers in
+            self?.onMarkerNumbersChanged?(numbers)
+        }
+        canvasView.onMarkerNoteRequest = { [weak self] number, rect in
+            self?.presentMarkerNotePopover(number: number, rect: rect)
+        }
 
         selectTool(.pen)
         selectColor(index: 0)
+    }
+
+    /// Replaces the UI-only note bar after the workflow's note text changes.
+    func updateNotePreview(_ text: String) {
+        notePreviewRaw = text
+        notePreviewContainer?.removeFromSuperview()
+        notePreviewContainer = nil
+        guard let rootStack = rootStackView, let noteView = makeNotePreviewView() else { return }
+        notePreviewContainer = noteView
+        rootStack.addArrangedSubview(noteView)
+        noteView.translatesAutoresizingMaskIntoConstraints = false
+        noteView.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
+    }
+
+    private func presentMarkerNotePopover(number: Int, rect: NSRect) {
+        markerNotePopover?.close()
+        let context = markerNoteContext?(number) ?? (text: nil, capacity: WorkflowNoteRenderer.maxNoteLength)
+        let field = MarkerNoteField(string: context.text ?? "")
+        field.maxLength = context.capacity
+        field.placeholderString = context.capacity > 0
+            ? "Note for \(number)…"
+            : "Note is full (\(WorkflowNoteRenderer.maxNoteLength) characters)"
+        field.font = NSFont.systemFont(ofSize: 13)
+        field.frame = NSRect(x: 10, y: 10, width: 300, height: 24)
+        // Only Enter commits; focus changes while the popover opens must not.
+        field.cell?.sendsActionOnEndEditing = false
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 44))
+        content.addSubview(field)
+        let controller = NSViewController()
+        controller.view = content
+
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = controller
+        field.target = self
+        field.action = #selector(markerNoteCommitted(_:))
+        field.tag = number
+        popover.delegate = self
+        markerNotePopover = popover
+        canvasView.suspendsKeyEquivalents = true
+        (window as? EditorWindow)?.keyEquivalentInterceptor = { [weak field] event in
+            field?.handleEditingShortcut(event) ?? false
+        }
+        popover.show(relativeTo: rect, of: canvasView, preferredEdge: .maxY)
+        let popoverWindow = popover.contentViewController?.view.window
+        popoverWindow?.makeFirstResponder(field)
+    }
+
+    @objc private func markerNoteCommitted(_ sender: NSTextField) {
+        let text = MarkerNoteLogic.sanitized(sender.stringValue)
+        markerNotePopover?.close()
+        markerNotePopover = nil
+        window?.makeFirstResponder(canvasView)
+        onMarkerNote?(sender.tag, text)
     }
 
     private func makeNotePreviewView() -> NSView? {
         let raw = (notePreviewRaw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return nil }
 
-        // Match note burning rules (prefix + 1000 char cap), but do not modify the image here.
-        var text = String(raw.prefix(1000))
+        // Match note burning rules (prefix + character cap), but do not modify the image here.
+        var text = String(raw.prefix(WorkflowNoteRenderer.maxNoteLength))
         let settings = settingsStore.settings
         if settings.notePrefixEnabled {
             let prefix = settings.notePrefix.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -884,6 +957,53 @@ extension EditorWindowController: NSWindowDelegate {
         // Native screenshot editor does not auto-scale the image when you manually resize the window.
         // Keep zoom stable; just update panning lock and centering.
         updateScrollLockAndRecentering()
+    }
+}
+
+/// Marker note field. The popover window has no Edit menu behind it, so the
+/// standard editing shortcuts are routed to the field editor directly.
+private final class MarkerNoteField: NSTextField {
+    var maxLength = Int.max
+
+    override func textDidChange(_ notification: Notification) {
+        super.textDidChange(notification)
+        guard stringValue.count > maxLength else { return }
+        stringValue = String(stringValue.prefix(maxLength))
+        NSSound.beep()
+    }
+
+    private static let editingSelectors: [String: Selector] = [
+        "c": #selector(NSText.copy(_:)), "v": #selector(NSText.paste(_:)),
+        "x": #selector(NSText.cut(_:)), "a": #selector(NSText.selectAll(_:))
+    ]
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        handleEditingShortcut(event) || super.performKeyEquivalent(with: event)
+    }
+
+    func handleEditingShortcut(_ event: NSEvent) -> Bool {
+        guard let editor = currentEditor() as? NSTextView else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let chars = event.charactersIgnoringModifiers?.lowercased()
+        if chars == "z" {
+            if flags == [.command] { editor.undoManager?.undo(); return true }
+            if flags == [.command, .shift] { editor.undoManager?.redo(); return true }
+        }
+        if flags == [.command], let chars, let selector = Self.editingSelectors[chars] {
+            return NSApp.sendAction(selector, to: editor, from: self)
+        }
+        return false
+    }
+}
+
+extension EditorWindowController: NSPopoverDelegate {
+    func popoverDidClose(_ notification: Notification) {
+        // A stale close (after a newer popover opened) must not restore shortcuts.
+        let closed = notification.object as? NSPopover
+        guard markerNotePopover == nil || closed === markerNotePopover else { return }
+        markerNotePopover = nil
+        canvasView.suspendsKeyEquivalents = false
+        (window as? EditorWindow)?.keyEquivalentInterceptor = nil
     }
 }
 

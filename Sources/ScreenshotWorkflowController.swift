@@ -360,6 +360,23 @@ final class ScreenshotWorkflowController {
         editor.onBackToNote = { [weak self] in
             self?.returnToNoteFromEditor()
         }
+        editor.markerNoteContext = { [weak self] number in
+            let note = self?.pendingNoteText ?? ""
+            return (MarkerNoteLogic.text(for: number, in: note),
+                    MarkerNoteLogic.capacity(note: note, number: number, limit: WorkflowNoteRenderer.maxNoteLength))
+        }
+        editor.onMarkerNote = { [weak self, weak editor] number, text in
+            guard let self else { return }
+            self.pendingNoteText = MarkerNoteLogic.update(note: self.pendingNoteText, number: number, newText: text)
+            editor?.updateNotePreview(self.pendingNoteText)
+        }
+        editor.onMarkerNumbersChanged = { [weak self, weak editor] numbers in
+            guard let self else { return }
+            let updated = MarkerNoteLogic.removingLines(notIn: numbers, from: self.pendingNoteText)
+            guard updated != self.pendingNoteText else { return }
+            self.pendingNoteText = updated
+            editor?.updateNotePreview(updated)
+        }
 
         editorController = editor
         presentation.editor(editor)

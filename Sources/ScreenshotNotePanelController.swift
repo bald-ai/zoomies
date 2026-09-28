@@ -13,7 +13,7 @@ final class ScreenshotNotePanelController: NotePanelController {
     init(initialText: String, escapeKeyDeletesFile: Bool = true) {
         super.init(initialText: initialText,
                    escapeKeyDeletesFile: escapeKeyDeletesFile,
-                   maxLength: 1000,
+                   maxLength: WorkflowNoteRenderer.maxNoteLength,
                    layout: Self.layout)
     }
 

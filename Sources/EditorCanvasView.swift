@@ -59,13 +59,35 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     }
     /// Test/debug hook fired whenever the marker cursor preview is invalidated.
     var onMarkerCursorInvalidation: (() -> Void)?
+    /// Double-click on an existing marker: (marker number, marker rect in canvas coordinates).
+    var onMarkerNoteRequest: ((Int, NSRect) -> Void)?
+    private var pendingMarkerNoteRequest: (number: Int, rect: NSRect)?
+    /// Set by the host while the marker note popover is open.
+    var suspendsKeyEquivalents = false
     /// Test/debug hook fired with each partial (gesture-only) invalidation rect.
     var onPartialInvalidation: ((NSRect) -> Void)?
     private let escapeFinalAction: ScreenshotFinalAction
 
     // MARK: - Internal model
 
-    private var items: [EditorDrawing.Item] = []
+    private var items: [EditorDrawing.Item] = [] {
+        didSet {
+            let numbers = Self.markerNumbers(in: items)
+            guard numbers != lastReportedMarkerNumbers else { return }
+            lastReportedMarkerNumbers = numbers
+            onMarkerNumbersChanged?(numbers)
+        }
+    }
+    private var lastReportedMarkerNumbers: Set<Int> = []
+    /// Fired when markers are added or removed (delete, clear, undo/redo).
+    var onMarkerNumbersChanged: ((Set<Int>) -> Void)?
+
+    private static func markerNumbers(in items: [EditorDrawing.Item]) -> Set<Int> {
+        Set(items.compactMap { item in
+            guard case let .marker(marker) = item else { return nil }
+            return marker.number
+        })
+    }
     private var undoStack: [[EditorDrawing.Item]] = []
     private var redoStack: [[EditorDrawing.Item]] = []
     private let maxUndoLevels = 30
@@ -141,6 +163,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         }
         self.baseImage = restored?.baseImage ?? image
         self.items = restored?.items ?? []
+        self.lastReportedMarkerNumbers = Self.markerNumbers(in: self.items)
         // Reuse the state's bytes only when they actually became the base
         // image; restoring falls back to `image` if they fail to decode.
         if let restored, restored.baseImage !== image {
@@ -902,7 +925,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         switch currentTool {
         case .selection: beginSelectionGesture(at: point); return
         case .text: beginTextGesture(at: point, clickCount: event.clickCount); return
-        case .marker: beginMarkerGesture(at: point); return
+        case .marker: beginMarkerGesture(at: point, clickCount: event.clickCount); return
         default: break
         }
 
@@ -1010,10 +1033,20 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         }
     }
 
-    private func beginMarkerGesture(at point: NSPoint) {
+    private func beginMarkerGesture(at point: NSPoint, clickCount: Int) {
         // Commit any open inline editor before hit testing, like the text flow.
         endTextEditingIfNeeded()
         if let (index, rect) = hitTestMarker(at: point) {
+            // Double-click asks the host for a quick note tied to this marker.
+            if clickCount >= 2, case let .marker(markerItem) = items[index] {
+                selectedMarkerIndex = index
+                draggingMarkerIndex = nil
+                needsDisplay = true
+                // Fire on mouse-up so the click that opens the note field
+                // does not immediately dismiss it.
+                pendingMarkerNoteRequest = (markerItem.number, rect)
+                return
+            }
             selectedMarkerIndex = index
             selectedTextIndex = nil
             selectedImageIndex = nil
@@ -1172,6 +1205,12 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         let point = convert(event.locationInWindow, from: nil)
         lastMousePoint = point
         constrainShapes = event.modifierFlags.contains(.shift)
+
+        if let request = pendingMarkerNoteRequest {
+            pendingMarkerNoteRequest = nil
+            onMarkerNoteRequest?(request.number, request.rect)
+            return
+        }
 
         if currentTool == .selection {
             finishSelection(at: point)
@@ -1689,7 +1728,8 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         // Cmd-based key equivalents can be intercepted by the window/menu before keyDown.
         // Handle editor commands here so they work reliably in the canvas.
-        if textEditor != nil {
+        // While the marker note popover is open, its field owns the shortcuts.
+        if textEditor != nil || suspendsKeyEquivalents {
             return super.performKeyEquivalent(with: event)
         }
 
