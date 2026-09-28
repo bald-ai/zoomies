@@ -253,9 +253,16 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     }
 
     /// Ensure the full visible workspace can receive drawing events.
+    /// Grows the canvas to cover the viewport, and shrinks it back when zooming
+    /// in or a larger viewport leaves blank margin that would otherwise stay
+    /// scrollable. Shrinking never cuts into the image inset or annotations.
     func ensureDrawableAreaCoversVisibleSize(_ visibleSize: NSSize) {
-        let targetWidth = max(frame.size.width, minimumCanvasSize.width, ceil(visibleSize.width))
-        let targetHeight = max(frame.size.height, minimumCanvasSize.height, ceil(visibleSize.height))
+        let inset = EditorDrawing.canvasEdgeInset
+        let content = visibleContentBounds.insetBy(dx: -inset, dy: -inset)
+        let slackX = max(0, floor(min(content.minX, frame.size.width - content.maxX)))
+        let slackY = max(0, floor(min(content.minY, frame.size.height - content.maxY)))
+        let targetWidth = max(frame.size.width - slackX * 2, minimumCanvasSize.width, ceil(visibleSize.width))
+        let targetHeight = max(frame.size.height - slackY * 2, minimumCanvasSize.height, ceil(visibleSize.height))
         let targetSize = NSSize(width: targetWidth, height: targetHeight)
         guard targetSize != frame.size else { return }
 
@@ -892,13 +899,25 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     }
 
     /// Ensure the canvas is large enough to contain the base image and all annotations.
-    private func updateCanvasSizeIfNeeded() {
-        var unionRect = baseImageBounds
+    /// Image, annotations, and any open text editor: what the viewport must
+    /// be able to reach. The blank edge inset around it is not.
+    var visibleContentBounds: NSRect {
+        guard let editor = textEditor else { return annotatedBounds }
+        return annotatedBounds.union(editor.frame)
+    }
 
+    /// Base image plus every annotation, in canvas coordinates.
+    private var annotatedBounds: NSRect {
+        var unionRect = baseImageBounds
         for item in items {
             guard let itemBounds = EditorImageRenderer.bounds(for: item) else { continue }
             unionRect = unionRect.union(itemBounds)
         }
+        return unionRect
+    }
+
+    private func updateCanvasSizeIfNeeded() {
+        let unionRect = annotatedBounds
 
         let newWidth = max(unionRect.maxX, minimumCanvasSize.width, frame.size.width)
         let newHeight = max(unionRect.maxY, minimumCanvasSize.height, frame.size.height)

@@ -27,6 +27,109 @@ final class EditorWindowControllerTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(controller.window).isVisible)
     }
 
+    func testAddingNoteGrowsWindowSoCanvasStaysUnscrollable() throws {
+        _ = NSApplication.shared
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let controller = EditorWindowController(image: TestSupport.solidImage(width: 600, height: 120),
+            settingsStore: SettingsStore(fileURL: root.appendingPathComponent("settings.json")))
+        defer { controller.dismissWithoutCompletion() }
+        let window = try XCTUnwrap(controller.window)
+        let canvas = try XCTUnwrap(findCanvas(in: window.contentView))
+        let scroll = try XCTUnwrap(canvas.enclosingScrollView)
+        let clipHeight = scroll.contentView.bounds.height
+        let windowHeight = window.frame.height
+
+        controller.updateNotePreview("1: test\n2: another line")
+
+        XCTAssertGreaterThan(window.frame.height, windowHeight)
+        XCTAssertEqual(scroll.contentView.bounds.height, clipHeight, accuracy: 1)
+        let cg = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -40, wheel2: 0, wheel3: 0))
+        let initial = scroll.contentView.bounds.origin
+        scroll.scrollWheel(with: try XCTUnwrap(NSEvent(cgEvent: cg)))
+        XCTAssertEqual(scroll.contentView.bounds.origin, initial)
+
+        controller.updateNotePreview("")
+        XCTAssertEqual(window.frame.height, windowHeight, accuracy: 1)
+    }
+
+    func testMassiveNoteOnFullSizeImageCapsBarAndRefitsImage() throws {
+        _ = NSApplication.shared
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let controller = EditorWindowController(image: TestSupport.solidImage(width: 3000, height: 2000),
+            settingsStore: SettingsStore(fileURL: root.appendingPathComponent("settings.json")))
+        defer { controller.dismissWithoutCompletion() }
+        let window = try XCTUnwrap(controller.window)
+        let canvas = try XCTUnwrap(findCanvas(in: window.contentView))
+        let scroll = try XCTUnwrap(canvas.enclosingScrollView)
+        let openingMagnification = scroll.magnification
+
+        let massive = (1...40).map { "\($0): " + String(repeating: "long note text ", count: 2) }.joined(separator: "\n")
+        controller.updateNotePreview(massive)
+
+        let bar = try XCTUnwrap(findView(EditorNotePreviewBar.self, in: window.contentView))
+        XCTAssertLessThanOrEqual(bar.frame.height, bar.maxHeight + 0.5)
+        XCTAssertLessThan(bar.frame.height, bar.textHeight(forWidth: bar.frame.width))
+        XCTAssertLessThan(scroll.magnification, openingMagnification)
+        try assertCanvasIsNotScrollable(scroll)
+
+        controller.updateNotePreview("")
+        XCTAssertEqual(scroll.magnification, openingMagnification, accuracy: 0.0001)
+        try assertCanvasIsNotScrollable(scroll)
+    }
+
+    func testOpeningWithLongNoteKeepsImageOnlyWindowWidth() throws {
+        _ = NSApplication.shared
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let store = SettingsStore(fileURL: root.appendingPathComponent("settings.json"))
+        let image = TestSupport.solidImage(width: 3000, height: 2000)
+        let plain = EditorWindowController(image: image, settingsStore: store)
+        defer { plain.dismissWithoutCompletion() }
+        let note = String(repeating: "A long note that wraps across the whole bar. ", count: 30)
+        let noted = EditorWindowController(image: image, settingsStore: store, notePreview: note)
+        defer { noted.dismissWithoutCompletion() }
+
+        let plainWindow = try XCTUnwrap(plain.window)
+        let notedWindow = try XCTUnwrap(noted.window)
+        XCTAssertEqual(notedWindow.frame.width, plainWindow.frame.width, accuracy: 1)
+        XCTAssertGreaterThan(notedWindow.frame.height, 0)
+    }
+
+    func testManualZoomIsKeptWhenNoteChanges() throws {
+        _ = NSApplication.shared
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let controller = EditorWindowController(image: TestSupport.solidImage(width: 3000, height: 2000),
+            settingsStore: SettingsStore(fileURL: root.appendingPathComponent("settings.json")))
+        defer { controller.dismissWithoutCompletion() }
+        let canvas = try XCTUnwrap(findCanvas(in: controller.window?.contentView))
+        let scroll = try XCTUnwrap(canvas.enclosingScrollView)
+        canvas.onKeyCommand?(.zoomIn)
+        let zoomed = scroll.magnification
+
+        controller.updateNotePreview((1...40).map { "\($0): note" }.joined(separator: "\n"))
+
+        XCTAssertEqual(scroll.magnification, zoomed, accuracy: 0.0001)
+    }
+
+    func testZoomingOutAndBackLeavesNoBlankScrollableMargin() throws {
+        _ = NSApplication.shared
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let controller = EditorWindowController(image: TestSupport.solidImage(width: 600, height: 120),
+            settingsStore: SettingsStore(fileURL: root.appendingPathComponent("settings.json")))
+        defer { controller.dismissWithoutCompletion() }
+        let canvas = try XCTUnwrap(findCanvas(in: controller.window?.contentView))
+        let scroll = try XCTUnwrap(canvas.enclosingScrollView)
+
+        for _ in 0..<3 { canvas.onKeyCommand?(.zoomOut) }
+        canvas.onKeyCommand?(.zoomReset)
+
+        try assertCanvasIsNotScrollable(scroll)
+    }
+
     func testEditorFinalActionsDeliverImageAndEditableStateOnlyForSavingActions() throws {
         for action: ScreenshotFinalAction in [.saveOnly, .copyAndSave, .copyAndDelete, .deleteOnly, .closeOnly] {
             let root = try TestSupport.makeTemporaryDirectory()
@@ -547,6 +650,26 @@ final class EditorWindowControllerTests: XCTestCase {
     private func color(in image: NSImage, at point: NSPoint) throws -> NSColor {
         let rep = try XCTUnwrap(image.representations.compactMap { $0 as? NSBitmapImageRep }.first)
         return try XCTUnwrap(rep.colorAt(x: Int(point.x), y: Int(point.y))?.usingColorSpace(.deviceRGB))
+    }
+
+    private func assertCanvasIsNotScrollable(_ scroll: NSScrollView,
+                                             file: StaticString = #filePath, line: UInt = #line) throws {
+        for (dy, dx): (Int32, Int32) in [(-40, 0), (40, 0), (0, -40), (0, 40)] {
+            let cg = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
+                                           wheel1: dy, wheel2: dx, wheel3: 0), file: file, line: line)
+            let initial = scroll.contentView.bounds.origin
+            scroll.scrollWheel(with: try XCTUnwrap(NSEvent(cgEvent: cg), file: file, line: line))
+            XCTAssertEqual(scroll.contentView.bounds.origin, initial, file: file, line: line)
+        }
+    }
+
+    private func findView<T: NSView>(_ type: T.Type, in view: NSView?) -> T? {
+        guard let view else { return nil }
+        if let match = view as? T { return match }
+        for subview in view.subviews {
+            if let match = findView(type, in: subview) { return match }
+        }
+        return nil
     }
 
     private func findCanvas(in view: NSView?) -> EditorCanvasView? {

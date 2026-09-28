@@ -75,7 +75,7 @@ final class NotePanelControllerTests: XCTestCase {
     }
 
     func testSeparatePanelsApplyTheirOwnLayoutAndLimits() throws {
-        let screenshot = ScreenshotNotePanelController(initialText: String(repeating: "s", count: 1100))
+        let screenshot = ScreenshotNotePanelController(initialText: String(repeating: "s", count: WorkflowNoteRenderer.maxNoteLength + 350))
         let dedicated = DedicatedNotePanelController(initialText: String(repeating: "d", count: 1100))
         XCTAssertEqual(screenshot.text.count, WorkflowNoteRenderer.maxNoteLength)
         XCTAssertEqual(dedicated.text.count, 1100)

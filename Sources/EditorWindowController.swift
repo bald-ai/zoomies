@@ -63,7 +63,7 @@ final class EditorWindowController: NSWindowController {
     private weak var rootStackView: NSStackView?
     private var markerNotePopover: NSPopover?
     private let targetScreen: NSScreen?
-    private var notePreviewContainer: NSView?
+    private var notePreviewContainer: EditorNotePreviewBar?
     // Toolbar Cancel (X) and the red window close button mirror Escape:
     // - For editor sessions that own the temp file: delete on cancel.
     // - For Finder-selected originals: close without deleting.
@@ -110,6 +110,13 @@ final class EditorWindowController: NSWindowController {
     private var userZoomFactor: CGFloat = 1.0
     private var baseScale: CGFloat = 1.0
     private var defaultUserZoomFactor: CGFloat = 1.0
+    // Effective zoom the editor opened at; refitting never zooms past it.
+    private var openingEffectiveZoom: CGFloat = 1.0
+    // True until the user zooms by hand; while true, note changes refit the image.
+    private var followsAutomaticFit = true
+    // Height the window gained for the note bar, so removing the note gives
+    // back only what the note added.
+    private var windowHeightAddedForNote: CGFloat = 0
     // Total padding amount around the image (not per-side).
     private var totalPadding: CGFloat = 0.0
 
@@ -370,14 +377,69 @@ final class EditorWindowController: NSWindowController {
 
     /// Replaces the UI-only note bar after the workflow's note text changes.
     func updateNotePreview(_ text: String) {
+        let previousNoteHeight = notePreviewStackHeight
         notePreviewRaw = text
-        notePreviewContainer?.removeFromSuperview()
-        notePreviewContainer = nil
-        guard let rootStack = rootStackView, let noteView = makeNotePreviewView() else { return }
-        notePreviewContainer = noteView
-        rootStack.addArrangedSubview(noteView)
-        noteView.translatesAutoresizingMaskIntoConstraints = false
-        noteView.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
+        if let existing = notePreviewContainer, let displayText = notePreviewDisplayText {
+            existing.text = displayText
+        } else {
+            notePreviewContainer?.removeFromSuperview()
+            notePreviewContainer = nil
+            if let rootStack = rootStackView, let noteView = makeNotePreviewView() {
+                notePreviewContainer = noteView
+                rootStack.addArrangedSubview(noteView)
+                noteView.translatesAutoresizingMaskIntoConstraints = false
+                noteView.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
+            }
+        }
+        notePreviewContainer?.updateHeight(forWidth: rootStackView?.bounds.width ?? 0)
+        preserveCanvasSize(afterNoteHeightChangeFrom: previousNoteHeight)
+        refitImageIfFollowingFit()
+    }
+
+    /// Height the note bar takes from the root stack, including its spacing.
+    private var notePreviewStackHeight: CGFloat {
+        guard let noteView = notePreviewContainer else { return 0 }
+        return noteView.frame.height + (rootStackView?.spacing ?? 0)
+    }
+
+    /// Resizes the window by the note bar's height change so the canvas keeps
+    /// its size instead of shrinking under the image and becoming scrollable.
+    private func preserveCanvasSize(afterNoteHeightChangeFrom previousHeight: CGFloat) {
+        guard let window else { return }
+        window.contentView?.layoutSubtreeIfNeeded()
+        var delta = notePreviewStackHeight - previousHeight
+        if delta < 0 {
+            delta = max(delta, -windowHeightAddedForNote)
+        }
+        guard abs(delta) > 0.5 else { return }
+        let previousWindowHeight = window.frame.height
+        let minFrameHeight = window.frameRect(forContentRect: NSRect(origin: .zero, size: window.contentMinSize)).height
+        let frame = EditorWindowLayoutLogic.frameAdjustedForChromeChange(
+            window.frame,
+            heightDelta: delta,
+            minHeight: minFrameHeight,
+            visibleFrame: window.screen?.visibleFrame ?? layoutVisibleFrame
+        )
+        window.setFrame(frame, display: true)
+        windowHeightAddedForNote = max(0, windowHeightAddedForNote + window.frame.height - previousWindowHeight)
+        window.contentView?.layoutSubtreeIfNeeded()
+        updateScrollLockAndRecentering()
+    }
+
+    /// While the user has not zoomed by hand, keeps the image fitted to the
+    /// canvas: it shrinks when the note bar takes space the window could not
+    /// add, and grows back toward the opening zoom when that space returns.
+    private func refitImageIfFollowingFit() {
+        guard followsAutomaticFit, userZoomFactor > 0 else { return }
+        window?.contentView?.layoutSubtreeIfNeeded()
+        let viewport = scrollView.contentSize
+        let zoom = EditorWindowLayoutLogic.fittedZoom(
+            contentSize: canvasView.visibleContentBounds.size,
+            viewportSize: NSSize(width: viewport.width - totalPadding, height: viewport.height - totalPadding),
+            preferredZoom: openingEffectiveZoom
+        )
+        baseScale = zoom / userZoomFactor
+        applyZoom()
     }
 
     private func presentMarkerNotePopover(number: Int, rect: NSRect) {
@@ -422,11 +484,12 @@ final class EditorWindowController: NSWindowController {
         onMarkerNote?(sender.tag, text)
     }
 
-    private func makeNotePreviewView() -> NSView? {
+    /// Note text as it will be burned in: prefix plus character cap, without
+    /// modifying the image here. `nil` when there is no note to show.
+    private var notePreviewDisplayText: String? {
         let raw = (notePreviewRaw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return nil }
 
-        // Match note burning rules (prefix + character cap), but do not modify the image here.
         var text = String(raw.prefix(WorkflowNoteRenderer.maxNoteLength))
         let settings = settingsStore.settings
         if settings.notePrefixEnabled {
@@ -435,25 +498,19 @@ final class EditorWindowController: NSWindowController {
                 text = prefix + " " + text
             }
         }
+        return text
+    }
 
-        let container = NSView()
-
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.font = NSFont.systemFont(ofSize: 13, weight: .regular)
-        label.textColor = NSColor.labelColor
-        label.lineBreakMode = .byWordWrapping
-        label.maximumNumberOfLines = 0
-        label.translatesAutoresizingMaskIntoConstraints = false
-
-        container.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
-            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10)
-        ])
-
-        return container
+    private func makeNotePreviewView() -> EditorNotePreviewBar? {
+        guard let text = notePreviewDisplayText else { return nil }
+        let maxContentSize = EditorWindowLayoutLogic.maximumContentSize(
+            visibleFrame: layoutVisibleFrame,
+            minContentSize: window?.contentMinSize ?? .zero
+        )
+        return EditorNotePreviewBar(
+            text: text,
+            maxHeight: EditorWindowLayoutLogic.noteBarMaxHeight(maxContentHeight: maxContentSize.height)
+        )
     }
 
     private func makeToolbarBackground() -> NSView {
@@ -735,6 +792,7 @@ final class EditorWindowController: NSWindowController {
     private func setZoom(_ value: CGFloat) {
         let clampedUser = max(minUserZoom, min(maxUserZoom, value))
         userZoomFactor = clampedUser
+        followsAutomaticFit = abs(clampedUser - defaultUserZoomFactor) < 0.001
         applyZoom()
     }
 
@@ -776,10 +834,7 @@ final class EditorWindowController: NSWindowController {
         let minW: CGFloat = 580.0
         let minH: CGFloat = 250.0
         let toolbarH: CGFloat = toolbarMinimumHeight
-        let noteH: CGFloat = (notePreviewContainer?.fittingSize.height ?? 0)
         let chromeW: CGFloat = 24.0
-        // Root stack spacing is 10. If we have a note preview bar, add its height + spacing.
-        let chromeH: CGFloat = 24.0 + toolbarH + 10.0 + (noteH > 0 ? (10.0 + noteH) : 0.0)
         let minContentSize = NSSize(width: minW, height: minH)
         let maxContentSize = EditorWindowLayoutLogic.maximumContentSize(
             visibleFrame: layoutVisibleFrame,
@@ -788,15 +843,27 @@ final class EditorWindowController: NSWindowController {
 
         let settings = settingsStore.settings
         let wasResized = settings.maxWidth > 0 && Int(pointW.rounded()) == settings.maxWidth
-        let layout = EditorWindowLayoutLogic.makeLayout(
-            EditorWindowLayoutInput(imagePointSize: NSSize(width: pointW, height: pointH),
-                                    maxContentSize: maxContentSize,
-                                    minContentSize: minContentSize,
-                                    chromeSize: NSSize(width: chromeW, height: chromeH),
-                                    wasResized: wasResized,
-                                    autoZoomFillRatio: autoZoomFillRatio,
-                                    maxAutoUserZoom: maxAutoUserZoom)
-        )
+        func makeLayout(noteHeight noteH: CGFloat, minWidth: CGFloat) -> EditorWindowLayoutResult {
+            // Root stack spacing is 10. If we have a note preview bar, add its height + spacing.
+            let chromeH: CGFloat = 24.0 + toolbarH + 10.0 + (noteH > 0 ? (10.0 + noteH) : 0.0)
+            return EditorWindowLayoutLogic.makeLayout(
+                EditorWindowLayoutInput(imagePointSize: NSSize(width: pointW, height: pointH),
+                                        maxContentSize: maxContentSize,
+                                        minContentSize: NSSize(width: minWidth, height: minContentSize.height),
+                                        chromeSize: NSSize(width: chromeW, height: chromeH),
+                                        wasResized: wasResized,
+                                        autoZoomFillRatio: autoZoomFillRatio,
+                                        maxAutoUserZoom: maxAutoUserZoom)
+            )
+        }
+        // Size the width for the image alone. A note then only takes height:
+        // if the image must shrink to make room, the window keeps its width
+        // so the note wraps at full width instead of growing taller.
+        var layout = makeLayout(noteHeight: 0, minWidth: minW)
+        if let noteBar = notePreviewContainer {
+            let width = layout.contentSize.width
+            layout = makeLayout(noteHeight: noteBar.preferredHeight(forWidth: width - chromeW), minWidth: width)
+        }
         totalPadding = layout.totalPadding
 
         let pointToCanvasScaleW = pointW / imageSize.width
@@ -808,6 +875,7 @@ final class EditorWindowController: NSWindowController {
 
         defaultUserZoomFactor = layout.defaultUserZoomFactor
         userZoomFactor = defaultUserZoomFactor
+        openingEffectiveZoom = baseScale * defaultUserZoomFactor
         applyZoom()
 
     }
@@ -843,47 +911,49 @@ final class EditorWindowController: NSWindowController {
         return image.size
     }
 
-    private var isContentScrollable: Bool {
-        guard let documentView = scrollView.documentView else { return false }
+    /// Panning is only for reaching content: the image, annotations, or an
+    /// open text box. The blank canvas margin around them never scrolls.
+    private func scrollableAxes() -> (x: Bool, y: Bool) {
         let clipSize = scrollView.contentView.bounds.size
-        let docSize = documentView.frame.size
-
+        let content = canvasView.visibleContentBounds
         // Small epsilon so rounding at some magnifications doesn't count as scrollable.
         let epsilon: CGFloat = 1.0
-        return (docSize.width > clipSize.width + epsilon) || (docSize.height > clipSize.height + epsilon)
+        return (content.width > clipSize.width + epsilon, content.height > clipSize.height + epsilon)
+    }
+
+    private var isContentScrollable: Bool {
+        let axes = scrollableAxes()
+        return axes.x || axes.y
     }
 
     private func updateScrollLockAndRecentering() {
         guard let documentView = scrollView.documentView else { return }
+        canvasView.ensureDrawableAreaCoversVisibleSize(scrollView.contentView.bounds.size)
         let clipSize = scrollView.contentView.bounds.size
-        canvasView.ensureDrawableAreaCoversVisibleSize(clipSize)
         let docSize = documentView.frame.size
-        let epsilon: CGFloat = 1.0
-
-        let scrollableX = docSize.width > clipSize.width + epsilon
-        let scrollableY = docSize.height > clipSize.height + epsilon
+        let content = canvasView.visibleContentBounds
+        let (scrollableX, scrollableY) = scrollableAxes()
 
         scrollView.horizontalScrollElasticity = scrollableX ? .automatic : .none
         scrollView.verticalScrollElasticity = scrollableY ? .automatic : .none
 
-        // Keep non-scrollable axes centered (native feel).
+        // Keep non-scrollable axes centered on the content (native feel).
         var origin = scrollView.contentView.bounds.origin
-
-        if scrollableX {
-            origin.x = max(0, min(origin.x, docSize.width - clipSize.width))
-        } else {
-            origin.x = floor((docSize.width - clipSize.width) / 2.0)
-        }
-
-        if scrollableY {
-            let maxY = docSize.height - clipSize.height
-            origin.y = max(0, min(origin.y, maxY))
-        } else {
-            origin.y = floor((docSize.height - clipSize.height) / 2.0)
-        }
+        origin.x = Self.clipOrigin(current: origin.x, scrollable: scrollableX, clip: clipSize.width,
+                                   document: docSize.width, contentMid: content.midX)
+        origin.y = Self.clipOrigin(current: origin.y, scrollable: scrollableY, clip: clipSize.height,
+                                   document: docSize.height, contentMid: content.midY)
 
         scrollView.contentView.scroll(to: origin)
         scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    private static func clipOrigin(current: CGFloat, scrollable: Bool, clip: CGFloat,
+                                   document: CGFloat, contentMid: CGFloat) -> CGFloat {
+        guard document > clip else { return floor((document - clip) / 2.0) }
+        let maxOrigin = document - clip
+        let origin = scrollable ? current : floor(contentMid - clip / 2.0)
+        return max(0, min(origin, maxOrigin))
     }
 
     private func copySelectionOrEditedImageToClipboard() {

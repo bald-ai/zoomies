@@ -36,6 +36,45 @@ enum EditorWindowLayoutLogic {
                       height: max(minContentSize.height, height))
     }
 
+    /// Window frame after the editor chrome above or below the canvas changes
+    /// height by `heightDelta`, so the canvas keeps its size. The top edge stays
+    /// put; growth never exceeds the visible frame, and a window pushed below it
+    /// moves up instead.
+    static func frameAdjustedForChromeChange(_ frame: NSRect,
+                                             heightDelta: CGFloat,
+                                             minHeight: CGFloat,
+                                             visibleFrame: NSRect?) -> NSRect {
+        var height = max(frame.height + heightDelta, minHeight)
+        var originY = frame.maxY - height
+        if let visibleFrame {
+            height = min(height, max(visibleFrame.height, frame.height))
+            originY = frame.maxY - height
+            if originY < visibleFrame.minY {
+                originY = min(visibleFrame.minY, visibleFrame.maxY - height)
+            }
+        }
+        return NSRect(x: frame.minX, y: originY, width: frame.width, height: height)
+    }
+
+    static let noteBarMaxHeightRatio: CGFloat = 0.25
+    static let noteBarMinimumMaxHeight: CGFloat = 80.0
+
+    /// Tallest the editor note bar may grow before it scrolls: a quarter of
+    /// the editor's maximum height, never less than a few lines.
+    static func noteBarMaxHeight(maxContentHeight: CGFloat) -> CGFloat {
+        max(noteBarMinimumMaxHeight, floor(maxContentHeight * noteBarMaxHeightRatio))
+    }
+
+    /// Largest zoom, capped at `preferredZoom`, that shows `contentSize`
+    /// entirely inside `viewportSize`.
+    static func fittedZoom(contentSize: NSSize, viewportSize: NSSize, preferredZoom: CGFloat) -> CGFloat {
+        guard contentSize.width > 0, contentSize.height > 0,
+              viewportSize.width > 0, viewportSize.height > 0 else { return preferredZoom }
+        let fit = min(viewportSize.width / contentSize.width, viewportSize.height / contentSize.height)
+        guard fit.isFinite, fit > 0 else { return preferredZoom }
+        return min(preferredZoom, fit)
+    }
+
     static func makeLayout(_ input: EditorWindowLayoutInput) -> EditorWindowLayoutResult {
         let totalPadding = calculatePadding(imagePointSize: input.imagePointSize,
                                             maxContentSize: input.maxContentSize,

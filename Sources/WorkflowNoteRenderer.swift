@@ -6,7 +6,7 @@ struct WorkflowPreparedNote: Equatable {
 }
 
 enum WorkflowNoteRenderer {
-    static let maxNoteLength = 750
+    static let maxNoteLength = 1_500
 
     static func prepareNoteText(_ rawText: String, settings: Settings) -> WorkflowPreparedNote? {
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
