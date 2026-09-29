@@ -927,6 +927,7 @@ final class ScreenshotWorkflowController {
         alert.buttons.first?.keyEquivalentModifierMask = []
         alert.buttons.last?.keyEquivalent = "r"
         alert.buttons.last?.keyEquivalentModifierMask = []
+        AlertPresenter.keepLetterShortcutsWorking(in: alert)
         return alert
     }
 
@@ -946,6 +947,7 @@ final class ScreenshotWorkflowController {
         alert.buttons.first?.keyEquivalentModifierMask = []
         alert.buttons.last?.keyEquivalent = "r"
         alert.buttons.last?.keyEquivalentModifierMask = []
+        AlertPresenter.keepLetterShortcutsWorking(in: alert)
         return alert
     }
 

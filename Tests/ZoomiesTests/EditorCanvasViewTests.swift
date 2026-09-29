@@ -348,6 +348,30 @@ final class EditorCanvasViewTests: XCTestCase {
         XCTAssertNil(canvas.selectedRegionPayload())
     }
 
+    func testEscapeDeselectsSelectedItemBeforeCancelling() throws {
+        let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
+        let arrow = EditorCanvasState.Item.arrow(start: .init(NSPoint(x: 30, y: 30)), end: .init(NSPoint(x: 70, y: 30)),
+                                                 color: .init(.systemRed), lineWidth: 4)
+        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80),
+                                      initialState: EditorCanvasState(baseImagePNG: basePNG, items: [arrow]))
+        var finalActions: [ScreenshotFinalAction] = []
+        canvas.onKeyCommand = { command in
+            if case .finalAction(let action) = command { finalActions.append(action) }
+        }
+        canvas.setTool(.selection)
+        canvas.mouseDown(with: try mouseEvent(type: .leftMouseDown, canvas: canvas,
+                                              location: NSPoint(x: 50, y: 30)))
+
+        canvas.keyDown(with: try keyEvent(keyCode: 53))
+        XCTAssertTrue(finalActions.isEmpty, "Escape with a selected item must only deselect it")
+
+        canvas.keyDown(with: try keyEvent(keyCode: 51))
+        XCTAssertEqual(canvas.editableState()?.items, [arrow], "Delete after Escape must not remove the deselected item")
+
+        canvas.keyDown(with: try keyEvent(keyCode: 53))
+        XCTAssertEqual(finalActions.count, 1, "Escape with nothing selected follows the normal exit behavior")
+    }
+
     func testUndoRedoRoundTripRestoresDeletedArrow() throws {
         let basePNG = try TestSupport.solidImagePNGData(width: 100, height: 80)
         let state = EditorCanvasState(baseImagePNG: basePNG, items: [

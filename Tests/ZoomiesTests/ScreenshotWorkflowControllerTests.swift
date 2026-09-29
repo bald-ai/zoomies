@@ -830,6 +830,14 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
         XCTAssertEqual(alert.buttons[0].keyEquivalent, "\u{1b}", "Esc must confirm the delete.")
         XCTAssertEqual(alert.buttons[1].title, "Go Back (R)")
         XCTAssertEqual(alert.buttons[1].keyEquivalent, "r", "R must keep the file.")
+        XCTAssertTrue(selectableTextFields(in: alert.window.contentView).isEmpty,
+                       "Clicking the alert text must not steal the R shortcut.")
+    }
+
+    private func selectableTextFields(in view: NSView?) -> [NSTextField] {
+        guard let view else { return [] }
+        let own = (view as? NSTextField).map { $0.isSelectable ? [$0] : [] } ?? []
+        return own + view.subviews.flatMap { selectableTextFields(in: $0) }
     }
 
     func testDisabledConfirmationProceedsWithoutShowingAlert() {
@@ -845,6 +853,8 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
         XCTAssertTrue(alert.informativeText.contains("original image will not be deleted"))
         XCTAssertEqual(alert.buttons[1].title, "Go Back (R)")
         XCTAssertEqual(alert.buttons[1].keyEquivalent, "r", "R must return to editing.")
+        XCTAssertTrue(selectableTextFields(in: alert.window.contentView).isEmpty,
+                       "Clicking the alert text must not steal the R shortcut.")
     }
 
     func testCopyAndSaveFailureWarnsButKeepsSave() throws {

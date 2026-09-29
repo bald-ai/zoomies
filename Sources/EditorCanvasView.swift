@@ -66,6 +66,9 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     var suspendsKeyEquivalents = false
     /// Test/debug hook fired with each partial (gesture-only) invalidation rect.
     var onPartialInvalidation: ((NSRect) -> Void)?
+    /// Fires whenever the canvas asks to repaint, so the chrome ink layer
+    /// can mirror annotations drawn outside the viewport.
+    var onDisplayInvalidated: (() -> Void)?
     private let escapeFinalAction: ScreenshotFinalAction
 
     // MARK: - Internal model
@@ -464,6 +467,37 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         drawGesturePreview()
     }
 
+    override var needsDisplay: Bool {
+        get { super.needsDisplay }
+        set {
+            super.needsDisplay = newValue
+            if newValue { onDisplayInvalidated?() }
+        }
+    }
+
+    override func setNeedsDisplay(_ invalidRect: NSRect) {
+        super.setNeedsDisplay(invalidRect)
+        onDisplayInvalidated?()
+    }
+
+    /// Annotations, selection outlines, and the in-progress gesture in canvas
+    /// coordinates, without the base image. The chrome ink layer draws these
+    /// where they extend past the scroll view.
+    func drawAnnotationsForChromeInk() {
+        for item in items {
+            EditorImageRenderer.draw(item: item)
+        }
+        drawSelectionOverlays(in: .infinite)
+        drawGesturePreview()
+    }
+
+    /// The screenshot plus any open text box. Panning and fitting follow this,
+    /// so strokes in the margin or chrome never shift or shrink the image.
+    var panningContentBounds: NSRect {
+        guard let editor = textEditor else { return baseImageBounds }
+        return baseImageBounds.union(editor.frame)
+    }
+
     private func drawSelectionOverlays(in dirtyRect: NSRect) {
         if let selectionRect, selectionOutlinePaintedRect(selectionRect).intersects(dirtyRect) {
             drawSelectionOutline(selectionRect)
@@ -779,7 +813,7 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
 
     // MARK: - Geometry helpers
 
-    private var baseImageBounds: NSRect {
+    var baseImageBounds: NSRect {
         NSRect(x: baseImageOrigin.x, y: baseImageOrigin.y, width: baseImage.size.width, height: baseImage.size.height)
     }
 
@@ -842,6 +876,18 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     private func clearSelectionIfNeeded() -> Bool {
         guard selectionRect != nil else { return false }
         clearSelectionState()
+        needsDisplay = true
+        return true
+    }
+
+    /// Deselects a selected annotation, pasted image, text or marker.
+    private func clearObjectSelectionIfNeeded() -> Bool {
+        guard selectedItemIndex != nil || selectedImageIndex != nil
+            || selectedTextIndex != nil || selectedMarkerIndex != nil else { return false }
+        selectedItemIndex = nil
+        selectedImageIndex = nil
+        selectedTextIndex = nil
+        selectedMarkerIndex = nil
         needsDisplay = true
         return true
     }
@@ -1723,7 +1769,10 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             onKeyCommand?(.selectTool(.pen))
             return true
         }
-        return clearSelectionIfNeeded()
+        // Escape deselects first; only an empty selection falls through to cancel.
+        let clearedArea = clearSelectionIfNeeded()
+        let clearedObject = clearObjectSelectionIfNeeded()
+        return clearedArea || clearedObject
     }
 
     private func handleWorkflowShortcut(_ event: NSEvent, _ flags: NSEvent.ModifierFlags) -> Bool {

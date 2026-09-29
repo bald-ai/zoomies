@@ -34,6 +34,22 @@ enum AlertPresenter {
         return modalRunner(alert)
     }
 
+    /// Letter shortcuts on alert buttons, like "Go Back (R)", only reach the
+    /// alert while no text has keyboard focus. NSAlert's message text is
+    /// selectable, so a click on it would swallow the key; make it plain text.
+    static func keepLetterShortcutsWorking(in alert: NSAlert) {
+        alert.layout()
+        disableTextSelection(in: alert.window.contentView)
+    }
+
+    private static func disableTextSelection(in view: NSView?) {
+        guard let view else { return }
+        if let field = view as? NSTextField, !field.isEditable {
+            field.isSelectable = false
+        }
+        view.subviews.forEach(disableTextSelection)
+    }
+
     static func presentWarning(title: String, message: String) {
         let showAlert = {
             let alert = NSAlert()

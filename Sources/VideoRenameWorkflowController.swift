@@ -223,6 +223,7 @@ final class VideoRenameWorkflowController {
         alert.buttons.first?.keyEquivalentModifierMask = []
         alert.buttons.last?.keyEquivalent = "r"
         alert.buttons.last?.keyEquivalentModifierMask = []
+        AlertPresenter.keepLetterShortcutsWorking(in: alert)
         return alert
     }
 

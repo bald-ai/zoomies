@@ -97,7 +97,6 @@ final class EditorWindowLayoutLogicTests: XCTestCase {
                                     maxContentSize: NSSize(width: 1400, height: 900),
                                     minContentSize: NSSize(width: 580, height: 250),
                                     chromeSize: NSSize(width: 24, height: 120),
-                                    wasResized: false,
                                     autoZoomFillRatio: 0.90,
                                     maxAutoUserZoom: 2.0)
         )
@@ -111,7 +110,6 @@ final class EditorWindowLayoutLogicTests: XCTestCase {
                                     maxContentSize: NSSize(width: 1200, height: 700),
                                     minContentSize: NSSize(width: 580, height: 250),
                                     chromeSize: NSSize(width: 24, height: 120),
-                                    wasResized: false,
                                     autoZoomFillRatio: 0.90,
                                     maxAutoUserZoom: 2.0)
         )
@@ -119,18 +117,21 @@ final class EditorWindowLayoutLogicTests: XCTestCase {
         XCTAssertLessThan(layout.fitScale, 1.0)
     }
 
-    func testMakeLayoutReturnsZeroPaddingWhenImageWasResized() {
+    func testFullScreenImageKeepsBlankMarginForDrawing() {
         let layout = EditorWindowLayoutLogic.makeLayout(
-            EditorWindowLayoutInput(imagePointSize: NSSize(width: 800, height: 500),
-                                    maxContentSize: NSSize(width: 1400, height: 900),
+            EditorWindowLayoutInput(imagePointSize: NSSize(width: 1512, height: 982),
+                                    maxContentSize: NSSize(width: 1360, height: 795),
                                     minContentSize: NSSize(width: 580, height: 250),
                                     chromeSize: NSSize(width: 24, height: 120),
-                                    wasResized: true,
                                     autoZoomFillRatio: 0.90,
                                     maxAutoUserZoom: 2.0)
         )
 
-        XCTAssertEqual(layout.totalPadding, 0.0, accuracy: 0.0001)
+        XCTAssertEqual(layout.totalPadding, EditorWindowLayoutLogic.imagePadding, accuracy: 0.0001)
+        let imageHeight = 982 * layout.fitScale
+        XCTAssertLessThanOrEqual(imageHeight + layout.totalPadding + 120, layout.contentSize.height + 0.5)
+        let imageWidth = 1512 * layout.fitScale
+        XCTAssertLessThanOrEqual(imageWidth + layout.totalPadding + 24, layout.contentSize.width + 0.5)
     }
 
     func testMakeLayoutAutoZoomsSmallImagesWithoutExceedingMax() {
@@ -139,7 +140,6 @@ final class EditorWindowLayoutLogicTests: XCTestCase {
                                     maxContentSize: NSSize(width: 1400, height: 900),
                                     minContentSize: NSSize(width: 580, height: 250),
                                     chromeSize: NSSize(width: 24, height: 120),
-                                    wasResized: false,
                                     autoZoomFillRatio: 0.90,
                                     maxAutoUserZoom: 2.0)
         )

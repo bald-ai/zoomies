@@ -130,6 +130,60 @@ final class EditorWindowControllerTests: XCTestCase {
         try assertCanvasIsNotScrollable(scroll)
     }
 
+    func testDragFromEmptyChromeDrawsAndShowsOnInkLayer() throws {
+        _ = NSApplication.shared
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let controller = EditorWindowController(image: TestSupport.solidImage(width: 900, height: 500),
+            settingsStore: SettingsStore(fileURL: root.appendingPathComponent("settings.json")))
+        defer { controller.dismissWithoutCompletion() }
+        let window = try XCTUnwrap(controller.window)
+        let content = try XCTUnwrap(window.contentView)
+        content.layoutSubtreeIfNeeded()
+        let ink = try XCTUnwrap(findView(EditorChromeInkView.self, in: content))
+        let start = NSPoint(x: 80, y: content.bounds.height - 60)
+        let end = NSPoint(x: 300, y: content.bounds.height / 2)
+
+        XCTAssertTrue(controller.handleChromeMouseEvent(try mouseEvent(.leftMouseDown, at: start, in: window), isKeyWindow: true))
+        ink.needsDisplay = false
+        XCTAssertTrue(controller.handleChromeMouseEvent(try mouseEvent(.leftMouseDragged, at: end, in: window), isKeyWindow: true))
+        XCTAssertTrue(ink.needsDisplay)
+        XCTAssertTrue(controller.handleChromeMouseEvent(try mouseEvent(.leftMouseUp, at: end, in: window), isKeyWindow: true))
+        XCTAssertEqual(controller.currentEditableState()?.items.count, 1)
+    }
+
+    func testChromePressLeavesClickToolsControlsAndInactiveWindowsAlone() throws {
+        _ = NSApplication.shared
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let controller = EditorWindowController(image: TestSupport.solidImage(width: 900, height: 500),
+            settingsStore: SettingsStore(fileURL: root.appendingPathComponent("settings.json")))
+        defer { controller.dismissWithoutCompletion() }
+        let window = try XCTUnwrap(controller.window)
+        let content = try XCTUnwrap(window.contentView)
+        content.layoutSubtreeIfNeeded()
+        let canvas = try XCTUnwrap(findCanvas(in: content))
+        let chrome = try mouseEvent(.leftMouseDown, at: NSPoint(x: 80, y: content.bounds.height - 60), in: window)
+
+        XCTAssertFalse(controller.handleChromeMouseEvent(chrome, isKeyWindow: false))
+        canvas.onKeyCommand?(.selectTool(.text))
+        XCTAssertFalse(controller.handleChromeMouseEvent(chrome, isKeyWindow: true))
+        canvas.onKeyCommand?(.selectTool(.marker))
+        XCTAssertFalse(controller.handleChromeMouseEvent(chrome, isKeyWindow: true))
+        canvas.onKeyCommand?(.selectTool(.pen))
+        // Presses on the canvas itself and on toolbar buttons keep their normal routing.
+        let scroll = try XCTUnwrap(canvas.enclosingScrollView)
+        let onCanvas = scroll.convert(NSPoint(x: scroll.bounds.midX, y: scroll.bounds.midY), to: nil)
+        XCTAssertFalse(controller.handleChromeMouseEvent(try mouseEvent(.leftMouseDown, at: onCanvas, in: window), isKeyWindow: true))
+        let button = try XCTUnwrap(findView(NSButton.self, in: content))
+        let onButton = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
+        XCTAssertFalse(controller.handleChromeMouseEvent(try mouseEvent(.leftMouseDown, at: onButton, in: window), isKeyWindow: true))
+        // The strip straight above the toolbar is not drawable.
+        let aboveToolbar = NSPoint(x: onButton.x, y: content.bounds.height - 4)
+        XCTAssertFalse(controller.handleChromeMouseEvent(try mouseEvent(.leftMouseDown, at: aboveToolbar, in: window), isKeyWindow: true))
+        XCTAssertEqual(controller.currentEditableState()?.items.count ?? 0, 0)
+    }
+
     func testEditorFinalActionsDeliverImageAndEditableStateOnlyForSavingActions() throws {
         for action: ScreenshotFinalAction in [.saveOnly, .copyAndSave, .copyAndDelete, .deleteOnly, .closeOnly] {
             let root = try TestSupport.makeTemporaryDirectory()
@@ -670,6 +724,12 @@ final class EditorWindowControllerTests: XCTestCase {
             if let match = findView(type, in: subview) { return match }
         }
         return nil
+    }
+
+    private func mouseEvent(_ type: NSEvent.EventType, at location: NSPoint, in window: NSWindow) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+                                         windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                         clickCount: 1, pressure: 1))
     }
 
     private func findCanvas(in view: NSView?) -> EditorCanvasView? {

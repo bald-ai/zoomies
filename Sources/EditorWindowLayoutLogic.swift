@@ -5,7 +5,6 @@ struct EditorWindowLayoutInput {
     let maxContentSize: NSSize
     let minContentSize: NSSize
     let chromeSize: NSSize
-    let wasResized: Bool
     let autoZoomFillRatio: CGFloat
     let maxAutoUserZoom: CGFloat
 }
@@ -20,7 +19,9 @@ struct EditorWindowLayoutResult {
 enum EditorWindowLayoutLogic {
     static let fallbackMaxContentSize = NSSize(width: 1400.0, height: 900.0)
     static let visibleFrameUsageRatio: CGFloat = 0.90
-    static let maxPadding: CGFloat = 40.0
+    /// Blank canvas kept around the image (total, both sides), even for
+    /// full-screen captures, so arrows can be drawn in from outside it.
+    static let imagePadding: CGFloat = 64.0
 
     static func maximumContentSize(visibleFrame: NSRect?,
                                    minContentSize: NSSize,
@@ -76,10 +77,7 @@ enum EditorWindowLayoutLogic {
     }
 
     static func makeLayout(_ input: EditorWindowLayoutInput) -> EditorWindowLayoutResult {
-        let totalPadding = calculatePadding(imagePointSize: input.imagePointSize,
-                                            maxContentSize: input.maxContentSize,
-                                            chromeSize: input.chromeSize,
-                                            wasResized: input.wasResized)
+        let totalPadding = imagePadding
 
         let availableWidth = max(input.maxContentSize.width - input.chromeSize.width - totalPadding, 1.0)
         let availableHeight = max(input.maxContentSize.height - input.chromeSize.height - totalPadding, 1.0)
@@ -122,21 +120,5 @@ enum EditorWindowLayoutLogic {
         let candidate = min(canvasWidth * input.autoZoomFillRatio / imageWidth,
                             canvasHeight * input.autoZoomFillRatio / imageHeight)
         return candidate.isFinite ? max(1, min(input.maxAutoUserZoom, candidate)) : 1
-    }
-
-    private static func calculatePadding(imagePointSize: NSSize,
-                                         maxContentSize: NSSize,
-                                         chromeSize: NSSize,
-                                         wasResized: Bool) -> CGFloat {
-        if wasResized {
-            return 0.0
-        }
-
-        let widthLimit = max(maxContentSize.width - maxPadding, 1.0)
-        let heightLimit = max(maxContentSize.height - chromeSize.height - maxPadding, 1.0)
-        let fillRatioWidth = imagePointSize.width / widthLimit
-        let fillRatioHeight = imagePointSize.height / heightLimit
-        let fillRatio = min(max(fillRatioWidth, fillRatioHeight), 1.0)
-        return maxPadding * (1.0 - fillRatio)
     }
 }

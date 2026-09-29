@@ -7,6 +7,19 @@ import Carbon
 final class EditorWindow: NSWindow {
     /// Consulted first; the marker note popover uses it to keep its shortcuts.
     var keyEquivalentInterceptor: ((NSEvent) -> Bool)?
+    /// Sees left-mouse events before AppKit routes them, so drags that start
+    /// in the empty chrome can reach the canvas. Returns true when consumed.
+    var mouseInterceptor: ((NSEvent) -> Bool)?
+
+    override func sendEvent(_ event: NSEvent) {
+        switch event.type {
+        case .leftMouseDown, .leftMouseDragged, .leftMouseUp:
+            if mouseInterceptor?(event) == true { return }
+        default:
+            break
+        }
+        super.sendEvent(event)
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if keyEquivalentInterceptor?(event) == true { return true }
@@ -57,6 +70,8 @@ final class EditorWindowController: NSWindowController {
 
     private let canvasView: EditorCanvasView
     private let scrollView = EditorScrollView()
+    private let chromeInkView = EditorChromeInkView()
+    private var scrollBoundsObserver: NSObjectProtocol?
     private let clipboardService: ClipboardService
     private let settingsStore: SettingsStore
     private var notePreviewRaw: String?
@@ -117,6 +132,8 @@ final class EditorWindowController: NSWindowController {
     // Height the window gained for the note bar, so removing the note gives
     // back only what the note added.
     private var windowHeightAddedForNote: CGFloat = 0
+    // A press in the empty chrome is being forwarded to the canvas until mouse up.
+    private var forwardsChromeDragToCanvas = false
     // Total padding amount around the image (not per-side).
     private var totalPadding: CGFloat = 0.0
 
@@ -206,6 +223,9 @@ final class EditorWindowController: NSWindowController {
         super.init(window: window)
 
         window.delegate = self
+        window.mouseInterceptor = { [weak self, weak window] event in
+            self?.handleChromeMouseEvent(event, isKeyWindow: window?.isKeyWindow == true) ?? false
+        }
         configureContent()
         paletteObserver = NotificationCenter.default.addObserver(forName: SettingsStore.didChangeNotification, object: settingsStore, queue: .main) { [weak self] _ in self?.reloadPaletteIfNeeded() }
         shortcutOverlay = EditorShortcutOverlayController(window: window) { [weak self] in self?.shortcutHints ?? [] }
@@ -226,6 +246,7 @@ final class EditorWindowController: NSWindowController {
 
     deinit {
         if let paletteObserver { NotificationCenter.default.removeObserver(paletteObserver) }
+        if let scrollBoundsObserver { NotificationCenter.default.removeObserver(scrollBoundsObserver) }
         removeKeyDownMonitor()
     }
 
@@ -301,6 +322,22 @@ final class EditorWindowController: NSWindowController {
         rootStack.spacing = 10
         rootStack.alignment = .centerX
         rootStack.translatesAutoresizingMaskIntoConstraints = false
+        // Behind the toolbar and canvas: shows strokes that leave the viewport.
+        chromeInkView.frame = surfaceView.bounds
+        chromeInkView.autoresizingMask = [.width, .height]
+        chromeInkView.canvas = canvasView
+        chromeInkView.excludedWindowRects = { [weak self] in
+            guard let self else { return [] }
+            // The viewport draws itself, and annotations on parts of the image
+            // panned out of view stay hidden with the image.
+            var rects = [self.scrollView.convert(self.scrollView.bounds, to: nil),
+                         self.canvasView.convert(self.canvasView.baseImageBounds, to: nil)]
+            if let noteBar = self.notePreviewContainer {
+                rects.append(noteBar.convert(noteBar.bounds, to: nil))
+            }
+            return rects
+        }
+        surfaceView.addSubview(chromeInkView)
         surfaceView.addSubview(rootStack)
         rootStackView = rootStack
 
@@ -359,6 +396,16 @@ final class EditorWindowController: NSWindowController {
             rootStack.addArrangedSubview(noteView)
             noteView.translatesAutoresizingMaskIntoConstraints = false
             noteView.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
+        }
+
+        canvasView.onDisplayInvalidated = { [weak self] in
+            self?.chromeInkView.needsDisplay = true
+        }
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        scrollBoundsObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: scrollView.contentView, queue: .main
+        ) { [weak self] _ in
+            self?.chromeInkView.needsDisplay = true
         }
 
         canvasView.onKeyCommand = { [weak self] command in
@@ -434,12 +481,88 @@ final class EditorWindowController: NSWindowController {
         window?.contentView?.layoutSubtreeIfNeeded()
         let viewport = scrollView.contentSize
         let zoom = EditorWindowLayoutLogic.fittedZoom(
-            contentSize: canvasView.visibleContentBounds.size,
+            contentSize: canvasView.panningContentBounds.size,
             viewportSize: NSSize(width: viewport.width - totalPadding, height: viewport.height - totalPadding),
             preferredZoom: openingEffectiveZoom
         )
         baseScale = zoom / userZoomFactor
         applyZoom()
+    }
+
+    // MARK: - Chrome gestures
+
+    private enum ChromeRegion {
+        case ink
+        case windowDrag
+        case other
+    }
+
+    /// Drags that start in the empty chrome around the canvas (title bar,
+    /// toolbar sides, window edges) go to the canvas, and the ink layer shows
+    /// the part outside the viewport. Empty toolbar space moves the window,
+    /// since the title bar is drawable.
+    func handleChromeMouseEvent(_ event: NSEvent, isKeyWindow: Bool) -> Bool {
+        switch event.type {
+        case .leftMouseDown:
+            guard isKeyWindow, markerNotePopover == nil else { return false }
+            switch chromeRegion(at: event.locationInWindow) {
+            case .windowDrag:
+                window?.performDrag(with: event)
+                return true
+            case .ink:
+                // Text and markers act on a click, which would land off-canvas.
+                switch canvasView.currentTool {
+                case .text, .marker: return false
+                default: break
+                }
+                forwardsChromeDragToCanvas = true
+                canvasView.mouseDown(with: event)
+                return true
+            case .other:
+                return false
+            }
+        case .leftMouseDragged:
+            guard forwardsChromeDragToCanvas else { return false }
+            canvasView.mouseDragged(with: event)
+            return true
+        case .leftMouseUp:
+            guard forwardsChromeDragToCanvas else { return false }
+            forwardsChromeDragToCanvas = false
+            canvasView.mouseUp(with: event)
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func chromeRegion(at windowPoint: NSPoint) -> ChromeRegion {
+        // The frame view is the window's root view, so window coordinates
+        // are what its hitTest expects.
+        guard let frameView = window?.contentView?.superview,
+              let hit = frameView.hitTest(windowPoint) else { return .other }
+        if Self.isInsideControl(hit) { return .other }
+        if hit.isDescendant(of: scrollView) { return .other }
+        if let noteBar = notePreviewContainer, hit.isDescendant(of: noteBar) { return .other }
+        if let toolbar = toolbarBackgroundView {
+            if hit.isDescendant(of: toolbar) { return .windowDrag }
+            // The strip straight above the toolbar stays a plain title bar
+            // (window drag), so stray presses there never start a stroke.
+            let toolbarFrame = toolbar.convert(toolbar.bounds, to: nil)
+            if windowPoint.y >= toolbarFrame.maxY,
+               windowPoint.x >= toolbarFrame.minX, windowPoint.x <= toolbarFrame.maxX {
+                return .other
+            }
+        }
+        return .ink
+    }
+
+    private static func isInsideControl(_ view: NSView) -> Bool {
+        var current: NSView? = view
+        while let candidate = current {
+            if candidate is NSControl { return true }
+            current = candidate.superview
+        }
+        return false
     }
 
     private func presentMarkerNotePopover(number: Int, rect: NSRect) {
@@ -841,8 +964,6 @@ final class EditorWindowController: NSWindowController {
             minContentSize: minContentSize
         )
 
-        let settings = settingsStore.settings
-        let wasResized = settings.maxWidth > 0 && Int(pointW.rounded()) == settings.maxWidth
         func makeLayout(noteHeight noteH: CGFloat, minWidth: CGFloat) -> EditorWindowLayoutResult {
             // Root stack spacing is 10. If we have a note preview bar, add its height + spacing.
             let chromeH: CGFloat = 24.0 + toolbarH + 10.0 + (noteH > 0 ? (10.0 + noteH) : 0.0)
@@ -851,7 +972,6 @@ final class EditorWindowController: NSWindowController {
                                         maxContentSize: maxContentSize,
                                         minContentSize: NSSize(width: minWidth, height: minContentSize.height),
                                         chromeSize: NSSize(width: chromeW, height: chromeH),
-                                        wasResized: wasResized,
                                         autoZoomFillRatio: autoZoomFillRatio,
                                         maxAutoUserZoom: maxAutoUserZoom)
             )
@@ -915,7 +1035,7 @@ final class EditorWindowController: NSWindowController {
     /// open text box. The blank canvas margin around them never scrolls.
     private func scrollableAxes() -> (x: Bool, y: Bool) {
         let clipSize = scrollView.contentView.bounds.size
-        let content = canvasView.visibleContentBounds
+        let content = canvasView.panningContentBounds
         // Small epsilon so rounding at some magnifications doesn't count as scrollable.
         let epsilon: CGFloat = 1.0
         return (content.width > clipSize.width + epsilon, content.height > clipSize.height + epsilon)
@@ -931,7 +1051,7 @@ final class EditorWindowController: NSWindowController {
         canvasView.ensureDrawableAreaCoversVisibleSize(scrollView.contentView.bounds.size)
         let clipSize = scrollView.contentView.bounds.size
         let docSize = documentView.frame.size
-        let content = canvasView.visibleContentBounds
+        let content = canvasView.panningContentBounds
         let (scrollableX, scrollableY) = scrollableAxes()
 
         scrollView.horizontalScrollElasticity = scrollableX ? .automatic : .none

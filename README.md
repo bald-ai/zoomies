@@ -98,6 +98,10 @@ the relevant shortcut code and build a new `.app` for you.
 
 Hold **⌘ alone for 0.5 seconds** to reveal shortcut badges beside the editor’s toolbar controls. A hint above the toolbar invites you to hover over a badge or control to read its action and shortcut in plain text. Release ⌘ to hide them. Another key or modifier dismisses the badges and lets the shortcut work normally.
 
+### Drawing from the window edges
+
+Pen, line, arrow, rectangle, ellipse, and Select drags can start anywhere in the empty window space around the screenshot, including the title bar beside the toolbar, and the stroke shows there too. The strip directly above the toolbar is left alone. Drawings outside the screenshot extend the saved image, just like drawing in the margin. To move the editor window, drag the empty space inside the toolbar.
+
 ## Editor Numbered Markers
 
 Press `F` in the editor to use the numbered marker tool.
