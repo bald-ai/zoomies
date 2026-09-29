@@ -7,6 +7,9 @@ struct WorkflowPreparedNote: Equatable {
 
 enum WorkflowNoteRenderer {
     static let maxNoteLength = 1_500
+    // Dark note to match the app's dark-only UI.
+    static let noteBackgroundColor = NSColor(calibratedWhite: 0.12, alpha: 1.0)
+    static let noteTextColor = NSColor(calibratedWhite: 0.93, alpha: 1.0)
 
     static func prepareNoteText(_ rawText: String, settings: Settings) -> WorkflowPreparedNote? {
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -35,7 +38,7 @@ enum WorkflowNoteRenderer {
         let minWidth: CGFloat = 400
         let effectiveWidth = max(baseWidth, minWidth)
 
-        let fontSize = max(12, baseWidth * 0.04)
+        let fontSize = max(12, baseWidth * 0.02)
         let padding = max(8, baseWidth * 0.02)
         let lineHeight = fontSize * 1.4
 
@@ -46,7 +49,7 @@ enum WorkflowNoteRenderer {
 
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.black,
+            .foregroundColor: noteTextColor,
             .paragraphStyle: paragraph
         ]
 
@@ -71,7 +74,7 @@ enum WorkflowNoteRenderer {
             context.imageInterpolation = .high
 
             if effectiveWidth > baseWidth {
-                NSColor(calibratedWhite: 0.95, alpha: 1.0).setFill()
+                noteBackgroundColor.setFill()
                 NSRect(origin: .zero, size: outputSize).fill()
             }
 
@@ -83,7 +86,7 @@ enum WorkflowNoteRenderer {
                            fraction: 1.0)
 
             let noteRect = NSRect(x: 0, y: 0, width: effectiveWidth, height: noteHeight)
-            NSColor.white.setFill()
+            noteBackgroundColor.setFill()
             noteRect.fill()
 
             for (index, line) in lines.enumerated() {
