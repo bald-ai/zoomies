@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import XCTest
 @testable import Zoomies
 
@@ -78,6 +79,45 @@ final class InkNoteModelTests: XCTestCase {
         XCTAssertEqual(PNGMetadata.extractInkNote(fromPNG: again), document)
         XCTAssertEqual(again.count, first.count, "Saving again replaces the note chunk instead of stacking another")
         XCTAssertNil(PNGMetadata.extractInkNote(fromPNG: png))
+    }
+}
+
+final class InkNoteKeymapTests: XCTestCase {
+    private func command(_ key: Int, _ chars: String = "", _ flags: NSEvent.ModifierFlags = [],
+                         drawing: Bool = false) -> InkNoteKeymap.Command? {
+        InkNoteKeymap.command(keyCode: UInt16(key), characters: chars, flags: flags, isDrawing: drawing)
+    }
+
+    func testDrawingLettersMatchTheScreenshotEditorAndStayTextWhileTyping() {
+        let keys: [(Int, InkNoteKeymap.Command)] = [(kVK_ANSI_W, .tool(.pen)), (kVK_ANSI_H, .tool(.highlighter)),
+            (kVK_ANSI_X, .tool(.eraser)), (kVK_ANSI_Q, .nextColor), (kVK_ANSI_F, .marker), (kVK_ANSI_T, .type)]
+        for (key, expected) in keys {
+            XCTAssertEqual(command(key, "other layout", .capsLock, drawing: true), expected)
+            XCTAssertNil(command(key, "w"), "While typing, letters are text")
+            for flag: NSEvent.ModifierFlags in [.shift, .control, .option] {
+                XCTAssertNil(command(key, "", flag, drawing: true))
+            }
+        }
+        for key in [kVK_ANSI_P, kVK_ANSI_E, kVK_ANSI_1, kVK_ANSI_5] {
+            XCTAssertNil(command(key, "", drawing: true), "The old P / E / 1–5 keys are gone")
+        }
+    }
+
+    func testCommandShortcutsAndSessionKeysMatchTheRestOfTheApp() {
+        let cases: [(Int, String, NSEvent.ModifierFlags, InkNoteKeymap.Command)] = [
+            (kVK_ANSI_S, "s", .command, .save), (kVK_Return, "\r", .command, .copyAndSave),
+            (kVK_ANSI_KeypadEnter, "\u{3}", .command, .copyAndSave), (kVK_ANSI_W, "w", .command, .close),
+            (kVK_Escape, "\u{1b}", [], .escape), (kVK_ANSI_Z, "z", .command, .undo),
+            (kVK_ANSI_Z, "Z", [.command, .shift], .redo), (kVK_ANSI_D, "d", .command, .toggleDraw),
+            (kVK_ANSI_F, "f", .command, .marker), (kVK_ANSI_A, "a", .command, .selectAll),
+            (kVK_ANSI_C, "c", .command, .copy), (kVK_ANSI_X, "x", .command, .cut), (kVK_ANSI_V, "v", .command, .paste)
+        ]
+        for (key, chars, flags, expected) in cases {
+            XCTAssertEqual(command(key, chars, flags), expected, "\(key) \(flags)")
+            XCTAssertEqual(command(key, chars, flags, drawing: true), expected, "\(key) \(flags) while drawing")
+        }
+        XCTAssertNil(command(kVK_Return, "\r"), "Return stays a newline")
+        XCTAssertNil(command(kVK_ANSI_C, "c", [.command, .shift]), "Command+Shift+C no longer copies the image")
     }
 }
 
@@ -221,5 +261,79 @@ final class InkNoteEditorTests: XCTestCase {
         XCTAssertEqual(editor.currentDocument().markers.map(\.number), [1, 1])
         editor.undo()
         XCTAssertEqual(editor.textView.string, "Fix this")
+    }
+
+    func testKeysSwitchModeToolsAndColorsAndOtherTypingLeavesDrawing() throws {
+        let (editor, root) = try editor("Note")
+        defer { editor.window?.close(); TestSupport.removeIfExists(root) }
+        editor.perform(.toggleDraw)
+        XCTAssertEqual(editor.mode, .draw)
+        editor.perform(.tool(.eraser))
+        XCTAssertEqual(editor.tool, .eraser)
+        let first = editor.colorHex
+        editor.perform(.nextColor)
+        XCTAssertNotEqual(editor.colorHex, first)
+        XCTAssertEqual(editor.tool, .pen, "Picking a color puts the eraser down")
+        for _ in 1..<InkNoteWindowController.palette.count { editor.perform(.nextColor) }
+        XCTAssertEqual(editor.colorHex, first, "Q wraps around the palette")
+        let letter = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, characters: "k", charactersIgnoringModifiers: "k", isARepeat: false,
+            keyCode: UInt16(kVK_ANSI_K)))
+        XCTAssertFalse(editor.handleKey(letter), "The letter still reaches the text")
+        XCTAssertEqual(editor.mode, .type)
+        editor.perform(.toggleDraw)
+        editor.perform(.escape)
+        XCTAssertEqual(editor.mode, .type, "Escape leaves drawing before it closes anything")
+    }
+
+    func testCopyAndSaveWritesCopiesAndCloses() throws {
+        let (editor, root) = try editor("Copy me")
+        defer { TestSupport.removeIfExists(root) }
+        var copied: URL?
+        var closed = false
+        editor.copyFile = { copied = $0 }
+        editor.onClose = { closed = true }
+        editor.textView.insertText(" now", replacementRange: NSRange(location: 7, length: 0))
+        editor.perform(.copyAndSave)
+        XCTAssertEqual(copied, editor.noteURL)
+        XCTAssertEqual(PNGMetadata.extractInkNote(fromPNG: try Data(contentsOf: editor.noteURL))?.text, "Copy me now")
+        XCTAssertTrue(closed)
+    }
+
+    func testEveryToolbarControlShowsItsShortcut() throws {
+        let (editor, root) = try editor("Hi")
+        defer { editor.window?.close(); TestSupport.removeIfExists(root) }
+        let host = try XCTUnwrap(editor.window?.contentView)
+        func buttons(in view: NSView) -> [NSButton] {
+            ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
+        }
+        let hinted = Set(editor.shortcutHints.map { ObjectIdentifier($0.view) })
+        let toolbarButtons = buttons(in: host)
+        XCTAssertEqual(toolbarButtons.filter { !($0 is InkSwatchButton) }.count, 11)
+        for button in toolbarButtons {
+            let tip = try XCTUnwrap(button.toolTip)
+            XCTAssertTrue(tip.contains("(") && tip.contains(")"), "Tooltip names a shortcut: \(tip)")
+            if !(button is InkSwatchButton) { XCTAssertTrue(hinted.contains(ObjectIdentifier(button)), tip) }
+        }
+    }
+
+    func testShortcutBadgesSitUnderTheToolbarInsideTheWindow() throws {
+        let (editor, root) = try editor("Hi")
+        defer { editor.window?.close(); TestSupport.removeIfExists(root) }
+        let host = try XCTUnwrap(editor.window?.contentView)
+        host.layoutSubtreeIfNeeded()
+        let view = try XCTUnwrap(editor.shortcutOverlay).makeView(in: host)
+        XCTAssertEqual(view.subviews.count, editor.shortcutHints.count + 1)
+        let help = try XCTUnwrap(view.subviews.last)
+        XCTAssertTrue(view.bounds.contains(help.frame))
+        let badges = view.subviews.dropLast()
+        for (i, badge) in badges.enumerated() {
+            XCTAssertTrue(view.bounds.contains(badge.frame))
+            XCTAssertFalse(badge.frame.intersects(help.frame))
+            for other in badges.dropFirst(i + 1) { XCTAssertFalse(badge.frame.intersects(other.frame)) }
+        }
+        for hint in editor.shortcutHints {
+            XCTAssertFalse(hint.view.convert(hint.view.bounds, to: host).intersects(help.frame), "Help never covers \(hint.label)")
+        }
     }
 }

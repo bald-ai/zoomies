@@ -54,7 +54,12 @@ struct EditorShortcutHoldState {
 
 /// A help view inside the editor; never takes key-window or first-responder status.
 final class EditorShortcutOverlayController {
+    /// The screenshot editor's title-bar strip holds the help line; the note
+    /// editor has a standard title bar, so its help line goes under the badges.
+    enum HelpPlacement { case aboveToolbar, belowBadges }
+
     private weak var window: NSWindow?
+    private let helpPlacement: HelpPlacement
     private let hints: () -> [EditorShortcutHint]
     private let isActive: () -> Bool
     private let clock: () -> TimeInterval
@@ -65,11 +70,13 @@ final class EditorShortcutOverlayController {
     private(set) var overlayView: NSView?
 
     init(window: NSWindow,
+         helpPlacement: HelpPlacement = .aboveToolbar,
          isActive: (() -> Bool)? = nil,
          clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          schedule: @escaping (TimeInterval, DispatchWorkItem) -> Void = { delay, work in DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work) },
          hints: @escaping () -> [EditorShortcutHint]) {
         self.window = window
+        self.helpPlacement = helpPlacement
         self.hints = hints
         self.isActive = isActive ?? { [weak window] in window?.isKeyWindow == true && window?.isVisible == true }
         self.clock = clock
@@ -165,8 +172,9 @@ final class EditorShortcutOverlayController {
             layer.addSubview(badge)
             hoverTargets.append((anchor.union(badge.frame), hint))
         }
-        layer.configure(hoverTargets: hoverTargets,
-                        toolbarTop: anchors.map(\.maxY).max() ?? baseline + 30)
+        let toolbarTop = anchors.map(\.maxY).max() ?? baseline + 30
+        let helpY = helpPlacement == .aboveToolbar ? min(toolbarTop + 12, host.bounds.height - 36) : max(8, baseline - 36)
+        layer.configure(hoverTargets: hoverTargets, helpY: helpY)
         return layer
     }
 }
@@ -183,13 +191,13 @@ private final class EditorShortcutHintLayer: NSView {
     private let help = NSTextField(wrappingLabelWithString: "")
     private let panel = NSView()
 
-    func configure(hoverTargets: [(NSRect, EditorShortcutHint)], toolbarTop: CGFloat) {
+    func configure(hoverTargets: [(NSRect, EditorShortcutHint)], helpY: CGFloat) {
         self.hoverTargets = hoverTargets
         panel.wantsLayer = true
         panel.layer?.backgroundColor = NSColor(calibratedWhite: 0.13, alpha: 0.97).cgColor
         panel.layer?.cornerRadius = 7
         panel.frame = NSRect(x: max(8, (bounds.width - 560) / 2),
-                             y: min(toolbarTop + 12, bounds.height - 36),
+                             y: helpY,
                              width: min(560, bounds.width - 16), height: 28)
         help.font = .systemFont(ofSize: 13, weight: .medium)
         help.textColor = .white

@@ -43,7 +43,7 @@ final class ScratchpadServiceTests: XCTestCase {
         let editor = f.service.open(date: date)
         defer { editor.window?.close() }
         editor.textView.insertText("Fix the label clipping.", replacementRange: NSRange(location: 0, length: 0))
-        editor.copyImage()
+        editor.copyAndSave()
         XCTAssertEqual(f.copied, [editor.noteURL])
         let files = try FileManager.default.contentsOfDirectory(atPath: f.root.appendingPathComponent("desktop").path)
         XCTAssertEqual(files, [editor.noteURL.lastPathComponent])
