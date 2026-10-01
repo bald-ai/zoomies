@@ -8,11 +8,13 @@ final class ScratchpadServiceTests: XCTestCase {
         let root: URL
         var presented: [InkNoteWindowController] = []
         var copied: [URL] = []
+        var acceptsClipboard = true
         var service: ScratchpadService!
         init() throws {
             _ = NSApplication.shared
             root = try TestSupport.makeTemporaryDirectory()
             let clipboard = ClipboardService(cacheDirectory: root.appendingPathComponent("cache"), pasteboardWriter: { [unowned self] objects in
+                guard acceptsClipboard else { return false }
                 copied.append(objects[0] as! URL); return true
             })
             service = ScratchpadService(clipboardService: clipboard, desktopDirectory: root.appendingPathComponent("desktop"),
@@ -58,5 +60,35 @@ final class ScratchpadServiceTests: XCTestCase {
         defer { first.window?.close(); second.window?.close() }
         XCTAssertNotEqual(first.noteURL, second.noteURL)
         XCTAssertEqual(second.noteURL.pathExtension, "png")
+    }
+
+    func testCopyFailureSavesKeepsTheNoteOpenAndAllowsRetry() throws {
+        let f = try Fixture()
+        let runner = AlertPresenter.modalRunner
+        let activator = AlertPresenter.appActivator
+        defer { AlertPresenter.modalRunner = runner; AlertPresenter.appActivator = activator }
+        var warnings: [String] = []
+        AlertPresenter.appActivator = {}
+        AlertPresenter.modalRunner = { warnings.append($0.messageText); return .alertFirstButtonReturn }
+        let editor = f.service.open(date: date)
+        defer { editor.window?.close() }
+        var closed = false
+        editor.onClose = { closed = true }
+        editor.textView.insertText("Keep this note", replacementRange: NSRange(location: 0, length: 0))
+        f.acceptsClipboard = false
+
+        editor.copyAndSave()
+
+        XCTAssertEqual(warnings, ["Cannot Copy Note"])
+        XCTAssertFalse(closed, "Clipboard failure must leave the note available for retry")
+        XCTAssertTrue(f.copied.isEmpty)
+        XCTAssertFalse(editor.hasUnsavedChanges, "The successful save is retained")
+        XCTAssertEqual(PNGMetadata.extractInkNote(fromPNG: try Data(contentsOf: editor.noteURL))?.text, "Keep this note")
+
+        f.acceptsClipboard = true
+        editor.copyAndSave()
+        XCTAssertEqual(f.copied, [editor.noteURL])
+        XCTAssertTrue(closed)
+        XCTAssertEqual(warnings.count, 1)
     }
 }

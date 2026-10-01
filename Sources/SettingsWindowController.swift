@@ -13,7 +13,7 @@ final class SettingsWindow: NSWindow {
         if (firstResponder as? ShortcutRecorderView)?.isRecordingShortcut == true {
             return super.performKeyEquivalent(with: event)
         }
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock)
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
         if flags == [.command], chars == "w" {
             performClose(nil)

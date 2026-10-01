@@ -39,7 +39,7 @@ final class ScratchpadService {
         )
         reservedPaths.insert(noteURL.path)
         let editor = InkNoteWindowController(opened: .init(noteURL: noteURL, sourceURL: noteURL, document: InkNoteDocument(text: "")))
-        editor.copyFile = { [clipboardService] url in _ = clipboardService.copyFile(at: url, useCache: false) }
+        editor.copyFile = { [clipboardService] url in clipboardService.copyFile(at: url, useCache: false) != nil }
         onOpen?(editor)
         present(editor)
         return editor

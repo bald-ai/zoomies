@@ -291,7 +291,7 @@ final class InkNoteEditorTests: XCTestCase {
         defer { TestSupport.removeIfExists(root) }
         var copied: URL?
         var closed = false
-        editor.copyFile = { copied = $0 }
+        editor.copyFile = { copied = $0; return true }
         editor.onClose = { closed = true }
         editor.textView.insertText(" now", replacementRange: NSRange(location: 7, length: 0))
         editor.perform(.copyAndSave)

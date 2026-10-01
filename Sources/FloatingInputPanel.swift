@@ -35,7 +35,7 @@ final class FloatingInputPanel: NSPanel {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock)
         let chars = event.charactersIgnoringModifiers?.lowercased()
 
         if flags == [.command], chars == "s", let keyCommandHandler {
@@ -57,7 +57,7 @@ enum StandardEditingKeys {
 
     static func perform(_ event: NSEvent, in window: NSWindow,
                         send: (Selector, Any?) -> Bool = { NSApp.sendAction($0, to: nil, from: $1) }) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock)
         let chars = event.charactersIgnoringModifiers?.lowercased()
         // NSText has no undo: action; its first-responder undo manager owns edits.
         if chars == "z", let textView = window.firstResponder as? NSTextView {

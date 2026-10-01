@@ -250,7 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 let editor = InkNoteWindowController(opened: opened)
-                editor.copyFile = { [weak self] url in _ = self?.clipboardService.copyFile(at: url, useCache: false) }
+                editor.copyFile = { [weak self] url in self?.clipboardService.copyFile(at: url, useCache: false) != nil }
                 track(editor)
                 editor.present()
             } catch {

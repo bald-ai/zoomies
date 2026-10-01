@@ -117,8 +117,8 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     let textView = InkNoteTextView(frame: .zero)
     let history = UndoManager()
     var onClose: (() -> Void)?
-    /// Puts the saved note file on the clipboard.
-    var copyFile: ((URL) -> Void)?
+    /// Returns whether the saved note file was published to the clipboard.
+    var copyFile: ((URL) -> Bool)?
 
     private(set) var items: [LiveItem] = []
     private(set) var mode: Mode = .type
@@ -797,7 +797,10 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// and closes, like Command+Return in the screenshot flow.
     func copyAndSave() {
         guard save() else { return }
-        copyFile?(noteURL)
+        guard copyFile?(noteURL) == true else {
+            AlertPresenter.presentWarning(title: "Cannot Copy Note", message: "The note was saved, but could not be copied to the clipboard. Try Copy + Save again.")
+            return
+        }
         close()
     }
 

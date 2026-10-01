@@ -117,8 +117,8 @@ final class SettingsWindowContractTests: XCTestCase {
         let window = try XCTUnwrap(f.controller.window as? SettingsWindow)
         let tabs = try XCTUnwrap(controls(NSTabView.self, in: window.contentView).first)
         let navigation = try XCTUnwrap(controls(NSSegmentedControl.self, in: window.contentView).first { $0.segmentCount == 4 })
-        func key(_ chars: String) throws -> NSEvent {
-            try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+        func key(_ chars: String, _ flags: NSEvent.ModifierFlags = .command) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
                 windowNumber: 0, context: nil, characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: 0))
         }
         XCTAssertTrue(window.performKeyEquivalent(with: try key("3")))
@@ -127,6 +127,9 @@ final class SettingsWindowContractTests: XCTestCase {
         XCTAssertEqual(navigation.toolTip(forSegment: 2), "Notes (Cmd+3)")
         XCTAssertFalse(window.performKeyEquivalent(with: try key("5")))
         XCTAssertEqual(tabs.selectedTabViewItem?.label, "Notes")
+        XCTAssertTrue(window.performKeyEquivalent(with: try key("4", [.command, .capsLock])))
+        XCTAssertEqual(tabs.selectedTabViewItem?.label, "Colors")
+        XCTAssertEqual(navigation.selectedSegment, 3)
         XCTAssertFalse(window.isVisible)
     }
 }
