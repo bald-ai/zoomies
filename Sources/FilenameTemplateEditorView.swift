@@ -50,7 +50,7 @@ final class FilenameTemplateEditorView: NSView, NSTableViewDataSource, NSTableVi
         let headerLabel = NSTextField(labelWithString: "Filename Template")
         headerLabel.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
 
-        let descriptionLabel = NSTextField(labelWithString: "Drag to reorder. Time or Counter must remain enabled to avoid collisions.")
+        let descriptionLabel = NSTextField(labelWithString: "Drag or use ↑ ↓ to reorder. Time or Counter must remain enabled to avoid collisions.")
         descriptionLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         descriptionLabel.textColor = NSColor.secondaryLabelColor
         descriptionLabel.lineBreakMode = .byWordWrapping
@@ -164,6 +164,14 @@ final class FilenameTemplateEditorView: NSView, NSTableViewDataSource, NSTableVi
         return true
     }
 
+    /// Keyboard-reachable alternative to dragging a row.
+    func moveBlock(id: UUID, by offset: Int) {
+        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
+        mutateTemplate { template in
+            template.moveBlock(id: id, to: index + offset)
+        }
+    }
+
     // MARK: - NSTableViewDelegate
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -178,7 +186,7 @@ final class FilenameTemplateEditorView: NSView, NSTableViewDataSource, NSTableVi
             cell.identifier = cellID
         }
 
-        cell.configure(with: block)
+        cell.configure(with: block, canMoveEarlier: row > 0, canMoveLater: row < blocks.count - 1)
 
         cell.onToggleEnabled = { [weak self] isEnabled in
             self?.mutateTemplate { template in
@@ -192,6 +200,10 @@ final class FilenameTemplateEditorView: NSView, NSTableViewDataSource, NSTableVi
                     template.blocks[i].text = newText
                 }
             }
+        }
+
+        cell.onMove = { [weak self] offset in
+            self?.moveBlock(id: block.id, by: offset)
         }
 
         cell.onFormatChanged = { [weak self] newFormat in
@@ -222,10 +234,13 @@ private final class BlockCellView: NSView, NSTextFieldDelegate {
     var onToggleEnabled: ((Bool) -> Void)?
     var onTextChanged: ((String) -> Void)?
     var onFormatChanged: ((String) -> Void)?
+    var onMove: ((Int) -> Void)?
 
     private let enabledCheckbox = MutedSettingsCheckbox(checkboxWithTitle: "", target: nil, action: nil)
     private let kindLabel = NSTextField(labelWithString: "")
     private let editorContainer = NSView()
+    private let earlierButton = NSButton(title: "↑", target: nil, action: nil)
+    private let laterButton = NSButton(title: "↓", target: nil, action: nil)
 
     private var editField: NSTextField?
     private var datePickerSegment: NSSegmentedControl?
@@ -263,10 +278,20 @@ private final class BlockCellView: NSView, NSTextFieldDelegate {
         editorContainer.translatesAutoresizingMaskIntoConstraints = false
         editorContainer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
+        for (button, action) in [(earlierButton, #selector(moveEarlier)), (laterButton, #selector(moveLater))] {
+            button.target = self
+            button.action = action
+            button.bezelStyle = .rounded
+            button.controlSize = .small
+            button.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        }
+
         row.addArrangedSubview(dragHandle)
         row.addArrangedSubview(enabledCheckbox)
         row.addArrangedSubview(kindLabel)
         row.addArrangedSubview(editorContainer)
+        row.addArrangedSubview(earlierButton)
+        row.addArrangedSubview(laterButton)
 
         addSubview(row)
         NSLayoutConstraint.activate([
@@ -278,9 +303,14 @@ private final class BlockCellView: NSView, NSTextFieldDelegate {
         ])
     }
 
-    func configure(with block: FilenameTemplate.Block) {
+    func configure(with block: FilenameTemplate.Block, canMoveEarlier: Bool, canMoveLater: Bool) {
         enabledCheckbox.state = block.isEnabled ? .on : .off
         kindLabel.stringValue = Self.title(for: block.kind)
+        let title = Self.title(for: block.kind)
+        earlierButton.isEnabled = canMoveEarlier
+        earlierButton.toolTip = "Move \(title) earlier"
+        laterButton.isEnabled = canMoveLater
+        laterButton.toolTip = "Move \(title) later"
 
         editorContainer.subviews.forEach { $0.removeFromSuperview() }
         editField = nil
@@ -343,6 +373,9 @@ private final class BlockCellView: NSView, NSTextFieldDelegate {
     }
 
     // MARK: - Actions
+
+    @objc private func moveEarlier() { onMove?(-1) }
+    @objc private func moveLater() { onMove?(1) }
 
     @objc private func toggleEnabled(_ sender: NSButton) {
         onToggleEnabled?(sender.state == .on)

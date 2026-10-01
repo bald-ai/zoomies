@@ -21,6 +21,29 @@ final class FilenameTemplateEditorViewTests: XCTestCase {
         XCTAssertEqual(store.settings.filenameTemplate.blocks.map(\.id), ids)
     }
 
+    func testArrowButtonsReorderWithoutDraggingAndStopAtTheEnds() throws {
+        _ = NSApplication.shared
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let store = SettingsStore(fileURL: root.appendingPathComponent("settings.json"))
+        let view = FilenameTemplateEditorView(settingsStore: store)
+        let ids = store.settings.filenameTemplate.blocks.map(\.id)
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        func arrows(row: Int) throws -> (up: NSButton, down: NSButton) {
+            let cell = try XCTUnwrap(view.tableView(view.tableView, viewFor: nil, row: row))
+            let buttons = descendants(cell).compactMap { $0 as? NSButton }
+            return (try XCTUnwrap(buttons.first { $0.title == "↑" }), try XCTUnwrap(buttons.first { $0.title == "↓" }))
+        }
+        let first = try arrows(row: 0)
+        XCTAssertFalse(first.up.isEnabled)
+        XCTAssertTrue(first.down.isEnabled)
+        XCTAssertFalse(try arrows(row: ids.count - 1).down.isEnabled)
+        first.down.performClick(nil)
+        XCTAssertEqual(store.settings.filenameTemplate.blocks.map(\.id), [ids[1], ids[0]] + ids.dropFirst(2))
+        try arrows(row: 1).up.performClick(nil)
+        XCTAssertEqual(store.settings.filenameTemplate.blocks.map(\.id), ids)
+    }
+
     func testDateAndTimeControlsPersistFormatsAndResetRestoresDefaults() throws {
         _ = NSApplication.shared
         let root = try TestSupport.makeTemporaryDirectory()
