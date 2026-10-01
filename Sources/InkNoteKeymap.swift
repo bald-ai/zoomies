@@ -10,7 +10,7 @@ enum InkNoteKeymap {
         case selectAll, copy, cut, paste, undo, redo
         case save, copyAndSave, close
         case toggleDraw, type, escape
-        case marker, nextColor
+        case marker, nextColor, clearInk
         case tool(InkNoteWindowController.Tool)
     }
 
@@ -40,6 +40,8 @@ enum InkNoteKeymap {
         }
         if flags == [.command] { return commandKeys[key] }
         if flags == [.command, .shift] { return key == "z" ? .redo : nil }
+        // Option+Backspace deletes a word while typing and clears all ink while drawing.
+        if flags == [.option], keyCode == UInt16(kVK_Delete) { return isDrawing ? .clearInk : nil }
         guard flags.isEmpty else { return nil }
         if keyCode == UInt16(kVK_Escape) { return .escape }
         return isDrawing ? drawingKeys[keyCode] : nil

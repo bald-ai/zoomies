@@ -117,6 +117,8 @@ final class InkNoteKeymapTests: XCTestCase {
             XCTAssertEqual(command(key, chars, flags, drawing: true), expected, "\(key) \(flags) while drawing")
         }
         XCTAssertNil(command(kVK_Return, "\r"), "Return stays a newline")
+        XCTAssertEqual(command(kVK_Delete, "", .option, drawing: true), .clearInk)
+        XCTAssertNil(command(kVK_Delete, "", .option), "Option+Backspace still deletes a word while typing")
         XCTAssertNil(command(kVK_ANSI_C, "c", [.command, .shift]), "Command+Shift+C no longer copies the image")
     }
 }
@@ -274,7 +276,7 @@ final class InkNoteEditorTests: XCTestCase {
         editor.perform(.nextColor)
         XCTAssertNotEqual(editor.colorHex, first)
         XCTAssertEqual(editor.tool, .pen, "Picking a color puts the eraser down")
-        for _ in 1..<InkNoteWindowController.palette.count { editor.perform(.nextColor) }
+        for _ in 1..<editor.palette.count { editor.perform(.nextColor) }
         XCTAssertEqual(editor.colorHex, first, "Q wraps around the palette")
         let letter = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
             windowNumber: 0, context: nil, characters: "k", charactersIgnoringModifiers: "k", isARepeat: false,
@@ -284,6 +286,43 @@ final class InkNoteEditorTests: XCTestCase {
         editor.perform(.toggleDraw)
         editor.perform(.escape)
         XCTAssertEqual(editor.mode, .type, "Escape leaves drawing before it closes anything")
+    }
+
+    func testClearInkIsOneUndoStep() throws {
+        let (editor, root) = try editor("Palette row is hard to see.\n")
+        defer { editor.window?.close(); TestSupport.removeIfExists(root) }
+        editor.commit(circle(around: rect(of: "Palette", in: editor)))
+        editor.commit(circle(around: rect(of: "hard", in: editor)), at: Date().addingTimeInterval(5))
+        settle()
+        editor.perform(.clearInk)
+        XCTAssertTrue(editor.items.isEmpty)
+        settle()
+        editor.undo()
+        XCTAssertEqual(editor.items.count, 2)
+    }
+
+    func testNotesUseTheSettingsPaletteWithoutColorsLostOnTheDarkBackground() throws {
+        XCTAssertEqual(InkNoteWindowController.noteColors(forPaletteIDs: EditorPalette.defaultIDs).map(\.id),
+                       ["red", "blue", "green", "yellow", "white"], "Black is dropped from the default palette")
+        XCTAssertEqual(InkNoteWindowController.noteColors(forPaletteIDs: ["purple", "black", "orange"]).map(\.id), ["purple", "orange"])
+        XCTAssertEqual(InkNoteWindowController.noteColors(forPaletteIDs: ["black"]).map(\.id), ["white"])
+        for color in EditorPalette.available where color.id != "black" {
+            XCTAssertTrue(InkNoteWindowController.isVisibleOnBackground(color.color), color.name)
+        }
+
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let store = SettingsStore(fileURL: root.appendingPathComponent("settings.json"))
+        store.update { $0.editorColorIDs = ["cyan", "pink"] }
+        let url = root.appendingPathComponent("plan.md")
+        try Data("Hi".utf8).write(to: url)
+        let editor = InkNoteWindowController(opened: try InkNoteWindowController.resolve(url), settingsStore: store)
+        defer { editor.window?.close() }
+        XCTAssertEqual(editor.palette.map(\.id), ["cyan", "pink"])
+        XCTAssertEqual(editor.colorHex, EditorPalette.available.first { $0.id == "cyan" }?.hex)
+        store.update { $0.editorColorIDs = ["pink", "white"] }
+        XCTAssertEqual(editor.palette.map(\.id), ["pink", "white"], "Settings changes reach an open note")
+        XCTAssertEqual(editor.colorHex, EditorPalette.available.first { $0.id == "pink" }?.hex)
     }
 
     func testCopyAndSaveWritesCopiesAndCloses() throws {
@@ -309,7 +348,7 @@ final class InkNoteEditorTests: XCTestCase {
         }
         let hinted = Set(editor.shortcutHints.map { ObjectIdentifier($0.view) })
         let toolbarButtons = buttons(in: host)
-        XCTAssertEqual(toolbarButtons.filter { !($0 is InkSwatchButton) }.count, 11)
+        XCTAssertEqual(toolbarButtons.filter { !($0 is InkSwatchButton) }.count, 12)
         for button in toolbarButtons {
             let tip = try XCTUnwrap(button.toolTip)
             XCTAssertTrue(tip.contains("(") && tip.contains(")"), "Tooltip names a shortcut: \(tip)")

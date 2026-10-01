@@ -65,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return Services(backup: backup, clipboard: clipboard,
                         screenshot: ScreenshotService(settingsStore: settings, backupService: backup,
                                                       clipboardService: clipboard, soundPlayer: sound),
-                        scratchpad: ScratchpadService(clipboardService: clipboard), hotKeys: HotKeyService(),
+                        scratchpad: ScratchpadService(clipboardService: clipboard, settingsStore: settings), hotKeys: HotKeyService(),
                         recording: ScreenRecordingService(), sound: sound)
     }
 
@@ -249,7 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     existing.present()
                     return
                 }
-                let editor = InkNoteWindowController(opened: opened)
+                let editor = InkNoteWindowController(opened: opened, settingsStore: settingsStore)
                 editor.copyFile = { [weak self] url in self?.clipboardService.copyFile(at: url, useCache: false) != nil }
                 track(editor)
                 editor.present()

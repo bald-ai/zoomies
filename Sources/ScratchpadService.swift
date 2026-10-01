@@ -7,6 +7,7 @@ import AppKit
 final class ScratchpadService {
     private let fileManager: FileManager
     private let clipboardService: ClipboardService
+    private let settingsStore: SettingsStore?
     private let directory: URL
     private let present: @MainActor (InkNoteWindowController) -> Void
     /// Names handed to notes this session, so two notes opened within the same
@@ -21,10 +22,12 @@ final class ScratchpadService {
 
     init(fileManager: FileManager = .default,
          clipboardService: ClipboardService,
+         settingsStore: SettingsStore? = nil,
          desktopDirectory: URL? = nil,
          present: @escaping @MainActor (InkNoteWindowController) -> Void = { $0.present() }) {
         self.fileManager = fileManager
         self.clipboardService = clipboardService
+        self.settingsStore = settingsStore
         self.present = present
         directory = desktopDirectory
             ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Desktop", isDirectory: true)
@@ -38,7 +41,8 @@ final class ScratchpadService {
             fileExists: { [fileManager, reservedPaths] path in fileManager.fileExists(atPath: path) || reservedPaths.contains(path) }
         )
         reservedPaths.insert(noteURL.path)
-        let editor = InkNoteWindowController(opened: .init(noteURL: noteURL, sourceURL: noteURL, document: InkNoteDocument(text: "")))
+        let editor = InkNoteWindowController(opened: .init(noteURL: noteURL, sourceURL: noteURL, document: InkNoteDocument(text: "")),
+                                            settingsStore: settingsStore)
         editor.copyFile = { [clipboardService] url in clipboardService.copyFile(at: url, useCache: false) != nil }
         onOpen?(editor)
         present(editor)

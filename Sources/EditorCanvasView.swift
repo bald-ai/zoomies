@@ -1754,6 +1754,10 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             return true
         }
         guard flags.contains(.command), let chars = event.charactersIgnoringModifiers?.lowercased() else { return false }
+        if let close = closeCommand(chars: chars, flags: flags) {
+            onKeyCommand?(close)
+            return true
+        }
         let commands: [String: KeyCommand] = ["=": .zoomIn, "+": .zoomIn, "-": .zoomOut,
             "0": .zoomReset, "c": .copyToClipboard, "x": .cutSelectionToClipboard,
             "v": .pasteSelectionInCanvas, "z": flags.contains(.shift) ? .redo : .undo,
@@ -1807,11 +1811,17 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             return super.performKeyEquivalent(with: event)
         }
 
-        guard let command = Self.keyEquivalentCommand(chars: chars, flags: flags) else {
+        guard let command = closeCommand(chars: chars, flags: flags) ?? Self.keyEquivalentCommand(chars: chars, flags: flags) else {
             return super.performKeyEquivalent(with: event)
         }
         onKeyCommand?(command)
         return true
+    }
+
+    /// Command+W closes like Escape and the window's close button: a fresh
+    /// capture is deleted (after the confirmation, when that setting is on).
+    private func closeCommand(chars: String, flags: NSEvent.ModifierFlags) -> KeyCommand? {
+        chars == "w" && flags.subtracting(.capsLock) == [.command] ? .finalAction(escapeFinalAction) : nil
     }
 
     private static func keyEquivalentCommand(chars: String, flags: NSEvent.ModifierFlags) -> KeyCommand? {

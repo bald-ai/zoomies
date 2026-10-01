@@ -78,7 +78,7 @@ the relevant shortcut code and build a new `.app` for you.
 
 The same keys mean the same thing everywhere: `Cmd+S` saves, `Cmd+Enter` copies
 and saves, `Esc` cancels or closes, `Cmd+Z` / `Cmd+Shift+Z` undo and redo, `Q`
-picks the next color, and `F` is the numbered marker. Plain `Enter` saves
+picks the next color, `Option+Backspace` clears the drawing, and `F` is the numbered marker. Plain `Enter` saves
 wherever it is not typing a new line.
 
 | Screen | Key | Action |
@@ -97,7 +97,7 @@ wherever it is not typing a new line.
 | Edit | `Cmd +` / `Cmd -` / `Cmd 0` | Zoom in / out / reset |
 | Edit | `Enter` or `Cmd+S` | Save |
 | Edit | `Cmd+Enter` | Copy + save |
-| Edit | `Esc` | Cancel |
+| Edit | `Esc` or `Cmd+W` | Cancel (same as the window's close button) |
 | Note | see [Ink Note Editor](#ink-note-editor) | |
 | Settings | `Cmd+1`–`Cmd+4` | Screenshots / Videos / Notes / Colors tab |
 | Settings | `Cmd+W` or `Esc` | Close |
@@ -137,6 +137,7 @@ The note editor has two modes. While typing, letters are text, so its commands u
 | Hold `Option` | Draw for a moment while typing |
 | `W` / `H` / `X` (while drawing) | Pen / highlighter / eraser |
 | `Q` (while drawing) | Next color |
+| `Option+Backspace` (while drawing) | Clear all ink (undoable); while typing it still deletes a word |
 | `F` (while drawing) or `Cmd+F` | Numbered marker at the cursor, with its note line at the end |
 | `T` or `Esc` (while drawing) | Back to typing |
 | `Cmd+Z` / `Cmd+Shift+Z` | Undo / redo text and ink in one history |
@@ -147,7 +148,7 @@ The note editor has two modes. While typing, letters are text, so its commands u
 Every toolbar button names its key in its tooltip.
 
 - Each stroke pins to the word under it, so it moves with that word as text above it changes. Strokes drawn right after and next to each other (an arrow and its head) move together. Deleting the word hides its ink; undo brings both back. The text column has a fixed width, so resizing the window never rewraps lines.
-- The note editor uses its own five colors (red, blue, green, yellow, white) because the note background is dark.
+- Notes use your colors from **Settings → Colors**, skipping any too dark to see on the note background (black). Changes apply to open notes.
 
 ## Editor Select Tool
 
@@ -230,7 +231,7 @@ it does not make the app notarized for distribution.
 
 ## Editor colors
 
-Press **Q** or click the color swatch to cycle to the next color in the screenshot editor. In **Settings → Colors**, choose 1–6 active colors from 15 options and use the up/down arrows to set their order. The last color wraps back to the first. Changes also apply to an already-open editor.
+Press **Q** or click the color swatch to cycle to the next color (in the note editor, Q while drawing). In **Settings → Colors**, choose 1–6 active colors from 15 options and use the up/down arrows to set their order. The last color wraps back to the first. Changes also apply to an already-open editor.
 
 Screenshot notes keep their 1,000-character limit. Input that would exceed the limit is rejected with a visible limit message, so an oversized paste does not silently lose its ending.
 

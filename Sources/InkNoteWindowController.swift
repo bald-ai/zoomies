@@ -79,8 +79,16 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     static let columnWidth: CGFloat = 640
-    static let palette: [EditorPaletteColor] = ["red", "blue", "green", "yellow", "white"].compactMap { id in
-        EditorPalette.available.first { $0.id == id }
+    /// The Settings colors, minus any too dark to see on the note background
+    /// (black is in the default palette).
+    static func noteColors(forPaletteIDs ids: [String]) -> [EditorPaletteColor] {
+        let visible = EditorPalette.colors(for: ids).filter { isVisibleOnBackground($0.color) }
+        return visible.isEmpty ? EditorPalette.available.filter { $0.id == "white" } : visible
+    }
+
+    static func isVisibleOnBackground(_ color: NSColor) -> Bool {
+        guard let rgb = color.usingColorSpace(.sRGB) else { return true }
+        return 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent > 0.12
     }
     private static let background = NSColor(srgbRed: 0.094, green: 0.098, blue: 0.118, alpha: 1)
     private static let penCursor = ringCursor(diameter: 8)
@@ -123,7 +131,10 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     private(set) var items: [LiveItem] = []
     private(set) var mode: Mode = .type
     private(set) var tool: Tool = .pen
-    private(set) var colorHex: String = palette.first?.hex ?? "#ff3b30"
+    private(set) var palette: [EditorPaletteColor]
+    private(set) var colorHex: String
+    private let settingsStore: SettingsStore?
+    private var paletteObserver: NSObjectProtocol?
     private var holdingOption = false
     private var current: InkStroke?
     private var eraseStart: [LiveItem]?
@@ -145,10 +156,13 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     var activeCursor: NSCursor? { isDrawing ? (tool == .eraser ? Self.eraserCursor : Self.penCursor) : nil }
     var hasUnsavedChanges: Bool { currentDocument() != savedDocument }
 
-    init(opened: Opened) {
+    init(opened: Opened, settingsStore: SettingsStore? = nil) {
         noteURL = opened.noteURL
         sourceURL = opened.sourceURL
         savedDocument = opened.document
+        self.settingsStore = settingsStore
+        palette = Self.noteColors(forPaletteIDs: settingsStore?.settings.editorColorIDs ?? EditorPalette.defaultIDs)
+        colorHex = palette.first?.hex ?? "#ff3b30"
         let window = EditorWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 720),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         super.init(window: window)
@@ -169,10 +183,20 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         }
         refreshShortcutLabels()
         layoutObservation = KeyboardLayoutObservation { [weak self] in self?.refreshShortcutLabels() }
+        if let settingsStore {
+            paletteObserver = NotificationCenter.default.addObserver(forName: SettingsStore.didChangeNotification, object: settingsStore,
+                                                                     queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reloadPalette() }
+            }
+        }
         syncControls()
         refresh()
     }
     required init?(coder: NSCoder) { nil }
+
+    deinit {
+        if let paletteObserver { NotificationCenter.default.removeObserver(paletteObserver) }
+    }
 
     func present() {
         installKeyMonitor()
@@ -268,17 +292,12 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         let eraser = button("eraser", "", #selector(toolPressed(_:)))
         modeButtons = [.type: type, .draw: draw]
         toolButtons = [.pen: pen, .highlighter: highlighter, .eraser: eraser]
-        swatches = Self.palette.map { color in
-            let button = InkSwatchButton(hex: color.hex, name: color.name)
-            button.target = self
-            button.action = #selector(swatchClicked(_:))
-            return button
-        }
-        swatchRow = NSStackView(views: swatches)
         swatchRow.spacing = 2
+        rebuildSwatches()
         markerButton = button("1.circle", "", #selector(markerPressed))
         let undo = button("arrow.uturn.left", "Undo (Cmd+Z)", #selector(undoPressed))
         let redo = button("arrow.uturn.right", "Redo (Cmd+Shift+Z)", #selector(redoPressed))
+        let clear = button("trash", "Clear all ink (Option+Backspace while drawing)", #selector(clearPressed))
         let close = button("xmark", "Close (Esc or Cmd+W)", #selector(closePressed))
         let copy = button("doc.on.doc", "Copy + save and close (Cmd+Enter)", #selector(copyPressed))
         let save = button("tray.and.arrow.down", "Save (Cmd+S)", #selector(savePressed))
@@ -286,18 +305,41 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
             .init(view: markerButton, key: "⌘F", label: "Numbered marker"),
             .init(view: undo, key: "⌘Z", label: "Undo"),
             .init(view: redo, key: "⌘⇧Z", label: "Redo"),
+            .init(view: clear, key: "⌥⌫", label: "Clear all ink, while drawing"),
             .init(view: close, key: "Esc", label: "Close (⌘W also closes)"),
             .init(view: copy, key: "⌘↩", label: "Copy + save and close"),
             .init(view: save, key: "⌘S", label: "Save")
         ]
 
-        let groups: [[NSView]] = [[type, draw], [pen, highlighter, eraser, swatchRow], [markerButton], [undo, redo]]
+        let groups: [[NSView]] = [[type, draw], [pen, highlighter, eraser, swatchRow], [markerButton], [undo, redo, clear]]
         let bar = NSStackView()
         bar.spacing = 8
         bar.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
         bar.setViews(groups.map { EditorToolbarStyle.group($0) }, in: .leading)
         bar.setViews([EditorToolbarStyle.group([close, copy, save])], in: .trailing)
         return bar
+    }
+
+    private func rebuildSwatches() {
+        swatchRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        swatches = palette.map { color in
+            let button = InkSwatchButton(hex: color.hex, name: color.name)
+            button.target = self
+            button.action = #selector(swatchClicked(_:))
+            swatchRow.addArrangedSubview(button)
+            return button
+        }
+    }
+
+    /// Settings → Colors changes apply to open notes, as in the screenshot editor.
+    private func reloadPalette() {
+        let updated = Self.noteColors(forPaletteIDs: settingsStore?.settings.editorColorIDs ?? EditorPalette.defaultIDs)
+        guard updated.map(\.id) != palette.map(\.id) else { return }
+        palette = updated
+        if !palette.contains(where: { $0.hex == colorHex }) { colorHex = palette.first?.hex ?? colorHex }
+        rebuildSwatches()
+        refreshShortcutLabels()
+        syncControls()
     }
 
     /// Tool letters are physical keys, so their names follow the keyboard layout.
@@ -652,8 +694,8 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     func setColor(_ index: Int) {
-        guard Self.palette.indices.contains(index) else { return }
-        colorHex = Self.palette[index].hex
+        guard palette.indices.contains(index) else { return }
+        colorHex = palette[index].hex
         if tool == .eraser { tool = .pen }
         if mode != .draw && !holdingOption { mode = .draw }
         syncControls()
@@ -661,8 +703,14 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     /// Q steps through the palette like the screenshot editor's color key.
     func nextColor() {
-        let current = Self.palette.firstIndex { $0.hex == colorHex } ?? -1
-        setColor((current + 1) % max(1, Self.palette.count))
+        let current = palette.firstIndex { $0.hex == colorHex } ?? -1
+        setColor((current + 1) % max(1, palette.count))
+    }
+
+    /// Option+Backspace while drawing, like Clear in the screenshot editor; undoable.
+    func clearInk() {
+        guard !items.isEmpty else { return }
+        setItems([])
     }
 
     func modifiersChanged(_ event: NSEvent) {
@@ -688,6 +736,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     @objc private func markerPressed() { perform(.marker) }
     @objc private func undoPressed() { perform(.undo) }
     @objc private func redoPressed() { perform(.redo) }
+    @objc private func clearPressed() { perform(.clearInk) }
     @objc private func closePressed() { perform(.close) }
     @objc private func copyPressed() { perform(.copyAndSave) }
     @objc private func savePressed() { perform(.save) }
@@ -729,6 +778,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         case .escape: if mode == .draw { setMode(.type) } else { window?.performClose(nil) }
         case .marker: insertMarker()
         case .nextColor: nextColor()
+        case .clearInk: clearInk()
         case .tool(let tool): setTool(tool)
         }
         if let window, window.isVisible, window.firstResponder !== textView { window.makeFirstResponder(textView) }
