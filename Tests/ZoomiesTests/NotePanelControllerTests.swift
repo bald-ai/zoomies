@@ -31,9 +31,9 @@ final class NotePanelControllerTests: XCTestCase {
         XCTAssertTrue(labels.contains { $0.contains("Enter: Save") })
     }
 
-    func testStandaloneNoteSavesFullGenerousLimit() throws {
+    func testLargeLimitSavesFullText() throws {
         let content = String(repeating: "a", count: 99_999) + "🌻"
-        let controller = NotePanelController(initialText: content, maxLength: NotePanelController.standaloneMaxLength)
+        let controller = NotePanelController(initialText: content, maxLength: 100_000)
         let textView = try XCTUnwrap(findTextView(in: controller.window?.contentView))
         XCTAssertEqual(controller.text, content)
         var saved: String?
@@ -44,7 +44,7 @@ final class NotePanelControllerTests: XCTestCase {
     }
 
     func testOversizedPasteIsRejectedWithoutChangingExistingText() throws {
-        let controller = NotePanelController(initialText: "keep this", maxLength: NotePanelController.standaloneMaxLength)
+        let controller = NotePanelController(initialText: "keep this", maxLength: 100_000)
         let textView = try XCTUnwrap(findTextView(in: controller.window?.contentView))
         XCTAssertFalse(textView.shouldChangeText(in: NSRange(location: 0, length: 9), replacementString: String(repeating: "x", count: 100_001)))
         XCTAssertEqual(controller.text, "keep this")
@@ -52,7 +52,7 @@ final class NotePanelControllerTests: XCTestCase {
     }
 
     func testBoundaryAllowsReplacementAndDeletionAndImageLimitStays1000() throws {
-        for limit in [1000, NotePanelController.standaloneMaxLength] {
+        for limit in [1000, 100_000] {
             let controller = NotePanelController(initialText: String(repeating: "a", count: limit), maxLength: limit)
             let textView = try XCTUnwrap(findTextView(in: controller.window?.contentView))
             XCTAssertFalse(textView.shouldChangeText(in: NSRange(location: limit, length: 0), replacementString: "b"))

@@ -188,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                     \(failures.joined(separator: "\n"))
 
-                    Free them up in System Settings → Keyboard → Keyboard Shortcuts, or pick a different combo in Zoomies Settings. You can always open the Scratchpad from the menu-bar icon.
+                    Free them up in System Settings → Keyboard → Keyboard Shortcuts, or pick a different combo in Zoomies Settings.
                     """
                 )
             }

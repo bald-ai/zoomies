@@ -6,7 +6,7 @@ _Take and copy paste screen in 2 seconds. Rename? 3 seconds. Rename + annotate w
 >
 > Zoomies builds natively on both Apple silicon and Intel Macs. Intel is supported but untested because I do not have an Intel Mac.
 
-Mac-only keyboard-first screenshot and scratchpad app for agentic coding.
+Mac-only keyboard-first screenshot and note app for agentic coding.
 Good for touchpad users too, especially if your wrist is already cooked from gaming.
 
 Fork it, pork it, change it, rebuild it. Have fun.
@@ -146,8 +146,7 @@ Editable objects are remembered only for PNGs saved by this version of Zoomies o
 
 ## Screen Recording
 
-`Option+Shift+5` or the menu-bar icon's Start Recording begins a display
-recording. There is no display picker: recording starts on the display under
+`Option+Shift+5` begins a display recording, and pressing it again stops it. There is no display picker: recording starts on the display under
 the pointer and follows the pointer to another monitor after it stays there
 for half a second. It keeps recording across app and Space changes, includes
 the cursor, excludes Zoomies' own windows, and stops automatically after 60
@@ -160,8 +159,8 @@ margins where needed). The menu bar shows only the elapsed seconds, from `0` to 
 
 Only one Zoomies operation runs at a time: recording blocks
 screenshots/notes/Finder-reopen, and those workflows block recording startup.
-Screen recording requires macOS 15 or later; on macOS 14 the menu command
-explains it is unavailable while screenshots and notes keep working.
+Screen recording requires macOS 15 or later; on macOS 14 the shortcut
+shows an "unavailable" message while screenshots and notes keep working.
 
 ## Temporary Clipboard Files
 
@@ -210,6 +209,6 @@ it does not make the app notarized for distribution.
 
 Press **Q** or click the color swatch to cycle to the next color. In **Settings → Colors**, choose 1–6 active colors from 15 options and use the up/down arrows to set their order. The last color wraps back to the first. Changes also apply to an already-open editor.
 
-Standalone Markdown notes accept up to 100,000 characters. Image notes keep their 1,000-character limit. Input that would exceed the limit is rejected with a visible limit message, so an oversized paste does not silently lose its ending.
+Screenshot notes keep their 1,000-character limit. Input that would exceed the limit is rejected with a visible limit message, so an oversized paste does not silently lose its ending.
 
 After placing or selecting editor text, click outside it to return to the pen. Typed text is kept; empty text boxes are discarded. The dismissing click does not draw a stroke.

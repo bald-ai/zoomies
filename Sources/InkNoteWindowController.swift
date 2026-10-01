@@ -52,7 +52,7 @@ final class InkNoteTextView: NSTextView {
     override func writeSelection(to pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
         guard type == .string, selectedRange().length > 0 else { return false }
         pboard.clearContents()
-        return pboard.setString(MarkdownTextView.plainText(attributedString().attributedSubstring(from: selectedRange())), forType: .string)
+        return pboard.setString(MarkdownMarkerAttachment.plainText(attributedString().attributedSubstring(from: selectedRange())), forType: .string)
     }
 }
 
