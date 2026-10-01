@@ -19,6 +19,7 @@ final class CanvasShortcutContractTests: XCTestCase {
             (8, .command, "c", .copyToClipboard), (7, .command, "x", .cutSelectionToClipboard),
             (9, .command, "v", .pasteSelectionInCanvas), (51, .option, "", .clear),
             (36, [], "", .finalAction(.saveOnly)), (76, [], "", .finalAction(.saveOnly)),
+            (1, .command, "s", .finalAction(.saveOnly)),
             (36, .command, "", .finalAction(.copyAndSave)), (76, .command, "", .finalAction(.copyAndSave)),
             (51, .command, "", .finalAction(.copyAndDelete)), (53, [], "", .finalAction(.deleteOnly)),
             (48, .shift, "", .backToNote)

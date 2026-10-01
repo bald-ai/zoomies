@@ -36,6 +36,16 @@ final class FloatingInputPanelCommandTests: XCTestCase {
         XCTAssertFalse(panel.isVisible)
     }
 
+    func testCommandSSavesLikeEnterOnlyWhenThePanelHasAHandler() {
+        let panel = FloatingInputPanel(contentRect: NSRect(x: 0, y: 0, width: 100, height: 80), sendEditingAction: { _, _ in false })
+        XCTAssertFalse(panel.performKeyEquivalent(with: event("s", .command)))
+        var received: [KeyCommand] = []
+        panel.keyCommandHandler = { received.append($0) }
+        XCTAssertTrue(panel.performKeyEquivalent(with: event("S", .command)))
+        _ = panel.performKeyEquivalent(with: event("s", [.command, .shift]))
+        XCTAssertEqual(received, [.enter])
+    }
+
     func testUndoRedoUsesActualFirstResponderHistory() {
         let panel = FloatingInputPanel(contentRect: NSRect(x: 0, y: 0, width: 100, height: 80), sendEditingAction: { _, _ in
             XCTFail("Undo must use the text view's history"); return false

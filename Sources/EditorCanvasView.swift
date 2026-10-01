@@ -1756,7 +1756,8 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
         guard flags.contains(.command), let chars = event.charactersIgnoringModifiers?.lowercased() else { return false }
         let commands: [String: KeyCommand] = ["=": .zoomIn, "+": .zoomIn, "-": .zoomOut,
             "0": .zoomReset, "c": .copyToClipboard, "x": .cutSelectionToClipboard,
-            "v": .pasteSelectionInCanvas, "z": flags.contains(.shift) ? .redo : .undo]
+            "v": .pasteSelectionInCanvas, "z": flags.contains(.shift) ? .redo : .undo,
+            "s": .finalAction(.saveOnly)]
         guard let command = commands[chars] else { return false }
         onKeyCommand?(command)
         return true
@@ -1816,8 +1817,10 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
     private static func keyEquivalentCommand(chars: String, flags: NSEvent.ModifierFlags) -> KeyCommand? {
         if chars == "z", flags == [.command, .shift] { return .redo }
         guard flags == [.command] else { return nil }
+        // Command+S saves like Enter, matching the note editor and the panels.
         let commands: [String: KeyCommand] = ["z": .undo, "c": .copyToClipboard,
-                                              "x": .cutSelectionToClipboard, "v": .pasteSelectionInCanvas]
+                                              "x": .cutSelectionToClipboard, "v": .pasteSelectionInCanvas,
+                                              "s": .finalAction(.saveOnly)]
         return commands[chars]
     }
 

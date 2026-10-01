@@ -48,6 +48,7 @@ final class RenamePanelController: NSWindowController {
         self.allowsNoteNavigation = allowsNoteNavigation
         configureFilenameMetadata(initialFilename: initialFilename)
         configureUI(initialFilename: initialFilename)
+        panel.keyCommandHandler = { [weak self] in self?.handleKeyCommand($0) }
     }
 
     override init(window: NSWindow?) {

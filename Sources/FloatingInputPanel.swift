@@ -5,6 +5,8 @@ final class FloatingInputPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     private let sendEditingAction: (Selector, Any?) -> Bool
+    /// Command+S saves, the same as Enter, so saving uses one key app-wide.
+    var keyCommandHandler: ((KeyCommand) -> Void)?
 
     init(contentRect: NSRect,
          sendEditingAction: @escaping (Selector, Any?) -> Bool = { NSApp.sendAction($0, to: nil, from: $1) }) {
@@ -37,6 +39,10 @@ final class FloatingInputPanel: NSPanel {
         let chars = event.charactersIgnoringModifiers?.lowercased()
 
         if performTextUndo(chars: chars, flags: flags) { return true }
+        if flags == [.command], chars == "s", let keyCommandHandler {
+            keyCommandHandler(.enter)
+            return true
+        }
         if flags == [.command], let chars,
            let selector = Self.editingSelectors[chars], sendEditingAction(selector, self) {
             return true
