@@ -18,7 +18,7 @@ Fork it, pork it, change it, rebuild it. Have fun.
 - Saves Zoomies edit data inside PNGs, so future reopens can edit/delete Zoomies-added arrows, text, pen strokes, shapes, pasted selections, and cut regions.
 - Creates quick scratchpad notes for errors, issues, and ideas you spot in one project while your head is still in another.
 - Lets you rename, annotate, save, copy, or delete without breaking coding flow.
-- Reopens a selected Finder image and sends it back through the Zoomies flow.
+- Reopens a selected Finder image through the Zoomies flow, or opens a Markdown file as a drawable note saved as PNG.
 
 When you edit and save a non-PNG image such as a JPEG or HEIC, Zoomies saves the
 edited result as a PNG and removes the original non-PNG file.
@@ -64,7 +64,7 @@ tested.**
 
 - `Option+Shift+4` -> area capture
 - `Option+Shift+3` -> full-screen capture
-- `Option+Shift+2` -> select an image in Finder, press this to edit/rename it with Zoomies
+- `Option+Shift+2` -> select an image, note PNG, or Markdown file in Finder, then press this to edit it with Zoomies
 - `Option+Shift+1` -> create a scratchpad note
 - `Option+Shift+5` -> start/stop screen recording (requires macOS 15)
 
@@ -111,6 +111,18 @@ New editor text and marker diameters grow with image width on a gentle curve: sm
 - Click on the image to stamp a numbered circle labeled `1`, then `2`, `3`, and so on. The outline and numeral use the current annotation color and the interior stays transparent so the image shows through; the circle widens instead of clipping for multi-digit numbers.
 - Drag an existing marker to move it or press `Delete` to remove it. Repeated clicks select the marker; number editing is currently disabled. Removing a marker never renumbers the others, and the next number continues past the highest existing marker.
 - Reference the numbers in your note text — the note is saved below the image, so prompts like "fix 1 and 3" travel with the screenshot.
+
+## Ink Note Editor
+
+Select one `.md` or `.markdown` file in Finder and press `Option+Shift+2` to open it as a drawable note. Markdown files must be valid UTF-8 and at most 1 MB. Footnotes (`[^1]` and `[^1]: note`) become numbered circles, with each note as a circle line at the end.
+
+Notes save as PNGs: the picture is what you paste to an agent, and the editable text and ink are stored inside it. `Command+S` writes `name.png` next to the Markdown file and never changes the `.md`. If a picture with that name already exists and is not a Zoomies note, the note gets a new name instead. Pressing `Option+Shift+2` on the note PNG, or on the Markdown file again, reopens the note.
+
+- `Command+D` switches between typing and drawing. Hold `Option` to draw for a moment while typing. A tablet or Apple Pencil (Sidecar) always draws and uses its pressure.
+- While drawing: `P` pen, `H` highlighter, `E` eraser, `1`–`5` colors, `T` or Escape back to typing. Typing any other key goes back to writing.
+- Each stroke pins to the word under it, so it moves with that word as text above it changes. Strokes drawn right after and next to each other (an arrow and its head) move together. Deleting the word hides its ink; undo brings both back. The text column has a fixed width, so resizing the window never rewraps lines.
+- `Command+F` drops a circle at the cursor and starts its note line at the end.
+- `Command+Z` and `Command+Shift+Z` undo and redo text and ink in one history. `Command+Shift+C` saves and copies the note image. `Command+W` or Escape prompts to Save, Discard, or Cancel when there are unsaved changes.
 
 ## Editor Select Tool
 

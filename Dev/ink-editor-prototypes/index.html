@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zoomies Ink Prototypes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a thin shell. Tabs on top, a one-line brief for the active prototype, then the prototype itself. */
+  :root {
+    color-scheme: dark;
+    --bg: #0e0f12;
+    --panel: #15161a;
+    --line: #2a2d35;
+    --fg: #e9eaee;
+    --soft: #b9bcc6;
+    --muted: #868b97;
+    --red: #ff3b30;
+    --sans: "Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+  .shell { height: 100%; display: flex; flex-direction: column; }
+  header { padding: 12px 16px 0; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .top { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .top h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.005em; }
+  .top p { margin: 0; color: var(--muted); font-size: 13px; }
+  nav { display: flex; gap: 2px; overflow-x: auto; margin-top: 8px; scrollbar-width: none; }
+  nav button {
+    display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+    border: 0; background: none; color: var(--muted); cursor: pointer; font: 500 13.5px var(--sans);
+    padding: 9px 12px 11px; border-bottom: 2px solid transparent;
+  }
+  nav button:hover { color: var(--fg); }
+  nav button[aria-selected="true"] { color: var(--fg); border-color: var(--red); }
+  nav .n {
+    display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+    background: #ffffff14; color: var(--soft); font: 600 10.5px/1 var(--sans);
+  }
+  nav button[aria-selected="true"] .n { background: var(--red); color: #fff; }
+  nav button:focus-visible { outline: 2px solid #3a8dff; outline-offset: -2px; }
+  .brief {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 28px;
+    padding: 10px 16px 12px; border-bottom: 1px solid var(--line); background: var(--bg);
+  }
+  .brief div { min-width: 0; }
+  .brief dt { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .brief dd { margin: 2px 0 0; font-size: 13px; color: var(--soft); }
+  .brief code { font: 12px var(--mono); color: var(--fg); }
+  @media (max-width: 760px) { .brief { grid-template-columns: minmax(0, 1fr); } }
+  .stage { flex: 1; min-height: 0; position: relative; }
+  .stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #121317; }
+
+  .formats { position: absolute; inset: 0; overflow: auto; padding: 32px 16px 60px; }
+  .formats .wrap { max-width: 860px; margin: 0 auto; display: grid; gap: 22px; }
+  .formats h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+  .formats p { margin: 0; color: var(--soft); max-width: 68ch; }
+  .formats h3 { margin: 8px 0 0; font-size: 14px; font-weight: 600; }
+  .tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 500; color: var(--muted); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; background: var(--panel); }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { color: var(--fg); font-weight: 500; white-space: nowrap; }
+  td { color: var(--soft); }
+  .yes { color: #6fdc8c; } .part { color: #ffd45e; } .no { color: #ff8a80; }
+  .formats ul { margin: 0; padding-left: 18px; color: var(--soft); display: grid; gap: 6px; max-width: 72ch; }
+  .formats code { font: 12.5px var(--mono); color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div class="top">
+      <h1>Zoomies ink prototypes</h1>
+      <p>Five ways to put text and drawing in one note. Each one shows the file it would save, live, on the right.</p>
+    </div>
+    <nav role="tablist" aria-label="Prototypes" id="tabs"></nav>
+  </header>
+  <dl class="brief" id="brief"></dl>
+  <div class="stage" id="stage">
+    <div class="formats" id="formats" hidden>
+      <div class="wrap">
+        <h2>Is there a format for text with a drawing on top?</h2>
+        <p>Yes, several. None is a single universal standard, but each prototype here saves to something that already exists, so the notes stay readable outside Zoomies.</p>
+        <div class="tbl">
+          <table>
+            <thead><tr><th>Format</th><th>Text + ink</th><th>Readable without Zoomies</th><th>Used in</th></tr></thead>
+            <tbody>
+              <tr><td>Markdown + hidden ink block</td><td>Ink stored in an HTML comment, anchored by <code>&lt;!--ink 3--&gt;</code> markers in the text</td><td><span class="part">Text yes, ink no</span> (add an SVG copy for viewers)</td><td>1 Glass Layer, 4 Red Pen</td></tr>
+              <tr><td>Markdown + SVG images</td><td><code>![sketch](note.assets/sketch-1.svg)</code></td><td><span class="yes">Everywhere</span>: GitHub, Obsidian, Quick Look, agents</td><td>2 Sketch Blocks, 3 Margin Notes</td></tr>
+              <tr><td>Markdown footnotes</td><td><code>[^1]</code> anchors plus <code>[^1]: note</code> lines, which Zoomies already writes</td><td><span class="yes">Everywhere</span></td><td>3 Margin Notes, 4 Red Pen</td></tr>
+              <tr><td>JSON Canvas <code>.canvas</code></td><td>Open spec: text nodes hold Markdown, file nodes hold images</td><td><span class="part">Obsidian and a few tools</span></td><td>5 Spatial Canvas</td></tr>
+              <tr><td>Excalidraw in Markdown</td><td><code>.excalidraw.md</code>: drawing JSON inside a Markdown file</td><td><span class="part">Obsidian with the plugin</span></td><td>Not prototyped, close to 1</td></tr>
+              <tr><td>PDF ink annotations</td><td>Text page with an Ink annotation layer on top</td><td><span class="yes">Preview, Acrobat</span>, but text is not editable</td><td>Not prototyped</td></tr>
+              <tr><td>HTML</td><td>Text plus absolutely positioned SVG, which is how these demos work</td><td><span class="part">Browsers</span>, but agents and Markdown tools get noise</td><td>Under the hood of all five</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>What it would take in the Mac app</h3>
+        <ul>
+          <li><b>All five are buildable in AppKit.</b> Text stays in <code>NSTextView</code>; ink is a transparent view on top that draws <code>NSBezierPath</code> strokes.</li>
+          <li><b>Pinning ink to words</b> (1, 4) needs the text layout to report where a character sits. TextKit 2 gives that through <code>NSTextLayoutManager</code>. The ink view redraws whenever layout changes.</li>
+          <li><b>Pressure</b> comes free with a tablet or Apple Pencil through Sidecar. On a trackpad, width is simulated from speed, as in these demos.</li>
+          <li><b>PencilKit</b> exists on macOS only as drawing data, not as a canvas view, so a custom ink view is the realistic route.</li>
+          <li><b>Lowest risk:</b> 2 and 3, because they only add images to the Markdown the editor already writes.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const PROTOS = [
+    { id: 'glass', name: 'Glass Layer', src: 'glass.html',
+      idea: 'A clear sheet over the text. Draw anywhere; each stroke pins to the word under it, so it follows edits and reflow.',
+      saved: '<code>note.md</code> with invisible <code>&lt;!--ink n--&gt;</code> anchors and a hidden ink block',
+      feel: 'Closest to “text layer with an image layer on top”. Flip Pin to Page to feel why pinning matters.' },
+    { id: 'sketch', name: 'Sketch Blocks', src: 'sketch.html',
+      idea: 'Drawings are blocks between paragraphs. No modes: type in text, draw in a sketch. <code>/sketch</code> or ⌘D adds one.',
+      saved: 'Plain Markdown <code>![Sketch 1](note.assets/sketch-1.svg)</code> plus SVG files',
+      feel: 'Notion or Obsidian. Calm and very portable, but ink never touches the text.' },
+    { id: 'margin', name: 'Margin Notes', src: 'margin.html',
+      idea: 'Your ⌘F circles, with each note as a card in the margin beside its line. A card can hold a small sketch.',
+      saved: 'The footnote format Zoomies writes today, plus an optional image link per note',
+      feel: 'The smallest step from the current editor. Feels like comments in a doc.' },
+    { id: 'redpen', name: 'Red Pen', src: 'redpen.html',
+      idea: 'Mark up text by hand and the marks turn into edits: strike, scribble to delete, underline, circle for a note, caret to insert.',
+      saved: 'Ordinary Markdown: <code>~~strike~~</code>, <code>==highlight==</code>, <code>[^n]</code>, <code>&lt;ins&gt;</code>',
+      feel: 'Reviewing an agent’s plan with a pen. Ink is the input, clean Markdown is the output.' },
+    { id: 'canvas', name: 'Spatial Canvas', src: 'canvas.html',
+      idea: 'An endless board. Text cards anywhere, ink anywhere, ink can sit over cards. Pan and zoom.',
+      saved: '<code>board.canvas</code> (JSON Canvas, the open format Obsidian uses) plus one SVG of the ink',
+      feel: 'Freeform or tldraw. Great for thinking, weakest as something you paste to an agent.' },
+    { id: 'formats', name: 'Formats', formats: true,
+      idea: 'Which file formats can hold text with drawing, and how each prototype saves.',
+      saved: 'Markdown, SVG, JSON Canvas, PDF, Excalidraw',
+      feel: 'Read this before choosing. 2 and 3 are the least risky to build.' },
+  ];
+  const tabs = document.getElementById('tabs'), stage = document.getElementById('stage'), brief = document.getElementById('brief');
+  const frames = {};
+  tabs.innerHTML = PROTOS.map((p, i) =>
+    `<button type="button" role="tab" id="tab-${p.id}" data-id="${p.id}">${p.formats ? '' : `<span class="n">${i + 1}</span>`}${p.name}</button>`).join('');
+
+  function show(id) {
+    const p = PROTOS.find((x) => x.id === id) || PROTOS[0];
+    tabs.querySelectorAll('button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.id === p.id)));
+    brief.innerHTML = `<div><dt>Idea</dt><dd>${p.idea}</dd></div><div><dt>Saved as</dt><dd>${p.saved}</dd></div><div><dt>Feels like</dt><dd>${p.feel}</dd></div>`;
+    Object.values(frames).forEach((f) => (f.hidden = true));
+    document.getElementById('formats').hidden = !p.formats;
+    if (!p.formats) {
+      if (!frames[p.id]) {
+        const f = document.createElement('iframe');
+        f.src = p.src;
+        f.title = p.name;
+        stage.appendChild(f);
+        frames[p.id] = f;
+      }
+      frames[p.id].hidden = false;
+      frames[p.id].focus();
+    }
+    try { history.replaceState(null, '', '#' + p.id); } catch (_) {}
+  }
+  tabs.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) show(b.dataset.id); });
+  tabs.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    const ids = PROTOS.map((p) => p.id), cur = ids.indexOf(tabs.querySelector('[aria-selected="true"]').dataset.id);
+    const next = ids[(cur + (e.key === 'ArrowRight' ? 1 : ids.length - 1)) % ids.length];
+    show(next);
+    document.getElementById('tab-' + next).focus();
+  });
+  show((location.hash || '#glass').slice(1));
+</script>
+</body></html>

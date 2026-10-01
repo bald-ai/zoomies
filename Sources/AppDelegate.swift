@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: TrayService!
+    private var inkNoteEditors: [URL: InkNoteWindowController] = [:]
     private var settingsWindowController: SettingsWindowController?
 
     private let settingsStore: SettingsStore
@@ -152,6 +153,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        for editor in Array(inkNoteEditors.values) {
+            if let window = editor.window, !editor.windowShouldClose(window) { return .terminateCancel }
+        }
         guard recordingService.isBusyForUserCommands else {
             return .terminateNow
         }
@@ -226,6 +230,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch FinderReopenLogic.resolve(result) {
         case .open(let url):
             screenshotService.beginPostCaptureFlow(forExistingFileAt: url, on: nil, escapeKeyDeletesFile: false)
+        case .openInkNote(let url):
+            do {
+                let opened = try InkNoteWindowController.resolve(url.resolvingSymlinksInPath().standardizedFileURL)
+                let key = opened.noteURL.standardizedFileURL
+                if let existing = inkNoteEditors[key] {
+                    existing.present()
+                    return
+                }
+                let editor = InkNoteWindowController(opened: opened)
+                editor.copyFile = { [weak self] url in _ = self?.clipboardService.copyFile(at: url, useCache: false) }
+                editor.onClose = { [weak self] in self?.inkNoteEditors[key] = nil }
+                inkNoteEditors[key] = editor
+                editor.present()
+            } catch {
+                presentError(title: "Cannot Open Note", message: error.localizedDescription)
+            }
         case .warning(let title, let message, let settingsURL):
             if let settingsURL {
                 AlertPresenter.presentWarningWithSettingsButton(title: title, message: message, settingsURL: settingsURL)

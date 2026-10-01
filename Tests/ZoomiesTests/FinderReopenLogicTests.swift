@@ -28,6 +28,22 @@ final class FinderReopenLogicTests: XCTestCase {
         XCTAssertEqual(title, "Image is too large")
     }
 
+    func testMarkdownRoutingValidatesSizeAndEncodingBeforeImageInspection() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        for name in ["plan.md", "plan.markdown", "plan.MD"] {
+            let file = root.appendingPathComponent(name)
+            try Data("# Plan\n".utf8).write(to: file)
+            XCTAssertEqual(FinderReopenLogic.resolve(.success(.single(url: file))), .openInkNote(file))
+            try Data([0xff, 0xfe]).write(to: file)
+            guard case .warning(let title, _, _) = FinderReopenLogic.resolve(.success(.single(url: file))) else { return XCTFail("Invalid encoding opened") }
+            XCTAssertEqual(title, "Invalid UTF-8")
+            try Data(repeating: 65, count: MarkdownMarkerLogic.maximumFileSize + 1).write(to: file)
+            guard case .warning(let title, _, _) = FinderReopenLogic.resolve(.success(.single(url: file))) else { return XCTFail("Oversized file opened") }
+            XCTAssertEqual(title, "Markdown file is too large")
+        }
+    }
+
     func testSelectionCountsAndErrorsHaveDistinctRecoveryMessages() {
         let cases: [(Result<FinderSelectionService.Selection, Error>, String, Bool)] = [
             (.success(.none), "No Finder Selection", false),

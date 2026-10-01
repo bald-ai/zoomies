@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Margin Notes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<style>
+  .main { padding-inline: 16px; }
+  .layout {
+    position: relative; display: grid; grid-template-columns: minmax(0, 600px) 280px; gap: 64px;
+    justify-content: center; padding-block: 44px 80px;
+  }
+  .margin { position: relative; }
+  .wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  .wires path { fill: none; stroke: var(--red); stroke-width: 1.5; stroke-dasharray: 3 4; opacity: 0; transition: opacity .2s ease; }
+  .wires path.on { opacity: .9; }
+
+  .mk {
+    display: inline-grid; place-items: center; width: 21px; height: 21px; margin: 0 2px; vertical-align: 1px;
+    border-radius: 50%; background: var(--red); color: #fff; font: 600 11.5px/1 var(--sans);
+    box-shadow: 0 0 0 2px #ffffff22; cursor: pointer; user-select: none; -webkit-user-select: none;
+    transition: transform .18s cubic-bezier(.2,.8,.2,1), box-shadow .18s ease;
+  }
+  .mk.on { transform: scale(1.18); box-shadow: 0 0 0 3px #ff3b3055; }
+  .mk.pop { animation: pop .3s cubic-bezier(.2,1.6,.4,1); }
+  @keyframes pop { from { transform: scale(.2); } to { transform: scale(1); } }
+
+  .card {
+    position: absolute; left: 0; right: 0; top: 0;
+    background: var(--paper); border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 10px 10px; transition: transform .28s cubic-bezier(.2,.8,.2,1), border-color .15s ease, box-shadow .15s ease, opacity .2s ease;
+  }
+  .card.on { border-color: #ff3b3080; box-shadow: 0 6px 24px #00000055; }
+  .card.new { animation: slide .3s cubic-bezier(.2,.8,.2,1); }
+  @keyframes slide { from { opacity: 0; translate: 12px 0; } to { opacity: 1; translate: 0 0; } }
+  .card-h { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .card-h .badge { width: 19px; height: 19px; border-radius: 50%; background: var(--red); color: #fff; display: grid; place-items: center; font: 600 10.5px/1 var(--sans); }
+  .card-h .where { font: 11.5px var(--mono); color: var(--faint); flex: 1; }
+  .card-h button { border: 0; background: none; color: var(--muted); font-size: 12px; padding: 2px 6px; border-radius: 5px; cursor: pointer; }
+  .card-h button:hover { background: var(--raise-2); color: var(--fg); }
+  .card textarea {
+    width: 100%; resize: none; border: 0; background: none; color: var(--fg); outline: none; overflow: hidden;
+    font: 14px/1.5 var(--sans); padding: 0; min-height: 21px;
+  }
+  .card textarea::placeholder { color: var(--faint); }
+  .mini {
+    margin-top: 8px; position: relative; aspect-ratio: 260 / 110; border-radius: 7px; background: var(--bg);
+    background-image: radial-gradient(circle, #ffffff12 1px, transparent 1.4px); background-size: 14px 14px;
+    border: 1px solid var(--line);
+  }
+  .mini svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+
+  .layout.stacked { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .layout.stacked .margin { display: grid; gap: 10px; height: auto !important; }
+  .layout.stacked .card { position: relative; transform: none !important; }
+  .layout.stacked .wires { display: none; }
+  .under { max-width: 944px; margin: -50px auto 60px; display: grid; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar" id="bar">
+    <button type="button" class="btn" id="add" title="Add a marker at the cursor">+ Marker <kbd>⌘F</kbd></button>
+    <span class="label">Sketch tools</span>
+    <span class="spacer"></span>
+    <button type="button" class="btn" id="fileToggle" aria-pressed="true">File</button>
+  </div>
+  <div class="work">
+    <div class="main" id="main">
+      <div class="layout" id="layout">
+        <article class="prose" id="doc" contenteditable="true" spellcheck="false">
+          <h1>Recording polish</h1>
+          <p>The menu bar stop button should show elapsed time<span class="mk" contenteditable="false" data-n="1">1</span>. Right now it only turns red, so you can't tell how long you have been recording.</p>
+          <p>When a recording ends, the rename panel opens before the file has finished writing<span class="mk" contenteditable="false" data-n="2">2</span>, and the preview stays blank for a second.</p>
+          <p>The microphone toggle<span class="mk" contenteditable="false" data-n="3">3</span> should remember its last state between recordings.</p>
+          <p>Recordings shorter than one second should be thrown away without asking.</p>
+        </article>
+        <div class="margin" id="margin" aria-label="Notes"></div>
+        <svg class="wires" id="wires" aria-hidden="true"></svg>
+      </div>
+      <div class="under">
+        <p class="hint"><b>⌘F</b> drops a numbered circle at the cursor and opens its card. Return saves and puts you back in the text. Esc on an empty card removes it. Click a circle to jump to its note.</p>
+        <p class="hint"><b>Sketch</b> on any card opens a small drawing pad. Deleting a circle in the text removes its note; ⌘Z brings both back.</p>
+      </div>
+    </div>
+    <aside class="file" id="file" aria-label="Saved files"></aside>
+  </div>
+</div>
+<script src="ink.js"></script>
+<script>
+(() => {
+  const SW = 260, SH = 110;
+  const doc = document.getElementById('doc'), margin = document.getElementById('margin');
+  const layoutEl = document.getElementById('layout'), wires = document.getElementById('wires');
+  const notes = new Map();   // n -> { n, text, strokes, sketch, card, ta, svg }
+  const undo = [];
+  let active = null, editing = null;
+
+  const st = Ink.toolbar(document.getElementById('bar'), {
+    modes: false,
+    undo: () => {
+      const op = undo.pop();
+      if (!op) return;
+      if (op.add) { op.note.strokes.splice(op.note.strokes.indexOf(op.add), 1); op.add.el.remove(); }
+      if (op.erase) op.erase.forEach((s) => { op.note.strokes.push(s); op.note.svg.appendChild(s.el); });
+      file.refresh();
+    },
+  });
+  // The sketch tools sit next to their label.
+  const bar = document.getElementById('bar');
+  bar.insertBefore(bar.querySelector('.label'), bar.querySelector('.inkbar'));
+  bar.insertBefore(document.getElementById('add'), bar.firstChild);
+
+  const markers = () => [...doc.querySelectorAll('.mk')];
+  const markerOf = (n) => doc.querySelector(`.mk[data-n="${n}"]`);
+  const nextNumber = () => Math.max(0, ...notes.keys()) + 1;
+
+  function makeNote(n, text = '') {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.n = n;
+    card.innerHTML = `<div class="card-h"><span class="badge">${n}</span><span class="where"></span><button type="button" data-act="sketch">Sketch</button></div>
+      <textarea rows="1" placeholder="Note for this spot" aria-label="Note ${n}"></textarea>
+      <div class="mini drawzone" hidden><svg viewBox="0 0 ${SW} ${SH}"></svg></div>`;
+    const note = { n, text, strokes: [], sketch: false, card, ta: card.querySelector('textarea'), svg: card.querySelector('svg') };
+    note.ta.value = text;
+    notes.set(n, note);
+    margin.appendChild(card);
+    const mini = card.querySelector('.mini');
+    card.querySelector('[data-act="sketch"]').addEventListener('click', () => {
+      note.sketch = !note.sketch;
+      mini.hidden = !note.sketch;
+      card.querySelector('[data-act="sketch"]').textContent = note.sketch ? 'Hide sketch' : 'Sketch';
+      layout();
+      file.refresh();
+    });
+    Ink.capture(mini, {
+      active: () => true,
+      local: (e) => { const r = mini.getBoundingClientRect(), k = SW / r.width; return [(e.clientX - r.left) * k, (e.clientY - r.top) * k]; },
+      tool: () => ({ tool: st.tool, color: st.color, size: st.tool === 'hl' ? 12 : 2.6 }),
+      live: note.svg,
+      commit: (s) => { addStroke(note, s); undo.push({ note, add: s }); file.refresh(); },
+      erase: ([x, y]) => {
+        const gone = note.strokes.filter((s) => Ink.hit(s, x, y, 4));
+        if (!gone.length) return;
+        gone.forEach((s) => { note.strokes.splice(note.strokes.indexOf(s), 1); s.el.remove(); });
+        undo.push({ note, erase: gone });
+        file.refresh();
+      },
+    });
+    note.ta.addEventListener('input', () => { note.text = note.ta.value.replace(/\n/g, ' '); grow(note); layout(); file.refresh(); });
+    note.ta.addEventListener('focus', () => { editing = note; setActive(n); });
+    note.ta.addEventListener('blur', () => { if (editing === note) editing = null; });
+    note.ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(note, true); }
+      if (e.key === 'Escape') { e.preventDefault(); finish(note, false); }
+    });
+    card.addEventListener('mouseenter', () => setActive(n));
+    card.addEventListener('mouseleave', () => { if (!editing) setActive(null); });
+    return note;
+  }
+  function addStroke(note, s) { s.el = Ink.strokeEl(s); note.strokes.push(s); note.svg.appendChild(s.el); }
+  function grow(note) { note.ta.style.height = 'auto'; note.ta.style.height = note.ta.scrollHeight + 'px'; }
+
+  function finish(note, keep) {
+    if (!note.text.trim() && !note.strokes.length) {
+      markerOf(note.n)?.remove();
+      note.card.remove();
+      notes.delete(note.n);
+      Ink.toast(`Marker ${note.n} removed`);
+    }
+    const mk = markerOf(note.n);
+    editing = null;
+    doc.focus();
+    if (mk) {
+      const r = document.createRange();
+      r.setStartAfter(mk); r.collapse(true);
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    }
+    setActive(null);
+    layout();
+    file.refresh();
+  }
+
+  function insertMarker() {
+    const sel = getSelection();
+    let r;
+    if (sel.rangeCount && doc.contains(sel.getRangeAt(0).endContainer)) { r = sel.getRangeAt(0).cloneRange(); r.collapse(false); }
+    else { r = document.createRange(); r.selectNodeContents(doc.lastElementChild || doc); r.collapse(false); }
+    const n = nextNumber();
+    const mk = document.createElement('span');
+    mk.className = 'mk pop';
+    mk.contentEditable = 'false';
+    mk.dataset.n = n;
+    mk.textContent = n;
+    r.insertNode(mk);
+    const note = makeNote(n);
+    note.card.classList.add('new');
+    layout();
+    note.ta.focus();
+    file.refresh();
+  }
+
+  function setActive(n) {
+    active = n;
+    markers().forEach((m) => m.classList.toggle('on', +m.dataset.n === n));
+    notes.forEach((note) => note.card.classList.toggle('on', note.n === n));
+    wires.querySelectorAll('path').forEach((p) => p.classList.toggle('on', +p.dataset.n === n));
+  }
+
+  function layout() {
+    const stacked = document.getElementById('main').clientWidth < 760;
+    layoutEl.classList.toggle('stacked', stacked);
+    const base = layoutEl.getBoundingClientRect(), mBox = margin.getBoundingClientRect();
+    const order = markers().map((m) => +m.dataset.n);
+    notes.forEach((note) => (note.card.hidden = !order.includes(note.n)));
+    order.forEach((n) => { const nt = notes.get(n); if (nt) margin.appendChild(nt.card); });
+    const paras = [...doc.children];
+    let floor = 0, wiresHtml = '';
+    for (const n of order) {
+      const note = notes.get(n);
+      if (!note) continue;
+      const mk = markerOf(n), r = mk.getBoundingClientRect();
+      let block = mk; while (block.parentNode !== doc) block = block.parentNode;
+      note.card.querySelector('.where').textContent = `paragraph ${paras.indexOf(block)}`;
+      if (stacked) continue;
+      const y = Math.max(r.top - mBox.top - 6, floor);
+      const first = !note.card.style.transform;
+      if (first) note.card.style.transition = 'none';
+      note.card.style.transform = `translateY(${y}px)`;
+      if (first) { void note.card.offsetHeight; note.card.style.transition = ''; }
+      floor = y + note.card.offsetHeight + 12;
+      const x1 = r.right - base.left + 4, y1 = r.top + r.height / 2 - base.top;
+      const x2 = mBox.left - base.left - 2, y2 = mBox.top - base.top + y + 18;
+      wiresHtml += `<path data-n="${n}" class="${n === active ? 'on' : ''}" d="M${x1} ${y1}C${x1 + 60} ${y1} ${x2 - 60} ${y2} ${x2} ${y2}"/>`;
+    }
+    if (!stacked) margin.style.height = floor + 'px';
+    wires.innerHTML = wiresHtml;
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); if (!editing) insertMarker(); }
+  });
+  document.getElementById('add').addEventListener('click', () => { if (!editing) insertMarker(); });
+  doc.addEventListener('click', (e) => {
+    const mk = e.target.closest('.mk');
+    if (mk) { const note = notes.get(+mk.dataset.n); note && note.ta.focus(); }
+  });
+  doc.addEventListener('mouseover', (e) => { const mk = e.target.closest('.mk'); if (mk && !editing) setActive(+mk.dataset.n); });
+  doc.addEventListener('mouseout', (e) => { if (e.target.closest('.mk') && !editing) setActive(null); });
+  doc.addEventListener('input', () => { layout(); file.refresh(); });
+  new ResizeObserver(layout).observe(document.getElementById('main'));
+  new ResizeObserver(layout).observe(doc);
+
+  const fileEl = document.getElementById('file');
+  document.getElementById('fileToggle').addEventListener('click', (e) => {
+    fileEl.hidden = !fileEl.hidden;
+    e.currentTarget.setAttribute('aria-pressed', String(!fileEl.hidden));
+  });
+
+  const file = Ink.fileView(fileEl, () => {
+    const md = Ink.toMarkdown(doc, (el) => (el.classList && el.classList.contains('mk') ? `[^${el.dataset.n}]` : null));
+    const live = markers().map((m) => notes.get(+m.dataset.n)).filter(Boolean).sort((a, b) => a.n - b.n);
+    const defs = live.map((nt) => `[^${nt.n}]: ${nt.text.trim()}${nt.sketch && nt.strokes.length ? ` ![sketch](recording-polish.assets/note-${nt.n}.svg)` : ''}`);
+    const files = [{ name: 'recording-polish.md', text: md + (defs.length ? '\n' + defs.join('\n') + '\n' : ''), note: 'Same footnote format Zoomies writes today. A sketch is one image link at the end of its note line.' }];
+    live.filter((nt) => nt.sketch && nt.strokes.length).forEach((nt) =>
+      files.push({ name: `note-${nt.n}.svg`, text: Ink.svgDoc(nt.strokes, { fixed: { w: SW, h: SH } }), note: 'Saved in recording-polish.assets/.' }));
+    return files;
+  });
+
+  // Seed notes.
+  const F = Ink.fake, C = Object.fromEntries(Ink.COLORS);
+  const n1 = makeNote(1, 'mm:ss with monospaced digits so the width does not jitter.');
+  makeNote(2, 'Wait for the asset writer to finish, then open the panel.');
+  makeNote(3, 'Default off on first launch.');
+  n1.sketch = true;
+  n1.card.querySelector('.mini').hidden = false;
+  n1.card.querySelector('[data-act="sketch"]').textContent = 'Hide sketch';
+  addStroke(n1, F.stroke(F.rect(46, 28, 168, 40, 2), C.white, 'pen', 2.4));
+  addStroke(n1, F.stroke(F.ellipse(70, 48, 7, 7, 4, 1.05), C.red, 'pen', 3));
+  addStroke(n1, F.stroke(F.line(90, 48, 196, 47, 6, 0.4), C.white, 'pen', 2));
+  addStroke(n1, F.stroke(F.line(150, 100, 140, 74, 8, 3), C.blue, 'pen', 2.4));
+  addStroke(n1, F.stroke(F.arrowHead(150, 100, 140, 74, 9, 8), C.blue, 'pen', 2.4));
+  notes.forEach(grow);
+  (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => { notes.forEach(grow); layout(); file.now(); });
+  layout();
+})();
+</script>
+</body>
+</html>

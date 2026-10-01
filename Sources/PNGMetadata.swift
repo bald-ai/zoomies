@@ -17,10 +17,13 @@ enum PNGMetadata {
     static let promptKeyword = "Zoomies-Prompt-v1"
     /// Keyword for the JSON-encoded editable canvas state.
     static let editorStateKeyword = "Zoomies-EditorState-v1"
+    /// Keyword for the JSON-encoded text + ink of a drawn note.
+    static let inkNoteKeyword = "Zoomies-InkNote-v1"
+    static let maximumInkNoteChunkBytes = 16 * 1024 * 1024
 
     private static let signature: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
     private static let iTXtType = Array("iTXt".utf8)
-    private static let zoomiesKeywords = [originalPNGKeyword, promptKeyword, editorStateKeyword]
+    private static let zoomiesKeywords = [originalPNGKeyword, promptKeyword, editorStateKeyword, inkNoteKeyword]
 
     /// Inserts the original PNG bytes and prompt as `iTXt` chunks just before
     /// `IEND`. Returns nil if either input is not a PNG, or the input PNG is
@@ -141,6 +144,32 @@ enum PNGMetadata {
             }
         }
         return editorState
+    }
+
+    /// Replaces any Zoomies chunks with the note's text + ink, so the PNG
+    /// reopens in the note editor.
+    static func embed(intoPNG pngData: Data, inkNote: InkNoteDocument) -> Data? {
+        let bytes = [UInt8](pngData)
+        guard hasPNGSignature(bytes), let iendStart = indexOfChunk(named: "IEND", in: bytes),
+              let json = try? JSONEncoder().encode(inkNote) else { return nil }
+        var result = stripZoomiesChunks(from: bytes[0..<iendStart])
+        result.append(makeITXtChunk(keyword: inkNoteKeyword, text: json))
+        result.append(contentsOf: bytes[iendStart...])
+        return result
+    }
+
+    static func extractInkNote(fromPNG pngData: Data) -> InkNoteDocument? {
+        let bytes = [UInt8](pngData)
+        guard hasPNGSignature(bytes) else { return nil }
+        var cursor = 8
+        while let chunk = nextChunk(in: bytes, cursor: &cursor) {
+            guard chunk.hasKeyword(inkNoteKeyword) else { continue }
+            guard chunk.payload.count <= maximumInkNoteChunkBytes, let text = parseITXt(chunk.payload),
+                  let document = try? JSONDecoder().decode(InkNoteDocument.self, from: Data(text.utf8)),
+                  document.isSafeToRestore else { return nil }
+            return document
+        }
+        return nil
     }
 
     /// True when the data starts with the 8-byte PNG signature.

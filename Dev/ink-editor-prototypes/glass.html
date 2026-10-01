@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Glass Layer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<style>
+  .main { padding-inline: 16px; }
+  .sheet { position: relative; max-width: var(--col, 620px); margin: 44px auto 0; min-height: 62vh; }
+  .sheet .inklayer { width: 100%; height: 100%; }
+  .anc { display: inline-block; width: 0; height: 1em; vertical-align: text-top; }
+  body.show-anchors .anc { width: 2px; margin: 0 1px; background: var(--blue); border-radius: 1px; opacity: .8; }
+  .under { max-width: var(--col, 620px); margin: 28px auto 60px; display: grid; gap: 6px; }
+  .bar input[type="range"] { width: 120px; accent-color: var(--fg); vertical-align: middle; }
+  .bar label { display: inline-flex; align-items: center; gap: 8px; }
+  body[data-ink] .prose { user-select: none; -webkit-user-select: none; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar" id="bar">
+    <span class="label">Pin ink to</span>
+    <div class="seg" id="pin" role="group" aria-label="Pin ink to">
+      <button type="button" data-pin="words">Words</button>
+      <button type="button" data-pin="page">Page</button>
+    </div>
+    <label for="col"><span class="label">Column</span><input type="range" id="col" min="300" max="760" value="620"></label>
+    <span class="spacer"></span>
+    <button type="button" class="btn" id="anchors" aria-pressed="false">Show anchors</button>
+    <button type="button" class="btn" id="fileToggle" aria-pressed="true">File</button>
+  </div>
+  <div class="work">
+    <div class="main" id="main">
+      <div class="sheet drawzone" id="sheet">
+        <article class="prose" id="doc" contenteditable="true" spellcheck="false">
+          <h1>Settings window pass</h1>
+          <p>The shortcut recorder clips its label when the combo is longer than three keys. Widen the field or let it grow with the text.</p>
+          <p>Palette row: the selected swatch ring is hard to see on yellow. Use a dark ring on light swatches.</p>
+          <p>Filename template preview still shows the old date format after you change it. It only refreshes after Settings is reopened.</p>
+          <p>Leave the screenshot sound toggle alone, that one is fine.</p>
+        </article>
+        <svg class="inklayer" id="ink" aria-hidden="true"></svg>
+      </div>
+      <div class="under">
+        <p class="hint"><b>Draw:</b> ⌘D toggles, or hold ⌥ and drag. P pen · H highlighter · E eraser · 1–5 colors · T or Esc back to typing.</p>
+        <p class="hint"><b>Try:</b> drag Column, or add a line above the red circle. The ink rides along with its word. Switch Pin to Page and do it again: the ink stays put and drifts off the text.</p>
+      </div>
+    </div>
+    <aside class="file" id="file" aria-label="Saved file"></aside>
+  </div>
+</div>
+<script src="ink.js"></script>
+<script>
+(() => {
+  const doc = document.getElementById('doc'), sheet = document.getElementById('sheet'), svg = document.getElementById('ink');
+  const items = [];          // { n, s, anchor, dx, dy, x, y, el }
+  const undo = [];
+  let n = 0, pin = 'words';
+
+  const st = Ink.toolbar(document.getElementById('bar'), {
+    undo: () => {
+      const op = undo.pop();
+      if (!op) return;
+      if (op.add) { remove(op.add); }
+      if (op.erase) op.erase.forEach((it) => { items.push(it); svg.appendChild(it.el); });
+      render();
+    },
+  });
+  st.on((k) => { if (k === 'mode' && st.mode === 'type') doc.focus(); });
+
+  const sheetBox = () => sheet.getBoundingClientRect();
+  const posOf = (it) => {
+    if (!it.anchor) return { x: it.x, y: it.y };
+    const span = doc.querySelector(`[data-ink="${it.anchor}"]`);
+    if (!span) return null;
+    const r = span.getBoundingClientRect(), b = sheetBox();
+    return { x: r.left - b.left + it.dx, y: r.top - b.top + it.dy };
+  };
+
+  function makeAnchor(cx, cy) {
+    const r = Ink.caretAt(cx, cy);
+    if (!r || !doc.contains(r.startContainer)) return null;
+    let node = r.startContainer, off = r.startOffset;
+    if (node.nodeType === 3) while (off > 0 && /\S/.test(node.data[off - 1])) off--;
+    const span = document.createElement('span');
+    span.className = 'anc';
+    span.contentEditable = 'false';
+    span.dataset.ink = Ink.uid('a');
+    span.textContent = '​';
+    const at = document.createRange();
+    at.setStart(node, off);
+    at.insertNode(span);
+    return span;
+  }
+
+  function place(it, abs) {
+    // abs: position of the stroke's origin in sheet coordinates
+    if (pin === 'words') {
+      // Loops anchor at their middle, flat lines at their start, everything else at its tip.
+      const b = sheetBox(), bb = Ink.bbox(it.s.pts), P = it.s.pts, first = P[0], last = P[P.length - 1];
+      const closed = Math.hypot(last[0] - first[0], last[1] - first[1]) < Math.max(bb.w, bb.h) * 0.35;
+      const at = closed ? [bb.cx, bb.cy] : bb.h < bb.w * 0.3 ? (first[0] < last[0] ? first : last) : last;
+      const span = makeAnchor(b.left + abs.x + at[0], b.top + abs.y + at[1]);
+      if (span) {
+        const r = span.getBoundingClientRect();
+        it.anchor = span.dataset.ink;
+        it.dx = abs.x - (r.left - b.left);
+        it.dy = abs.y - (r.top - b.top);
+        return;
+      }
+    }
+    it.anchor = null;
+    it.x = abs.x; it.y = abs.y;
+  }
+
+  function add(s, record = true) {
+    const origin = Ink.localize(s);
+    const it = { n: ++n, s, el: Ink.strokeEl(s), t: Date.now() };
+    // A stroke drawn right after and right next to the previous one (an arrow head, a second
+    // underline) joins its anchor, so the pair moves as one drawing.
+    const prev = items[items.length - 1], bb = Ink.bbox(s.pts);
+    if (prev && prev.visible && prev.anchor && it.t - prev.t < 1500) {
+      const pb = Ink.bbox(prev.s.pts);
+      const gx = Math.max(0, pb.x + prev.pos.x - (origin.x + bb.w), origin.x - (pb.x + prev.pos.x + pb.w));
+      const gy = Math.max(0, pb.y + prev.pos.y - (origin.y + bb.h), origin.y - (pb.y + prev.pos.y + pb.h));
+      if (Math.hypot(gx, gy) < 16) {
+        Object.assign(it, { anchor: prev.anchor, dx: prev.dx + origin.x - prev.pos.x, dy: prev.dy + origin.y - prev.pos.y });
+      }
+    }
+    if (!it.anchor) place(it, origin);
+    items.push(it);
+    svg.appendChild(it.el);
+    if (record) undo.push({ add: it });
+    render();
+    return it;
+  }
+
+  function remove(it) {
+    items.splice(items.indexOf(it), 1);
+    it.el.remove();
+    if (it.anchor && !items.some((o) => o.anchor === it.anchor)) doc.querySelector(`[data-ink="${it.anchor}"]`)?.remove();
+  }
+
+  function render() {
+    for (const it of items) {
+      const p = posOf(it);
+      it.visible = !!p;
+      it.el.style.display = p ? '' : 'none';
+      if (p) { it.pos = p; it.el.setAttribute('transform', `translate(${Ink.f(p.x)} ${Ink.f(p.y)})`); }
+    }
+    file.refresh();
+  }
+
+  Ink.capture(sheet, {
+    active: (e) => st.drawing() || e.pointerType === 'pen',
+    local: (e) => { const b = sheetBox(); return [e.clientX - b.left, e.clientY - b.top]; },
+    tool: () => ({ tool: st.tool, color: st.color, size: st.size() }),
+    live: svg,
+    commit: (s) => add(s),
+    erase: ([x, y]) => {
+      const gone = items.filter((it) => it.visible && Ink.hit(it.s, x - it.pos.x, y - it.pos.y));
+      if (!gone.length) return;
+      gone.forEach((it) => { items.splice(items.indexOf(it), 1); it.el.remove(); });
+      undo.push({ erase: gone });
+      render();
+    },
+  });
+
+  document.getElementById('pin').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-pin]');
+    if (!b || b.dataset.pin === pin) return;
+    const abs = items.filter((it) => it.visible).map((it) => [it, { ...it.pos }]);
+    for (const [it] of abs) if (it.anchor) { doc.querySelector(`[data-ink="${it.anchor}"]`)?.remove(); it.anchor = null; }
+    doc.querySelectorAll('.anc').forEach((a) => a.remove());
+    pin = b.dataset.pin;
+    for (const [it, p] of abs) place(it, p);
+    syncPin();
+    render();
+    Ink.toast(pin === 'words' ? 'Ink now follows its words' : 'Ink now stays at a fixed spot on the page');
+  });
+  const syncPin = () => document.querySelectorAll('[data-pin]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pin === pin)));
+  syncPin();
+
+  const col = document.getElementById('col');
+  col.addEventListener('input', () => { document.documentElement.style.setProperty('--col', col.value + 'px'); render(); });
+  document.getElementById('anchors').addEventListener('click', (e) => {
+    const on = document.body.classList.toggle('show-anchors');
+    e.currentTarget.setAttribute('aria-pressed', String(on));
+    render();
+  });
+  const fileEl = document.getElementById('file');
+  document.getElementById('fileToggle').addEventListener('click', (e) => {
+    fileEl.hidden = !fileEl.hidden;
+    e.currentTarget.setAttribute('aria-pressed', String(!fileEl.hidden));
+    render();
+  });
+  doc.addEventListener('input', render);
+  new ResizeObserver(render).observe(doc);
+
+  const file = Ink.fileView(fileEl, () => {
+    const live = new Set(items.filter((it) => it.visible && it.anchor).map((it) => it.anchor));
+    const num = {};
+    items.filter((it) => it.visible && it.anchor).forEach((it) => (num[it.anchor] = (num[it.anchor] ? num[it.anchor] + ',' : '') + it.n));
+    const md = Ink.toMarkdown(doc, (el) => (el.classList && el.classList.contains('anc') ? (live.has(el.dataset.ink) ? `<!--ink ${num[el.dataset.ink]}-->` : '') : null));
+    const lines = items.filter((it) => it.visible).map((it) => JSON.stringify(Object.assign(
+      { n: it.n },
+      it.anchor ? { pin: 'word', dx: Math.round(it.dx), dy: Math.round(it.dy) } : { pin: 'page', x: Math.round(it.x), y: Math.round(it.y) },
+      { tool: it.s.tool, color: it.s.color, size: it.s.size, pts: Ink.ptsString(it.s.pts) })));
+    const text = md + (lines.length ? `\n<!-- zoomies-ink v1\n${lines.join('\n')}\n-->\n` : '');
+    return [
+      { name: 'settings-pass.md', text, note: 'HTML comments are invisible in every Markdown viewer, so the file still reads as plain notes.' },
+      { name: 'settings-pass.ink.svg', text: Ink.svgDoc(items.filter((it) => it.visible).map((it) => ({ s: it.s, dx: it.pos.x, dy: it.pos.y }))), note: 'Optional flattened copy of the ink for viewers that cannot redraw it.' },
+    ];
+  });
+
+  // Seed a realistic working state once fonts have settled.
+  function phraseRect(text) {
+    const w = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+    while (w.nextNode()) {
+      const i = w.currentNode.data.indexOf(text);
+      if (i < 0) continue;
+      const r = document.createRange();
+      r.setStart(w.currentNode, i); r.setEnd(w.currentNode, i + text.length);
+      const rects = [...r.getClientRects()], b = sheetBox();
+      const a = rects[0], z = rects[rects.length - 1];
+      return { x: a.left - b.left, y: a.top - b.top, w: (a.top === z.top ? z.right : a.right) - a.left, h: a.height };
+    }
+  }
+  (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => {
+    const F = Ink.fake, C = Object.fromEntries(Ink.COLORS);
+    const a = phraseRect('clips its label');
+    if (a) add(F.stroke(F.ellipse(a.x + a.w / 2, a.y + a.h / 2, a.w / 2 + 12, a.h / 2 + 5, 3), C.red), false);
+    const b = phraseRect('dark ring on light swatches');
+    if (b) add(F.stroke(F.line(b.x - 2, b.y + b.h * 0.58, b.x + b.w + 2, b.y + b.h * 0.55, 7, 0.8), C.yellow, 'hl'), false);
+    const c = phraseRect('old date format');
+    if (c) {
+      const ex = c.x + c.w / 2, ey = c.y + c.h + 2, sx = ex + 70, sy = ey + 46;
+      add(F.stroke(F.line(sx, sy, ex + 4, ey + 2, 11, 6), C.blue), false);
+      add(F.stroke(F.arrowHead(sx, sy, ex + 4, ey + 2, 12), C.blue), false);
+    }
+    const d = phraseRect('one is fine.');
+    if (d) {
+      const x = d.x + d.w + 12, y = d.y + d.h * 0.55;
+      add(F.stroke(F.line(x, y, x + 6, y + 8, 21, 0.3).concat(F.line(x + 6, y + 8, x + 19, y - 9, 22, 1)), C.green), false);
+    }
+    render();
+  });
+})();
+</script>
+</body>
+</html>

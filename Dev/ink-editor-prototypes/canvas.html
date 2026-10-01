@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Spatial Canvas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<style>
+  .board {
+    overflow: hidden !important; position: relative; touch-action: none;
+    background-color: var(--bg);
+    background-image: radial-gradient(circle, #ffffff16 1px, transparent 1.3px);
+  }
+  @media (max-width: 860px) { .board { height: 72vh; flex: none; } }
+  .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .world .inklayer { z-index: 2; }
+  body.panning .board, body[data-tool="hand"] .board { cursor: grab; }
+  body.panning.grabbing .board { cursor: grabbing; }
+  body[data-tool="text"] .board { cursor: text; }
+
+  .card {
+    position: absolute; z-index: 1; background: var(--paper); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 1px 0 #ffffff08 inset, 0 8px 24px #00000040;
+    transition: box-shadow .15s ease, border-color .15s ease;
+  }
+  .card:focus-within { border-color: var(--line-2); box-shadow: 0 0 0 3px #3a8dff22, 0 12px 30px #00000055; }
+  .card.new { animation: pop .22s cubic-bezier(.2,1.4,.4,1); }
+  @keyframes pop { from { transform: scale(.85); opacity: 0; } }
+  .grab { height: 14px; cursor: grab; display: grid; place-items: center; }
+  .grab::before { content: ""; width: 28px; height: 3px; border-radius: 2px; background: var(--line-2); opacity: 0; transition: opacity .15s ease; }
+  .card:hover .grab::before { opacity: 1; }
+  .card .body { padding: 0 14px 12px; outline: none; font: 14.5px/1.55 var(--sans); white-space: pre-wrap; word-break: break-word; min-height: 1.5em; }
+  .card .body::first-line { font-weight: 600; }
+  .card .body:empty::before { content: "Type a note"; color: var(--faint); }
+  .zoom { font: 12px var(--mono); color: var(--muted); min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+  .help {
+    position: absolute; left: 16px; bottom: 14px; z-index: 3; max-width: calc(100% - 32px);
+    background: #18191ee6; border: 1px solid var(--line); border-radius: 9px; padding: 8px 12px; pointer-events: none;
+  }
+</style>
+</head>
+<body data-tool="pen">
+<div class="app">
+  <div class="bar" id="bar">
+    <span class="zoom" id="zoom">100%</span>
+    <button type="button" class="btn" id="fit">Fit <kbd>F</kbd></button>
+    <span class="spacer"></span>
+    <button type="button" class="btn" id="fileToggle" aria-pressed="true">File</button>
+  </div>
+  <div class="work">
+    <div class="main board drawzone" id="board">
+      <div class="world" id="world"><svg class="inklayer" id="ink" aria-hidden="true"></svg></div>
+      <p class="hint help"><b>Draw</b> anywhere. <b>T</b> then click for a text card, or double-click with the hand. Drag the bar on a card to move it. <b>Space</b>-drag or two fingers to pan, pinch or ⌘-scroll to zoom. Hold <b>⌥</b> to draw over a card.</p>
+    </div>
+    <aside class="file" id="file" aria-label="Saved files"></aside>
+  </div>
+</div>
+<script src="ink.js"></script>
+<script>
+(() => {
+  const board = document.getElementById('board'), world = document.getElementById('world'), svg = document.getElementById('ink');
+  const view = { x: 0, y: 0, z: 1 };
+  const cards = [];      // { id, x, y, w, el, body }
+  const strokes = [];    // world-space strokes
+  const undo = [];
+  let space = false, cardSeq = 0;
+
+  const st = Ink.toolbar(document.getElementById('bar'), {
+    modes: false,
+    extraTools: [['text', 'Text card', 'T'], ['hand', 'Hand', 'V']],
+    undo: () => {
+      const op = undo.pop();
+      if (!op) return;
+      if (op.add) { strokes.splice(strokes.indexOf(op.add), 1); op.add.el.remove(); }
+      if (op.erase) op.erase.forEach((s) => { strokes.push(s); svg.appendChild(s.el); });
+      if (op.card) removeCard(op.card);
+      file.refresh();
+    },
+    inkCursor: (s) => ['pen', 'hl', 'eraser'].includes(s.tool),
+  });
+  const syncTool = () => { document.body.dataset.tool = st.tool; };
+  st.on(syncTool);
+
+  function apply() {
+    world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.z})`;
+    board.style.backgroundSize = `${22 * view.z}px ${22 * view.z}px`;
+    board.style.backgroundPosition = `${view.x}px ${view.y}px`;
+    document.getElementById('zoom').textContent = Math.round(view.z * 100) + '%';
+  }
+  const toWorld = (cx, cy) => { const r = board.getBoundingClientRect(); return [(cx - r.left - view.x) / view.z, (cy - r.top - view.y) / view.z]; };
+
+  function addCard(x, y, text = '', w = 240, fresh = false) {
+    const el = document.createElement('div');
+    el.className = 'card' + (fresh ? ' new' : '');
+    el.innerHTML = '<div class="grab" title="Drag to move"></div><div class="body" contenteditable="true" spellcheck="false"></div>';
+    const c = { id: 'c' + ++cardSeq, x, y, w, el, body: el.querySelector('.body') };
+    c.body.textContent = text;
+    place(c);
+    world.insertBefore(el, svg);
+    cards.push(c);
+    c.body.addEventListener('input', () => file.refresh());
+    c.body.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); c.body.blur(); } });
+    c.body.addEventListener('blur', () => { if (!c.body.textContent.trim()) removeCard(c); });
+    const grab = el.querySelector('.grab');
+    grab.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      grab.setPointerCapture(e.pointerId);
+      const sx = e.clientX, sy = e.clientY, x0 = c.x, y0 = c.y;
+      const move = (ev) => { c.x = x0 + (ev.clientX - sx) / view.z; c.y = y0 + (ev.clientY - sy) / view.z; place(c); };
+      const up = () => { grab.removeEventListener('pointermove', move); grab.removeEventListener('pointerup', up); file.refresh(); };
+      grab.addEventListener('pointermove', move);
+      grab.addEventListener('pointerup', up);
+    });
+    return c;
+  }
+  function place(c) { Object.assign(c.el.style, { left: c.x + 'px', top: c.y + 'px', width: c.w + 'px' }); }
+  function removeCard(c) { const i = cards.indexOf(c); if (i >= 0) cards.splice(i, 1); c.el.remove(); file.refresh(); }
+  function addStroke(s) { s.el = Ink.strokeEl(s); strokes.push(s); svg.appendChild(s.el); return s; }
+
+  Ink.capture(board, {
+    active: (e) => !space && ['pen', 'hl', 'eraser'].includes(st.tool) && (!e.target.closest('.card') || e.altKey) && !e.target.closest('.help'),
+    local: (e) => toWorld(e.clientX, e.clientY),
+    tool: () => ({ tool: st.tool, color: st.color, size: st.size() }),
+    live: svg,
+    start: () => document.activeElement && document.activeElement.blur && document.activeElement.blur(),
+    commit: (s) => { addStroke(s); undo.push({ add: s }); file.refresh(); },
+    erase: ([x, y]) => {
+      const gone = strokes.filter((s) => Ink.hit(s, x, y, 7 / view.z));
+      if (!gone.length) return;
+      gone.forEach((s) => { strokes.splice(strokes.indexOf(s), 1); s.el.remove(); });
+      undo.push({ erase: gone });
+      file.refresh();
+    },
+  });
+
+  // Panning, text placement.
+  board.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.card')) return;
+    if (st.tool === 'text' && !space) {
+      e.preventDefault();
+      const [x, y] = toWorld(e.clientX, e.clientY);
+      const c = addCard(x - 12, y - 18, '', 240, true);
+      undo.push({ card: c });
+      setTimeout(() => c.body.focus(), 0);
+      return;
+    }
+    if (!(space || st.tool === 'hand' || e.button === 1)) return;
+    e.preventDefault();
+    board.setPointerCapture(e.pointerId);
+    document.body.classList.add('grabbing');
+    const sx = e.clientX - view.x, sy = e.clientY - view.y;
+    const move = (ev) => { view.x = ev.clientX - sx; view.y = ev.clientY - sy; apply(); };
+    const up = () => { document.body.classList.remove('grabbing'); board.removeEventListener('pointermove', move); board.removeEventListener('pointerup', up); };
+    board.addEventListener('pointermove', move);
+    board.addEventListener('pointerup', up);
+  });
+  board.addEventListener('dblclick', (e) => {
+    if (st.tool !== 'hand' || e.target.closest('.card')) return;
+    const [x, y] = toWorld(e.clientX, e.clientY);
+    const c = addCard(x - 12, y - 18, '', 240, true);
+    undo.push({ card: c });
+    setTimeout(() => c.body.focus(), 0);
+  });
+  board.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {
+      const r = board.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+      const z = Math.min(4, Math.max(0.25, view.z * Math.exp(-e.deltaY * 0.01)));
+      view.x = px - ((px - view.x) * z) / view.z;
+      view.y = py - ((py - view.y) * z) / view.z;
+      view.z = z;
+    } else { view.x -= e.deltaX; view.y -= e.deltaY; }
+    apply();
+  }, { passive: false });
+
+  document.addEventListener('keydown', (e) => {
+    if (Ink.isEditable(document.activeElement)) return;
+    if (e.code === 'Space') { e.preventDefault(); space = true; document.body.classList.add('panning'); }
+    if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey) fit();
+  });
+  document.addEventListener('keyup', (e) => { if (e.code === 'Space') { space = false; document.body.classList.remove('panning'); } });
+
+  function contentBox() {
+    const pts = strokes.flatMap((s) => s.pts.map((p) => [p[0], p[1]]));
+    cards.forEach((c) => { pts.push([c.x, c.y], [c.x + c.w, c.y + c.el.offsetHeight]); });
+    return pts.length ? Ink.bbox(pts) : null;
+  }
+  function fit() {
+    const b = contentBox();
+    if (!b) return;
+    const r = board.getBoundingClientRect(), pad = 48;
+    view.z = Math.min(1.4, Math.max(0.25, Math.min((r.width - pad * 2) / b.w, (r.height - pad * 2 - 40) / b.h)));
+    view.x = (r.width - b.w * view.z) / 2 - b.x * view.z;
+    view.y = (r.height - 40 - b.h * view.z) / 2 - b.y * view.z;
+    apply();
+  }
+  document.getElementById('fit').addEventListener('click', fit);
+
+  const fileEl = document.getElementById('file');
+  document.getElementById('fileToggle').addEventListener('click', (e) => {
+    fileEl.hidden = !fileEl.hidden;
+    e.currentTarget.setAttribute('aria-pressed', String(!fileEl.hidden));
+    setTimeout(fit, 0);
+  });
+
+  const file = Ink.fileView(fileEl, () => {
+    const r = Math.round;
+    const nodes = cards.map((c) => ({ id: c.id, type: 'text', x: r(c.x), y: r(c.y), width: r(c.w), height: r(c.el.offsetHeight), text: c.body.innerText.replace(/\n$/, '') }));
+    let ink = null;
+    if (strokes.length) {
+      const b = Ink.bbox(strokes.flatMap((s) => s.pts), 10);
+      ink = { x: r(b.x), y: r(b.y), w: r(b.w), h: r(b.h) };
+      nodes.push({ id: 'ink', type: 'file', file: 'zoomies-v2.ink.svg', x: ink.x, y: ink.y, width: ink.w, height: ink.h });
+    }
+    const json = JSON.stringify({ nodes, edges: [] }, null, 2);
+    return [
+      { name: 'zoomies-v2.canvas', text: json + '\n', note: 'JSON Canvas, the open format Obsidian Canvas uses. Text nodes hold Markdown.' },
+      { name: 'zoomies-v2.ink.svg', text: ink ? Ink.svgDoc(strokes, { fixed: ink }) : '<svg xmlns="http://www.w3.org/2000/svg"/>\n', note: 'All ink as one file node, layered over the cards.' },
+    ];
+  });
+
+  // Seed board.
+  const F = Ink.fake, C = Object.fromEntries(Ink.COLORS);
+  addCard(40, 60, 'Capture\nArea, full screen, window. Window capture needs a hover highlight.', 230);
+  addCard(420, 30, 'Annotate\nArrows, markers, notes. Marker notes should be able to hold a sketch.', 240);
+  addCard(450, 300, 'Hand off\nCopy image and note in one paste, so the agent gets both.', 250);
+  addCard(60, 330, 'Open question\nOne PNG with everything inside, or a PNG and a .md side by side?', 250);
+  (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => {
+    addStroke(F.stroke(F.line(282, 110, 410, 82, 3, -14), C.green));
+    addStroke(F.stroke(F.arrowHead(282, 110, 410, 82, 4), C.green));
+    addStroke(F.stroke(F.line(560, 150, 572, 290, 7, 12), C.green));
+    addStroke(F.stroke(F.arrowHead(560, 150, 572, 290, 8), C.green));
+    addStroke(F.stroke(F.ellipse(185, 382, 152, 70, 11, 1.1), C.red));
+    addStroke(F.stroke(F.line(462, 350, 640, 350, 15, 0.6), C.yellow, 'hl', 16));
+    fit();
+    file.now();
+  });
+  apply();
+  syncTool();
+})();
+</script>
+</body>
+</html>

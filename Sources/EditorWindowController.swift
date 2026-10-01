@@ -1152,7 +1152,7 @@ extension EditorWindowController: NSWindowDelegate {
 
 /// Marker note field. The popover window has no Edit menu behind it, so the
 /// standard editing shortcuts are routed to the field editor directly.
-private final class MarkerNoteField: NSTextField {
+final class MarkerNoteField: NSTextField {
     var maxLength = Int.max
 
     override func textDidChange(_ notification: Notification) {

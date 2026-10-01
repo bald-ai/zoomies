@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sketch Blocks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<style>
+  .main { padding-inline: 16px; }
+  .column { max-width: 660px; margin: 44px auto 0; }
+  .sketch {
+    margin: 1.4em -12px 1.6em; padding: 0; position: relative;
+    border-radius: 12px; background: var(--paper); border: 1px solid var(--line);
+    transition: border-color .15s ease, box-shadow .15s ease;
+    user-select: none; -webkit-user-select: none;
+  }
+  .sketch:hover, .sketch.drawing { border-color: var(--line-2); }
+  .sketch.drawing { box-shadow: 0 0 0 4px #3a8dff14; }
+  .sketch.fresh { animation: grow .35s cubic-bezier(.2,.8,.2,1); }
+  @keyframes grow { from { opacity: 0; transform: scaleY(.6); } to { opacity: 1; transform: none; } }
+  .pad {
+    position: relative; width: 100%; border-radius: 12px 12px 0 0; overflow: hidden;
+    background-image: radial-gradient(circle, #ffffff14 1px, transparent 1.4px);
+    background-size: 20px 20px; background-position: 10px 10px;
+  }
+  .pad svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .sketch figcaption {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 12px;
+    border-top: 1px solid var(--line); font: 12px var(--mono); color: var(--muted);
+  }
+  .sketch figcaption .sp { flex: 1; }
+  .sketch figcaption button {
+    border: 0; background: none; color: var(--muted); font: 12px var(--sans); padding: 3px 8px; border-radius: 6px; cursor: pointer; opacity: 0;
+    transition: opacity .15s ease;
+  }
+  .sketch:hover figcaption button, .sketch figcaption button:focus-visible { opacity: 1; }
+  .sketch figcaption button:hover { background: var(--raise-2); color: var(--fg); }
+  .grip {
+    position: absolute; left: 50%; bottom: -7px; width: 44px; height: 12px; margin-left: -22px; cursor: ns-resize;
+    display: grid; place-items: center; opacity: 0; transition: opacity .15s ease;
+  }
+  .grip::before { content: ""; width: 30px; height: 4px; border-radius: 2px; background: var(--line-2); }
+  .sketch:hover .grip { opacity: 1; }
+  .empty-pad { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); font-size: 13px; pointer-events: none; }
+  .under { max-width: 660px; margin: 28px auto 60px; display: grid; gap: 6px; }
+  .slash { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar" id="bar">
+    <button type="button" class="btn" id="insert" title="Insert a sketch below the current paragraph">+ Sketch <kbd>⌘D</kbd></button>
+    <span class="spacer"></span>
+    <button type="button" class="btn" id="fileToggle" aria-pressed="true">File</button>
+  </div>
+  <div class="work">
+    <div class="main">
+      <div class="column">
+        <article class="prose" id="doc" contenteditable="true" spellcheck="false">
+          <h1>Capture overlay rework</h1>
+          <p>The size readout sits on top of the selection and hides what you are capturing. Move it outside, next to the corner you are dragging.</p>
+          <p>When the selection touches a screen edge, flip the readout to the inside corner instead.</p>
+          <p>Keep the crosshair lines. People use them to line things up.</p>
+        </article>
+      </div>
+      <div class="under">
+        <p class="hint"><b>No modes:</b> type in text, draw in a sketch. Type <code>/sketch</code> on an empty line and press Return, or press ⌘D, to add one. Drag the bar under a sketch to make it taller.</p>
+        <p class="hint"><b>Keys:</b> P pen · H highlighter · E eraser · 1–5 colors (when the text is not focused) · ⌘Z undoes ink.</p>
+      </div>
+    </div>
+    <aside class="file" id="file" aria-label="Saved files"></aside>
+  </div>
+</div>
+<script src="ink.js"></script>
+<script>
+(() => {
+  const W = 640;
+  const doc = document.getElementById('doc');
+  const sketches = new Map();       // id -> { id, h, strokes, fig, svg }
+  const undo = [];
+  let count = 0;
+
+  const st = Ink.toolbar(document.getElementById('bar'), {
+    modes: false,
+    undo: () => {
+      const op = undo.pop();
+      if (!op) return;
+      if (op.add) { op.sk.strokes.splice(op.sk.strokes.indexOf(op.add), 1); op.add.el.remove(); }
+      if (op.erase) op.erase.forEach((s) => { op.sk.strokes.push(s); op.sk.svg.appendChild(s.el); });
+      refreshEmpty(op.sk);
+      file.refresh();
+    },
+  });
+
+  function refreshEmpty(sk) { sk.fig.querySelector('.empty-pad').hidden = sk.strokes.length > 0; }
+
+  function makeSketch(h = 240) {
+    const id = ++count;
+    const fig = document.createElement('figure');
+    fig.className = 'sketch';
+    fig.contentEditable = 'false';
+    fig.dataset.id = id;
+    fig.innerHTML = `<div class="pad drawzone" style="aspect-ratio:${W}/${h}"><svg viewBox="0 0 ${W} ${h}" aria-label="Sketch ${id}"></svg><div class="empty-pad">Draw here</div></div>
+      <figcaption><span>sketch-${id}.svg</span><span class="sp"></span><button type="button" data-act="clear">Clear</button><button type="button" data-act="del">Remove</button></figcaption>
+      <div class="grip" title="Drag to resize"></div>`;
+    const sk = { id, h, strokes: [], fig, svg: fig.querySelector('svg') };
+    sketches.set(id, sk);
+    const pad = fig.querySelector('.pad');
+    const local = (e) => { const r = pad.getBoundingClientRect(), k = W / r.width; return [(e.clientX - r.left) * k, (e.clientY - r.top) * k]; };
+    Ink.capture(pad, {
+      active: () => true,
+      local,
+      tool: () => ({ tool: st.tool, color: st.color, size: st.size() }),
+      live: sk.svg,
+      start: () => fig.classList.add('drawing'),
+      commit: (s) => {
+        fig.classList.remove('drawing');
+        s.el = Ink.strokeEl(s);
+        sk.strokes.push(s);
+        sk.svg.appendChild(s.el);
+        undo.push({ sk, add: s });
+        refreshEmpty(sk);
+        file.refresh();
+      },
+      erase: ([x, y]) => {
+        const gone = sk.strokes.filter((s) => Ink.hit(s, x, y));
+        if (!gone.length) return;
+        gone.forEach((s) => { sk.strokes.splice(sk.strokes.indexOf(s), 1); s.el.remove(); });
+        undo.push({ sk, erase: gone });
+        refreshEmpty(sk);
+        file.refresh();
+      },
+    });
+    pad.addEventListener('pointerup', () => fig.classList.remove('drawing'));
+    fig.querySelector('[data-act="clear"]').addEventListener('click', () => {
+      if (!sk.strokes.length) return;
+      const gone = sk.strokes.splice(0);
+      gone.forEach((s) => s.el.remove());
+      undo.push({ sk, erase: gone });
+      refreshEmpty(sk);
+      file.refresh();
+    });
+    fig.querySelector('[data-act="del"]').addEventListener('click', () => { fig.remove(); file.refresh(); });
+    const grip = fig.querySelector('.grip');
+    grip.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      grip.setPointerCapture(e.pointerId);
+      const y0 = e.clientY, h0 = sk.h, k = W / pad.getBoundingClientRect().width;
+      const move = (ev) => {
+        sk.h = Math.round(Math.max(120, Math.min(900, h0 + (ev.clientY - y0) * k)));
+        pad.style.aspectRatio = `${W}/${sk.h}`;
+        sk.svg.setAttribute('viewBox', `0 0 ${W} ${sk.h}`);
+      };
+      const up = () => { grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); file.refresh(); };
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', up);
+    });
+    return sk;
+  }
+
+  function addStroke(sk, s) { s.el = Ink.strokeEl(s); sk.strokes.push(s); sk.svg.appendChild(s.el); refreshEmpty(sk); }
+
+  function currentBlock() {
+    const sel = getSelection();
+    if (!sel.rangeCount) return null;
+    let n = sel.getRangeAt(0).endContainer;
+    if (!doc.contains(n)) return null;
+    while (n && n.parentNode !== doc) n = n.parentNode;
+    return n;
+  }
+
+  function insertSketch(replace) {
+    const block = currentBlock();
+    const sk = makeSketch();
+    sk.fig.classList.add('fresh');
+    let next;
+    if (replace && block) {
+      block.replaceWith(sk.fig);
+      next = sk.fig.nextElementSibling;
+    } else if (block) {
+      block.after(sk.fig);
+      next = sk.fig.nextElementSibling;
+    } else {
+      doc.appendChild(sk.fig);
+    }
+    if (!next || next.tagName === 'FIGURE') { next = document.createElement('p'); next.appendChild(document.createElement('br')); sk.fig.after(next); }
+    const r = document.createRange();
+    r.setStart(next, 0); r.collapse(true);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    file.refresh();
+    Ink.toast(`Sketch ${sk.id} added. Draw in it, then keep typing below.`);
+  }
+
+  document.getElementById('insert').addEventListener('click', () => { doc.focus(); insertSketch(false); });
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); insertSketch(false); }
+  });
+  doc.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    const block = currentBlock();
+    if (block && block.textContent.trim() === '/sketch') { e.preventDefault(); insertSketch(true); }
+  });
+  doc.addEventListener('input', () => {
+    const block = currentBlock();
+    if (block) block.classList.toggle('slash', block.textContent.trim().startsWith('/'));
+    file.refresh();
+  });
+
+  const fileEl = document.getElementById('file');
+  document.getElementById('fileToggle').addEventListener('click', (e) => {
+    fileEl.hidden = !fileEl.hidden;
+    e.currentTarget.setAttribute('aria-pressed', String(!fileEl.hidden));
+  });
+
+  const file = Ink.fileView(fileEl, () => {
+    const live = [...doc.querySelectorAll('figure.sketch')].map((f) => sketches.get(+f.dataset.id));
+    const md = Ink.toMarkdown(doc, (el, block) =>
+      block && el.tagName === 'FIGURE' ? `![Sketch ${el.dataset.id}](capture-overlay.assets/sketch-${el.dataset.id}.svg)` : null);
+    return [{ name: 'capture-overlay.md', text: md, note: 'Plain Markdown images. GitHub, Obsidian, Quick Look and coding agents all show the sketches.' }]
+      .concat(live.map((sk) => ({ name: `sketch-${sk.id}.svg`, text: Ink.svgDoc(sk.strokes, { fixed: { w: W, h: sk.h } }), note: 'Saved next to the note in capture-overlay.assets/.' })));
+  });
+
+  // Seed: one wireframe sketch after the first paragraph.
+  const first = doc.querySelector('p');
+  const sk = makeSketch(250);
+  first.after(sk.fig);
+  const F = Ink.fake, C = Object.fromEntries(Ink.COLORS);
+  addStroke(sk, F.stroke(F.rect(24, 22, 590, 204, 1), C.white));
+  addStroke(sk, F.stroke(F.rect(150, 62, 270, 118, 5), C.blue));
+  addStroke(sk, F.stroke(F.rect(300, 140, 92, 26, 9), C.white));
+  addStroke(sk, F.stroke(F.line(296, 136, 398, 172, 13, 1).concat(F.line(398, 136, 296, 172, 14, -1)), C.red));
+  addStroke(sk, F.stroke(F.rect(438, 190, 96, 26, 17), C.green));
+  addStroke(sk, F.stroke(F.line(452, 203, 500, 203, 19, 0.5), C.green, 'pen', 2.2));
+  addStroke(sk, F.stroke(F.line(470, 186, 428, 184, 21, -6), C.green));
+  addStroke(sk, F.stroke(F.arrowHead(470, 186, 428, 184, 22, 10), C.green));
+  file.now();
+})();
+</script>
+</body>
+</html>

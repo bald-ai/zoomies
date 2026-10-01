@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Red Pen</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<style>
+  .main { padding-inline: 16px; }
+  .gestures {
+    display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 8px 16px; border-bottom: 1px solid var(--line);
+    background: var(--bg); font-size: 12.5px; color: var(--muted);
+  }
+  .g { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+  .g svg { width: 30px; height: 18px; flex: none; }
+  .g code { font: 12px var(--mono); color: var(--soft); }
+  .sheet { position: relative; max-width: 640px; margin: 40px auto 0; }
+  .sheet .inklayer { width: 100%; height: 100%; }
+  .inklayer path.consumed { opacity: 0; transition: opacity .32s ease .05s; }
+  body[data-ink] .prose { user-select: none; -webkit-user-select: none; }
+
+  .prose del { color: var(--muted); text-decoration: line-through 2px var(--red); }
+  .prose mark { background: #ffcc0038; color: inherit; border-radius: 3px; box-shadow: 0 0 0 2px #ffcc0038; }
+  .prose ins { text-decoration: none; color: #7ee39a; background: #34c75918; border-radius: 3px; padding: 0 2px; }
+  .prose .circled { border-radius: 999px; box-shadow: 0 0 0 1.5px var(--red); padding: 0 4px; margin: 0 -2px; }
+  .prose .gone { color: var(--red); text-decoration: line-through; opacity: 0; transition: opacity .26s ease; }
+  .prose .fresh { animation: settle .45s ease; }
+  @keyframes settle { from { background-color: #ffffff22; } }
+  .mk {
+    display: inline-grid; place-items: center; width: 19px; height: 19px; margin-left: 4px; vertical-align: 1px;
+    border-radius: 50%; background: var(--red); color: #fff; font: 600 10.5px/1 var(--sans); cursor: pointer;
+  }
+  .pop {
+    position: absolute; z-index: 5; display: flex; align-items: center; gap: 8px;
+    background: var(--raise-2); border: 1px solid var(--line-2); border-radius: 9px; padding: 6px 8px 6px 10px;
+    box-shadow: 0 10px 30px #00000066; animation: rise .18s ease;
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(4px); } }
+  .pop .tag { font: 600 11px var(--sans); color: #fff; background: var(--red); border-radius: 999px; padding: 2px 7px; }
+  .pop .tag.ins { background: var(--green); color: #0b2a14; }
+  .pop input { width: 240px; max-width: 52vw; border: 0; background: none; outline: none; color: var(--fg); font: 14px var(--sans); }
+  .notes { max-width: 640px; margin: 10px auto 0; display: grid; gap: 6px; }
+  .notes .row { display: flex; gap: 10px; align-items: baseline; font-size: 14px; color: var(--soft); }
+  .notes .row .mk { flex: none; }
+  .under { max-width: 640px; margin: 28px auto 60px; display: grid; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar" id="bar">
+    <span class="spacer"></span>
+    <button type="button" class="btn" id="fileToggle" aria-pressed="true">File</button>
+  </div>
+  <div class="gestures" aria-label="Gestures">
+    <span class="g"><svg viewBox="0 0 30 18"><path d="M2 9h26" stroke="#ff3b30" stroke-width="2" stroke-linecap="round" fill="none"/></svg>through words <code>~~strike~~</code></span>
+    <span class="g"><svg viewBox="0 0 30 18"><path d="M2 14h26" stroke="#ff3b30" stroke-width="2" stroke-linecap="round" fill="none"/><path d="M6 10h18" stroke="#868b97" stroke-width="2" fill="none"/></svg>under words <code>==highlight==</code></span>
+    <span class="g"><svg viewBox="0 0 30 18"><path d="M3 12L7 4l3 10 3-10 3 10 3-10 3 10 3-10 3 8" stroke="#ff3b30" stroke-width="1.8" stroke-linejoin="round" fill="none"/></svg>scribble · delete</span>
+    <span class="g"><svg viewBox="0 0 30 18"><ellipse cx="15" cy="9" rx="12" ry="6.5" stroke="#ff3b30" stroke-width="1.8" fill="none"/></svg>circle <code>[^n]</code> note</span>
+    <span class="g"><svg viewBox="0 0 30 18"><path d="M9 15l6-11 6 11" stroke="#34c759" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" fill="none"/></svg>caret between words · insert</span>
+    <span class="g"><svg viewBox="0 0 30 18"><path d="M4 13c5-9 9 4 13-3s6-6 9 0" stroke="#3a8dff" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>anything else stays ink</span>
+  </div>
+  <div class="work">
+    <div class="main" id="main">
+      <div class="sheet drawzone" id="sheet">
+        <article class="prose" id="doc" contenteditable="true" spellcheck="false">
+          <h1>Plan: thumbnail cache</h1>
+          <p>I will add a thumbnail cache so the history panel opens faster.</p>
+          <p>Thumbnails are stored as <del>full-size</del> <ins>256 px</ins> PNG files in the caches folder and loaded on launch.</p>
+          <p>Every capture writes its thumbnail <span class="circled" data-n="1">on the main thread</span><span class="mk" contenteditable="false" data-n="1">1</span> right after saving.</p>
+          <p>Old thumbnails are deleted after 30 days, or when the cache passes <mark>500 MB</mark>.</p>
+          <p>While I am in there I will also rewrite the settings window to use SwiftUI.</p>
+        </article>
+        <svg class="inklayer" id="ink" aria-hidden="true"></svg>
+      </div>
+      <div class="notes" id="notes" aria-label="Notes"></div>
+      <div class="under">
+        <p class="hint"><b>Try:</b> scribble over the last sentence, strike “on launch”, or draw a small caret under the gap after “thumbnail” to add a word.</p>
+        <p class="hint"><b>Keys:</b> ⌘D or T switch to typing (it starts in Draw). Hold ⌥ to draw while typing. ⌘Z undoes the last mark.</p>
+      </div>
+    </div>
+    <aside class="file" id="file" aria-label="Saved file"></aside>
+  </div>
+</div>
+<script src="ink.js"></script>
+<script>
+(() => {
+  const doc = document.getElementById('doc'), sheet = document.getElementById('sheet'), svg = document.getElementById('ink');
+  const notesEl = document.getElementById('notes');
+  let notes = new Map([[1, 'Move this to a background queue. Captures must not stutter.']]);
+  let free = [];              // strokes that stayed ink: { s, x, y, el }
+  const history = [];
+  let pop = null;
+
+  const st = Ink.toolbar(document.getElementById('bar'), { mode: 'draw', undo: () => restore() });
+  st.on((k) => { if (k === 'mode' && st.mode === 'type') doc.focus(); });
+
+  const box = () => sheet.getBoundingClientRect();
+  const snapshot = () => history.push({ html: doc.innerHTML, notes: new Map(notes), free: free.slice() });
+  function restore() {
+    closePop(false);
+    const h = history.pop();
+    if (!h) { Ink.toast('Nothing to undo'); return; }
+    doc.innerHTML = h.html;
+    notes = h.notes;
+    free = h.free;
+    drawFree();
+    sync();
+  }
+  function drawFree() {
+    svg.querySelectorAll('path:not(.consumed)').forEach((p) => p.remove());
+    for (const it of free) { it.el = it.el || Ink.strokeEl(it.s); it.el.setAttribute('transform', `translate(${it.x} ${it.y})`); svg.appendChild(it.el); }
+  }
+
+  /* ---- reading the text under the ink ---- */
+  function words() {
+    const out = [];
+    const w = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => (n.parentElement.closest('.mk') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    while (w.nextNode()) {
+      const node = w.currentNode, re = /\S+/g;
+      let m;
+      while ((m = re.exec(node.data))) {
+        const r = document.createRange();
+        r.setStart(node, m.index); r.setEnd(node, m.index + m[0].length);
+        out.push({ node, start: m.index, end: m.index + m[0].length, rect: r.getBoundingClientRect() });
+      }
+    }
+    return out;
+  }
+
+  function classify(pts) {
+    const b = Ink.bbox(pts), first = pts[0], last = pts[pts.length - 1];
+    let len = 0;
+    for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    let rev = 0, dir = 0, lx = first[0];
+    for (const p of pts) {
+      const dx = p[0] - lx;
+      if (Math.abs(dx) < 4) continue;
+      const d = Math.sign(dx);
+      if (dir && d !== dir) rev++;
+      dir = d; lx = p[0];
+    }
+    let yrev = 0, ydir = 0, ly = first[1];
+    for (const p of pts) {
+      const dy = p[1] - ly;
+      if (Math.abs(dy) < 4) continue;
+      const d = Math.sign(dy);
+      if (ydir && d !== ydir) yrev++;
+      ydir = d; ly = p[1];
+    }
+    const gap = Math.hypot(last[0] - first[0], last[1] - first[1]);
+    if (b.w > 14 && ((rev >= 3 && len > b.w * 2.4) || (yrev >= 4 && len > b.w * 1.6))) return 'scribble';
+    if (gap < Math.max(b.w, b.h) * 0.38 && b.w > 16 && b.h > 10 && len > (b.w + b.h) * 1.2) return 'circle';
+    let apex = 0;
+    pts.forEach((p, i) => { if (p[1] < pts[apex][1]) apex = i; });
+    const k = apex / (pts.length - 1);
+    if (b.w > 6 && b.w < 70 && b.h > 7 && b.h < 50 && k > 0.2 && k < 0.8 && rev <= 1 &&
+        first[1] > b.y + b.h * 0.6 && last[1] > b.y + b.h * 0.6) return 'caret';
+    if (b.h < Math.max(14, b.w * 0.22) && b.w > 18 && rev <= 1) return 'line';
+    return 'ink';
+  }
+
+  function wrap(list, make) {
+    const groups = new Map();
+    for (const w of list) {
+      const g = groups.get(w.node);
+      if (g) { g.start = Math.min(g.start, w.start); g.end = Math.max(g.end, w.end); }
+      else groups.set(w.node, { node: w.node, start: w.start, end: w.end });
+    }
+    const made = [];
+    for (const g of groups.values()) {
+      const r = document.createRange();
+      r.setStart(g.node, g.start); r.setEnd(g.node, g.end);
+      const el = make();
+      r.surroundContents(el);
+      made.push(el);
+    }
+    return made;
+  }
+
+  function recognize(s) {
+    const o = box();
+    const pts = s.pts.map((p) => [p[0] + o.left, p[1] + o.top]);   // client coordinates
+    const kind = classify(pts);
+    const b = Ink.bbox(pts);
+    const all = words();
+    const inside = (w, pad) => {
+      const cx = (w.rect.left + w.rect.right) / 2, cy = (w.rect.top + w.rect.bottom) / 2;
+      return cx > b.x - pad && cx < b.x + b.w + pad && cy > b.y - pad && cy < b.y + b.h + pad;
+    };
+    if (kind === 'scribble' || kind === 'circle') {
+      const hit = all.filter((w) => inside(w, kind === 'scribble' ? 6 : 3));
+      if (!hit.length) return keep(s);
+      snapshot();
+      if (kind === 'scribble') {
+        const gone = wrap(hit, () => Object.assign(document.createElement('span'), { className: 'gone' }));
+        requestAnimationFrame(() => gone.forEach((g) => (g.style.opacity = '0')));
+        gone.forEach((g) => g.classList.add('gone'));
+        setTimeout(() => { gone.forEach((g) => g.remove()); tidy(); sync(); }, 280);
+        return done(s, `Scribble → deleted ${hit.length} word${hit.length > 1 ? 's' : ''}`);
+      }
+      const n = Math.max(0, ...notes.keys()) + 1;
+      const els = wrap(hit, () => Object.assign(document.createElement('span'), { className: 'circled fresh' }));
+      els.forEach((e) => (e.dataset.n = n));
+      const mk = Object.assign(document.createElement('span'), { className: 'mk', textContent: n, contentEditable: 'false' });
+      mk.dataset.n = n;
+      els[els.length - 1].after(mk);
+      notes.set(n, '');
+      done(s, `Circle → note ${n}`);
+      openPop('note', mk, n);
+      return;
+    }
+    if (kind === 'line') {
+      const meanY = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+      const cand = all.map((w) => ({ w, rel: (meanY - w.rect.top) / w.rect.height }))
+        .filter(({ w, rel }) => {
+          const ov = Math.min(w.rect.right, b.x + b.w) - Math.max(w.rect.left, b.x);
+          return ov > w.rect.width * 0.4 && rel > -0.2 && rel < 1.7;
+        });
+      if (!cand.length) return keep(s);
+      const lineTop = cand.sort((a, c) => Math.abs(a.rel - 0.6) - Math.abs(c.rel - 0.6))[0].w.rect.top;
+      const row = cand.filter((c) => Math.abs(c.w.rect.top - lineTop) < 4);
+      const rel = row.reduce((a, c) => a + c.rel, 0) / row.length;
+      snapshot();
+      const strike = rel < 0.8;
+      wrap(row.map((c) => c.w), () => Object.assign(document.createElement(strike ? 'del' : 'mark'), { className: 'fresh' }));
+      return done(s, strike ? 'Line through → ~~strike~~' : 'Underline → ==highlight==');
+    }
+    if (kind === 'caret') {
+      let apex = pts[0];
+      for (const p of pts) if (p[1] < apex[1]) apex = p;
+      const r = Ink.caretAt(apex[0], apex[1] - 8);
+      if (!r || !doc.contains(r.startContainer)) return keep(s);
+      snapshot();
+      const anchor = Object.assign(document.createElement('span'), { className: 'ins-at' });
+      r.insertNode(anchor);
+      done(s, 'Caret → insert text');
+      openPop('insert', anchor);
+      return;
+    }
+    keep(s);
+  }
+
+  // Strokes arrive in sheet coordinates. Recognized ones fade out; the rest become free ink.
+  function done(s, msg) {
+    const p = Ink.strokeEl(s);
+    svg.appendChild(p);
+    requestAnimationFrame(() => requestAnimationFrame(() => p.classList.add('consumed')));
+    setTimeout(() => p.remove(), 420);
+    Ink.toast(msg);
+    sync();
+  }
+  function keep(s) {
+    snapshot();
+    const o = Ink.localize(s);
+    free.push({ s, x: o.x, y: o.y });
+    drawFree();
+    sync();
+  }
+  function tidy() {
+    doc.querySelectorAll('del, mark, ins, .circled').forEach((e) => { if (!e.textContent.trim()) e.remove(); });
+    doc.normalize();
+    const w = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+    while (w.nextNode()) w.currentNode.data = w.currentNode.data.replace(/ {2,}/g, ' ').replace(/ ([.,;:])/g, '$1');
+  }
+
+  /* ---- the little input that appears after circle and caret ---- */
+  function openPop(kind, el, n) {
+    closePop(false);
+    const o = box(), r = el.getBoundingClientRect();
+    const d = document.createElement('div');
+    d.className = 'pop';
+    d.innerHTML = kind === 'note'
+      ? `<span class="tag">${n}</span><input id="pop-input" placeholder="Note for this spot" aria-label="Note ${n}">`
+      : `<span class="tag ins">insert</span><input id="pop-input" placeholder="Text to insert" aria-label="Text to insert">`;
+    d.style.left = Math.max(0, Math.min(r.left - o.left - 10, o.width - 330)) + 'px';
+    d.style.top = r.bottom - o.top + 10 + 'px';
+    sheet.appendChild(d);
+    const input = d.querySelector('input');
+    pop = { kind, el, n, d, input };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); closePop(true); }
+      if (e.key === 'Escape') { e.preventDefault(); closePop(false, true); }
+    });
+    input.addEventListener('blur', () => setTimeout(() => pop && pop.input === input && closePop(true), 0));
+    input.focus();
+  }
+  function closePop(commit, revert) {
+    if (!pop) return;
+    const p = pop;
+    pop = null;
+    p.d.remove();
+    const text = p.input.value.trim();
+    if (p.kind === 'note') {
+      if (commit && text) notes.set(p.n, text);
+      else if (revert || !text) { restoreLast(); return; }
+    } else {
+      if (commit && text) {
+        const prev = p.el.previousSibling, next = p.el.nextSibling;
+        const before = prev && prev.nodeType === 3 ? prev.data.slice(-1) : ' ';
+        const after = next && next.nodeType === 3 ? next.data.slice(0, 1) : ' ';
+        const ins = Object.assign(document.createElement('ins'), { className: 'fresh', textContent: text });
+        p.el.replaceWith(...[/\S/.test(before) ? ' ' : '', ins, /[^\s.,;:]/.test(after) ? ' ' : ''].filter(Boolean));
+        tidy();
+      } else { restoreLast(); return; }
+    }
+    sync();
+  }
+  function restoreLast() { const h = history.pop(); if (h) { doc.innerHTML = h.html; notes = h.notes; free = h.free; drawFree(); } sync(); }
+
+  /* ---- input ---- */
+  Ink.capture(sheet, {
+    active: (e) => (st.drawing() || e.pointerType === 'pen') && !e.target.closest('.pop'),
+    local: (e) => { const b = box(); return [e.clientX - b.left, e.clientY - b.top]; },
+    tool: () => ({ tool: st.tool, color: st.color, size: st.size() }),
+    live: svg,
+    commit: (s) => {
+      if (st.tool === 'hl') keep(s);
+      else recognize(s);
+    },
+    erase: ([x, y]) => {
+      const gone = free.filter((it) => Ink.hit(it.s, x - it.x, y - it.y));
+      if (!gone.length) return;
+      snapshot();
+      free = free.filter((it) => !gone.includes(it));
+      gone.forEach((it) => it.el && it.el.remove());
+      sync();
+    },
+  });
+  doc.addEventListener('input', () => sync());
+  doc.addEventListener('click', (e) => {
+    const mk = e.target.closest('.mk');
+    if (mk) openPopEdit(+mk.dataset.n, mk);
+  });
+  function openPopEdit(n, mk) {
+    snapshot();
+    openPop('note', mk, n);
+    pop.input.value = notes.get(n) || '';
+  }
+
+  const liveNotes = () => {
+    const live = new Set([...doc.querySelectorAll('.mk')].map((m) => +m.dataset.n));
+    return [...notes].filter(([n, t]) => live.has(n) && t).sort((a, b) => a[0] - b[0]);
+  };
+  function sync() {
+    notesEl.replaceChildren(...liveNotes().map(([n, t]) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `<span class="mk">${n}</span><span></span>`;
+      row.lastChild.textContent = t;
+      return row;
+    }));
+    file.refresh();
+  }
+
+  const fileEl = document.getElementById('file');
+  document.getElementById('fileToggle').addEventListener('click', (e) => {
+    fileEl.hidden = !fileEl.hidden;
+    e.currentTarget.setAttribute('aria-pressed', String(!fileEl.hidden));
+  });
+  const file = Ink.fileView(fileEl, () => {
+    const md = Ink.toMarkdown(doc, (el) => {
+      if (!el.classList) return null;
+      if (el.classList.contains('mk')) return `[^${el.dataset.n}]`;
+      if (el.classList.contains('gone') || el.classList.contains('ins-at')) return '';
+      if (el.tagName === 'DEL') return `~~${el.textContent}~~`;
+      if (el.tagName === 'MARK') return `==${el.textContent}==`;
+      if (el.tagName === 'INS') return `<ins>${el.textContent}</ins>`;
+      return null;
+    });
+    const defs = liveNotes().map(([n, t]) => `[^${n}]: ${t}`);
+    const ink = free.map((it) => JSON.stringify({ pin: 'page', x: Math.round(it.x), y: Math.round(it.y), tool: it.s.tool, color: it.s.color, pts: Ink.ptsString(it.s.pts) }));
+    const text = md + (defs.length ? '\n' + defs.join('\n') + '\n' : '') + (ink.length ? `\n<!-- zoomies-ink v1\n${ink.join('\n')}\n-->\n` : '');
+    return [{ name: 'thumbnail-cache-plan.md', text, note: 'Every recognized mark is ordinary Markdown an agent can read. Only unrecognized ink needs the hidden block.' }];
+  });
+  sync();
+})();
+</script>
+</body>
+</html>
