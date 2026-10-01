@@ -76,9 +76,14 @@ the relevant shortcut code and build a new `.app` for you.
 
 ## Workflow Keybinds
 
+The same keys mean the same thing everywhere: `Cmd+S` saves, `Cmd+Enter` copies
+and saves, `Esc` cancels or closes, `Cmd+Z` / `Cmd+Shift+Z` undo and redo, `Q`
+picks the next color, and `F` is the numbered marker. Plain `Enter` saves
+wherever it is not typing a new line.
+
 | Screen | Key | Action |
 | --- | --- | --- |
-| Rename / Prompt | `Enter` | Save |
+| Rename / Prompt | `Enter` or `Cmd+S` | Save |
 | Rename / Prompt | `Cmd+Enter` | Copy + save |
 | Rename / Prompt | `Cmd+Backspace` | Copy + delete |
 | Rename / Prompt | `Esc` | Delete / close |
@@ -90,13 +95,17 @@ the relevant shortcut code and build a new `.app` for you.
 | Edit | `Option+Backspace` | Clear |
 | Edit | `Cmd+C` / `Cmd+X` / `Cmd+V` | Copy / cut / paste |
 | Edit | `Cmd +` / `Cmd -` / `Cmd 0` | Zoom in / out / reset |
-| Edit | `Enter` | Save |
+| Edit | `Enter` or `Cmd+S` | Save |
 | Edit | `Cmd+Enter` | Copy + save |
 | Edit | `Esc` | Cancel |
+| Note | see [Ink Note Editor](#ink-note-editor) | |
+| Settings | `Cmd+1`–`Cmd+4` | Screenshots / Videos / Notes / Colors tab |
+| Settings | `Cmd+W` or `Esc` | Close |
+| Settings | `Space` or `Enter` on a focused shortcut | Record a new shortcut |
 
 ### Editor shortcut hints
 
-Hold **⌘ alone for 0.5 seconds** to reveal shortcut badges beside the editor’s toolbar controls. A hint above the toolbar invites you to hover over a badge or control to read its action and shortcut in plain text. Release ⌘ to hide them. Another key or modifier dismisses the badges and lets the shortcut work normally.
+Hold **⌘ alone for 0.5 seconds** to reveal shortcut badges beside the toolbar controls of the screenshot editor and the note editor. A hint line near the toolbar invites you to hover over a badge or control to read its action and shortcut in plain text. Release ⌘ to hide them. Another key or modifier dismisses the badges and lets the shortcut work normally.
 
 ### Drawing from the window edges
 
@@ -114,17 +123,31 @@ New editor text and marker diameters grow with image width on a gentle curve: sm
 
 ## Ink Note Editor
 
-Press `Option+Shift+1` for a new note. It saves as `Note <date> at <time>.png` on the Desktop when you press `Command+S` (or `Command+Shift+C` to save and copy). Closing an untouched note leaves no file.
+Press `Option+Shift+1` for a new note. It saves as `Note <date> at <time>.png` on the Desktop when you press `Command+S` (or `Command+Enter` to save, copy, and close). Closing an untouched note leaves no file.
 
 To start from existing Markdown, select one `.md` or `.markdown` file in Finder and press `Option+Shift+2`. Markdown files must be valid UTF-8 and at most 1 MB. Footnotes (`[^1]` and `[^1]: note`) become numbered circles, with each note as a circle line at the end.
 
 Notes save as PNGs: the picture is what you paste to an agent, and the editable text and ink are stored inside it. `Command+S` writes `name.png` next to the Markdown file and never changes the `.md`. If a picture with that name already exists and is not a Zoomies note, the note gets a new name instead. Pressing `Option+Shift+2` on the note PNG, or on the Markdown file again, reopens the note.
 
-- `Command+D` switches between typing and drawing. Hold `Option` to draw for a moment while typing. A tablet or Apple Pencil (Sidecar) always draws and uses its pressure.
-- While drawing: `P` pen, `H` highlighter, `E` eraser, `1`–`5` colors, `T` or Escape back to typing. Typing any other key goes back to writing.
+The note editor has two modes. While typing, letters are text, so its commands use `Command`. While drawing, plain letters pick tools with the same letters as the screenshot editor; any other key goes back to typing and types itself. A tablet or Apple Pencil (Sidecar) always draws and uses its pressure.
+
+| Key | Action |
+| --- | --- |
+| `Cmd+D` | Switch between typing and drawing |
+| Hold `Option` | Draw for a moment while typing |
+| `W` / `H` / `X` (while drawing) | Pen / highlighter / eraser |
+| `Q` (while drawing) | Next color |
+| `F` (while drawing) or `Cmd+F` | Numbered marker at the cursor, with its note line at the end |
+| `T` or `Esc` (while drawing) | Back to typing |
+| `Cmd+Z` / `Cmd+Shift+Z` | Undo / redo text and ink in one history |
+| `Cmd+S` | Save and keep editing |
+| `Cmd+Enter` | Save, copy the note image, and close |
+| `Esc` (while typing) or `Cmd+W` | Close; asks to Save, Discard, or Cancel when there are unsaved changes |
+
+Every toolbar button names its key in its tooltip.
+
 - Each stroke pins to the word under it, so it moves with that word as text above it changes. Strokes drawn right after and next to each other (an arrow and its head) move together. Deleting the word hides its ink; undo brings both back. The text column has a fixed width, so resizing the window never rewraps lines.
-- `Command+F` drops a circle at the cursor and starts its note line at the end.
-- `Command+Z` and `Command+Shift+Z` undo and redo text and ink in one history. `Command+Shift+C` saves and copies the note image. `Command+W` or Escape prompts to Save, Discard, or Cancel when there are unsaved changes.
+- The note editor uses its own five colors (red, blue, green, yellow, white) because the note background is dark.
 
 ## Editor Select Tool
 
@@ -207,7 +230,7 @@ it does not make the app notarized for distribution.
 
 ## Editor colors
 
-Press **Q** or click the color swatch to cycle to the next color. In **Settings → Colors**, choose 1–6 active colors from 15 options and use the up/down arrows to set their order. The last color wraps back to the first. Changes also apply to an already-open editor.
+Press **Q** or click the color swatch to cycle to the next color in the screenshot editor. In **Settings → Colors**, choose 1–6 active colors from 15 options and use the up/down arrows to set their order. The last color wraps back to the first. Changes also apply to an already-open editor.
 
 Screenshot notes keep their 1,000-character limit. Input that would exceed the limit is rejected with a visible limit message, so an oversized paste does not silently lose its ending.
 
