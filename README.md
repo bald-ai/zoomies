@@ -16,7 +16,7 @@ Fork it, pork it, change it, rebuild it. Have fun.
 - Captures the exact UI state you want a coding agent to understand.
 - Adds quick notes/prompts to screenshots so the context travels with the image.
 - Saves Zoomies edit data inside PNGs, so future reopens can edit/delete Zoomies-added arrows, text, pen strokes, shapes, pasted selections, and cut regions.
-- Creates quick scratchpad notes for errors, issues, and ideas you spot in one project while your head is still in another.
+- Creates quick notes you can type and draw on, saved as PNGs, for errors, issues, and ideas you spot in one project while your head is still in another.
 - Lets you rename, annotate, save, copy, or delete without breaking coding flow.
 - Reopens a selected Finder image through the Zoomies flow, or opens a Markdown file as a drawable note saved as PNG.
 
@@ -65,7 +65,7 @@ tested.**
 - `Option+Shift+4` -> area capture
 - `Option+Shift+3` -> full-screen capture
 - `Option+Shift+2` -> select an image, note PNG, or Markdown file in Finder, then press this to edit it with Zoomies
-- `Option+Shift+1` -> create a scratchpad note
+- `Option+Shift+1` -> create a new note (text + drawing, saved as PNG on the Desktop)
 - `Option+Shift+5` -> start/stop screen recording (requires macOS 15)
 
 The defaults intentionally avoid the standard macOS `Cmd+Shift` screenshot shortcuts.
@@ -114,7 +114,9 @@ New editor text and marker diameters grow with image width on a gentle curve: sm
 
 ## Ink Note Editor
 
-Select one `.md` or `.markdown` file in Finder and press `Option+Shift+2` to open it as a drawable note. Markdown files must be valid UTF-8 and at most 1 MB. Footnotes (`[^1]` and `[^1]: note`) become numbered circles, with each note as a circle line at the end.
+Press `Option+Shift+1` for a new note. It saves as `Note <date> at <time>.png` on the Desktop when you press `Command+S` (or `Command+Shift+C` to save and copy). Closing an untouched note leaves no file.
+
+To start from existing Markdown, select one `.md` or `.markdown` file in Finder and press `Option+Shift+2`. Markdown files must be valid UTF-8 and at most 1 MB. Footnotes (`[^1]` and `[^1]: note`) become numbered circles, with each note as a circle line at the end.
 
 Notes save as PNGs: the picture is what you paste to an agent, and the editable text and ink are stored inside it. `Command+S` writes `name.png` next to the Markdown file and never changes the `.md`. If a picture with that name already exists and is not a Zoomies note, the note gets a new name instead. Pressing `Option+Shift+2` on the note PNG, or on the Markdown file again, reopens the note.
 

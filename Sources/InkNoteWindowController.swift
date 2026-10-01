@@ -720,6 +720,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
             guard let png = renderPNG(), let data = PNGMetadata.embed(intoPNG: png, inkNote: document) else {
                 throw NSError(domain: "InkNote", code: 3, userInfo: [NSLocalizedDescriptionKey: "The note could not be drawn into an image."])
             }
+            try FileManager.default.createDirectory(at: noteURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: noteURL, options: .atomic)
             savedDocument = document
             refresh()

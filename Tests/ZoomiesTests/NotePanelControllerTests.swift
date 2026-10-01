@@ -31,17 +31,6 @@ final class NotePanelControllerTests: XCTestCase {
         XCTAssertTrue(labels.contains { $0.contains("Enter: Save") })
     }
 
-    func testScratchpadModeUsesNotePanelWithoutScreenshotOnlyActions() throws {
-        let controller = DedicatedNotePanelController(initialText: "")
-        let labels = findLabels(in: controller.window?.contentView).map(\.stringValue)
-
-        XCTAssertTrue(labels.contains("Note"))
-        XCTAssertTrue(labels.contains { $0.contains("Esc: Close") })
-        XCTAssertTrue(labels.contains { $0.contains("Shift+Tab: Rename") })
-        XCTAssertFalse(labels.contains { $0.contains("Copy+Delete") })
-        XCTAssertFalse(labels.contains { $0.contains("Tab: Editor") })
-    }
-
     func testStandaloneNoteSavesFullGenerousLimit() throws {
         let content = String(repeating: "a", count: 99_999) + "🌻"
         let controller = NotePanelController(initialText: content, maxLength: NotePanelController.standaloneMaxLength)
@@ -74,40 +63,14 @@ final class NotePanelControllerTests: XCTestCase {
         XCTAssertEqual(imageNote.text.count, 1000)
     }
 
-    func testSeparatePanelsApplyTheirOwnLayoutAndLimits() throws {
+    func testScreenshotPanelAppliesItsOwnLayoutAndLimit() throws {
         let screenshot = ScreenshotNotePanelController(initialText: String(repeating: "s", count: WorkflowNoteRenderer.maxNoteLength + 350))
-        let dedicated = DedicatedNotePanelController(initialText: String(repeating: "d", count: 1100))
         XCTAssertEqual(screenshot.text.count, WorkflowNoteRenderer.maxNoteLength)
-        XCTAssertEqual(dedicated.text.count, 1100)
-        for (controller, layout) in [(screenshot as NotePanelController, ScreenshotNotePanelController.layout),
-                                     (dedicated as NotePanelController, DedicatedNotePanelController.layout)] {
-            let textView = try XCTUnwrap(findTextView(in: controller.window?.contentView))
-            let scrollView = try XCTUnwrap(textView.enclosingScrollView)
-            XCTAssertEqual(scrollView.hasVerticalScroller, layout.hasVerticalScroller)
-            XCTAssertEqual(scrollView.autohidesScrollers, layout.autohidesScrollers)
-        }
-    }
-
-    func testDedicatedNoteShowsScrollbarAndScrollsLongText() throws {
-        let controller = DedicatedNotePanelController(initialText: "")
-        let window = try XCTUnwrap(controller.window)
-        defer { controller.close() }
-        window.contentView?.layoutSubtreeIfNeeded()
-        let textView = try XCTUnwrap(findTextView(in: window.contentView))
+        let layout = ScreenshotNotePanelController.layout
+        let textView = try XCTUnwrap(findTextView(in: screenshot.window?.contentView))
         let scrollView = try XCTUnwrap(textView.enclosingScrollView)
-        scrollView.tile()
-        let scroller = try XCTUnwrap(scrollView.verticalScroller)
-        XCTAssertEqual(scrollView.scrollerStyle, .legacy)
-        XCTAssertFalse(scroller.isHidden)
-        XCTAssertGreaterThan(scroller.frame.width, 0)
-
-        controller.text = String(repeating: "Long note line for scrolling.\n", count: 1400)
-        textView.layoutManager?.ensureLayout(for: try XCTUnwrap(textView.textContainer))
-        XCTAssertGreaterThan(textView.frame.height, scrollView.contentSize.height)
-        textView.scrollRangeToVisible(NSRange(location: (textView.string as NSString).length, length: 0))
-        XCTAssertGreaterThan(scrollView.contentView.bounds.minY, 0)
-        textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
-        XCTAssertEqual(scrollView.contentView.bounds.minY, 0, accuracy: 1)
+        XCTAssertEqual(scrollView.hasVerticalScroller, layout.hasVerticalScroller)
+        XCTAssertEqual(scrollView.autohidesScrollers, layout.autohidesScrollers)
     }
 
     private func findTextView(in view: NSView?) -> NSTextView? {

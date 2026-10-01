@@ -96,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clipboardService = services.clipboard
         screenshotService = services.screenshot
         scratchpadService = services.scratchpad
+        scratchpadService.onOpen = { [weak self] in self?.track($0) }
         hotKeyService = services.hotKeys
         recordingService = services.recording
         screenshotSoundPlayer = services.sound
@@ -138,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             • Option+Shift+4 → Area capture
             • Option+Shift+3 → Full-screen capture
             • Option+Shift+2 → Edit or rename an image selected in Finder
-            • Option+Shift+1 → Create a scratchpad note
+            • Option+Shift+1 → Create a note
             • Option+Shift+5 → Start/stop screen recording (macOS 15+)
 
             On your first capture, allow Screen Recording when macOS asks. You can also enable it later in System Settings → Privacy & Security → Screen Recording.
@@ -226,6 +227,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         videoRenameController?.isBusyForUserCommands == true
     }
 
+    /// Keeps a note window alive while open, keyed by its file, so reopening
+    /// the same note brings its window forward instead of opening another.
+    private func track(_ editor: InkNoteWindowController) {
+        let key = editor.noteURL.standardizedFileURL
+        inkNoteEditors[key] = editor
+        editor.onClose = { [weak self, weak editor] in
+            if self?.inkNoteEditors[key] === editor { self?.inkNoteEditors[key] = nil }
+        }
+    }
+
     private func handleFinderSelectionResult(_ result: Result<FinderSelectionService.Selection, Error>) {
         switch FinderReopenLogic.resolve(result) {
         case .open(let url):
@@ -240,8 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 let editor = InkNoteWindowController(opened: opened)
                 editor.copyFile = { [weak self] url in _ = self?.clipboardService.copyFile(at: url, useCache: false) }
-                editor.onClose = { [weak self] in self?.inkNoteEditors[key] = nil }
-                inkNoteEditors[key] = editor
+                track(editor)
                 editor.present()
             } catch {
                 presentError(title: "Cannot Open Note", message: error.localizedDescription)
