@@ -156,13 +156,17 @@ final class InkNoteKeymapTests: XCTestCase {
             XCTAssertNil(command(key, chars, drawing: false), "While typing, \(chars) is text")
         }
         XCTAssertNil(command(kVK_Delete, "", .option, drawing: false), "Option+Backspace deletes a word while typing")
+        XCTAssertEqual(command(kVK_Delete, ""), .deleteSelection)
+        XCTAssertEqual(command(kVK_ForwardDelete, ""), .deleteSelection)
+        XCTAssertNil(command(kVK_Delete, "", drawing: false), "Backspace is text while typing")
         XCTAssertEqual(command(kVK_ANSI_V, "v", .command, drawing: false), .paste)
     }
 
     func testToolLettersMatchTheScreenshotEditorAndOtherLettersDoNothing() {
         let keys: [(Int, InkNoteKeymap.Command)] = [(kVK_ANSI_W, .tool(.pen)), (kVK_ANSI_D, .tool(.line)),
             (kVK_ANSI_A, .tool(.arrow)), (kVK_ANSI_R, .tool(.rectangle)), (kVK_ANSI_E, .tool(.ellipse)),
-            (kVK_ANSI_F, .tool(.marker)), (kVK_ANSI_H, .tool(.highlighter)), (kVK_ANSI_X, .tool(.eraser)),
+            (kVK_ANSI_F, .tool(.marker)), (kVK_ANSI_S, .tool(.select)), (kVK_ANSI_H, .tool(.highlighter)),
+            (kVK_ANSI_X, .tool(.eraser)),
             (kVK_ANSI_Q, .nextColor)]
         for (key, expected) in keys {
             XCTAssertEqual(command(key, "other layout", .capsLock), expected)
@@ -321,6 +325,57 @@ final class InkNoteEditorTests: XCTestCase {
         XCTAssertEqual(editor.textView.string, "Header", "Typing and drawing share one undo history")
     }
 
+    func testSelectPicksMovesAndDeletesLikeTheScreenshotEditor() throws {
+        let editor = editor(InkNoteDocument(note: "Text"))
+        defer { editor.window?.close() }
+        var actions: [InkNoteWindowController.Action] = []
+        editor.onAction = { actions.append($0) }
+        editor.perform(.tool(.rectangle))
+        try drag(editor, from: CGPoint(x: 100, y: 100), to: CGPoint(x: 200, y: 160))
+        settle()
+        editor.perform(.tool(.marker))
+        try click(editor, CGPoint(x: 400, y: 300))
+        editor.setMarkerNote(1, text: "here")
+        settle()
+
+        editor.perform(.tool(.select))
+        try click(editor, CGPoint(x: 150, y: 150))
+        XCTAssertNil(editor.selection, "The inside of an outline is not the shape")
+        try click(editor, CGPoint(x: 150, y: 102))
+        XCTAssertEqual(editor.selection, .item(0), "Clicking near a side picks the shape")
+        let before = editor.noteDocument.items[0]
+        try drag(editor, from: CGPoint(x: 150, y: 102), to: CGPoint(x: 190, y: 132))
+        XCTAssertEqual(editor.noteDocument.items[0].x, before.x + 40, accuracy: 0.01)
+        XCTAssertEqual(editor.noteDocument.items[0].y, before.y + 30, accuracy: 0.01)
+        XCTAssertEqual(editor.noteDocument.items[0].stroke, before.stroke, "Moving never reshapes")
+        settle()
+        editor.perform(.undo)
+        XCTAssertEqual(editor.noteDocument.items[0].x, before.x, accuracy: 0.01, "A move is one undo step")
+        XCTAssertNil(editor.selection, "Undo lets go of the selection")
+        settle()
+
+        try click(editor, CGPoint(x: 400, y: 300))
+        XCTAssertEqual(editor.selection, .marker(0))
+        editor.perform(.close)
+        XCTAssertNil(editor.selection, "Esc lets go of a selection first")
+        XCTAssertTrue(actions.isEmpty, "Esc with a selection does not close")
+        try click(editor, CGPoint(x: 400, y: 300))
+        editor.perform(.deleteSelection)
+        XCTAssertTrue(editor.noteDocument.markers.isEmpty)
+        XCTAssertEqual(editor.noteDocument.note, "Text", "A deleted marker takes its line along")
+        settle()
+        editor.perform(.undo)
+        XCTAssertEqual(editor.noteDocument.markers.count, 1)
+        XCTAssertEqual(editor.noteDocument.note, "Text\n\n\n1: here")
+
+        editor.perform(.tool(.select))
+        try click(editor, CGPoint(x: 150, y: 102))
+        editor.perform(.tool(.pen))
+        XCTAssertNil(editor.selection, "Switching tools clears the selection")
+        editor.perform(.close)
+        XCTAssertEqual(actions.count, 1, "Esc closes once nothing is selected")
+    }
+
     func testStrayLettersNeverChangeAnything() throws {
         let editor = editor()
         defer { editor.window?.close() }
@@ -408,7 +463,7 @@ final class InkNoteEditorTests: XCTestCase {
         }
         let hinted = Set(editor.shortcutHints.map { ObjectIdentifier($0.view) })
         let toolbarButtons = buttons(in: host)
-        XCTAssertEqual(toolbarButtons.filter { !($0 is InkSwatchButton) }.count, 16)
+        XCTAssertEqual(toolbarButtons.filter { !($0 is InkSwatchButton) }.count, 17)
         for button in toolbarButtons {
             let tip = try XCTUnwrap(button.toolTip)
             XCTAssertTrue(tip.contains("(") && tip.contains(")"), "Tooltip names a shortcut: \(tip)")

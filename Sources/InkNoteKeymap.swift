@@ -11,13 +11,14 @@ enum InkNoteKeymap {
     enum Command: Equatable {
         case type, draw
         case tool(InkNoteWindowController.Tool)
-        case nextColor, clearInk, undo, redo
+        case nextColor, clearInk, undo, redo, deleteSelection
         case selectAll, copy, cut, paste
         case save, copyAndSave, close, backToNote
     }
 
     /// The screenshot editor's letters where the meaning is the same
-    /// (W pen, D line, A arrow, R rectangle, E ellipse, F marker, Q color).
+    /// (W pen, D line, A arrow, R rectangle, E ellipse, F marker, S select,
+    /// Q color).
     static let toolKeys: [UInt16: Command] = [
         UInt16(kVK_ANSI_W): .tool(.pen),
         UInt16(kVK_ANSI_D): .tool(.line),
@@ -25,6 +26,7 @@ enum InkNoteKeymap {
         UInt16(kVK_ANSI_R): .tool(.rectangle),
         UInt16(kVK_ANSI_E): .tool(.ellipse),
         UInt16(kVK_ANSI_F): .tool(.marker),
+        UInt16(kVK_ANSI_S): .tool(.select),
         UInt16(kVK_ANSI_H): .tool(.highlighter),
         UInt16(kVK_ANSI_X): .tool(.eraser),
         UInt16(kVK_ANSI_Q): .nextColor
@@ -48,6 +50,7 @@ enum InkNoteKeymap {
         guard flags.isEmpty else { return nil }
         if isReturn { return .save }
         if keyCode == UInt16(kVK_Escape) { return .close }
+        if keyCode == UInt16(kVK_Delete) || keyCode == UInt16(kVK_ForwardDelete) { return .deleteSelection }
         return toolKeys[keyCode]
     }
 }

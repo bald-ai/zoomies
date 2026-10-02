@@ -56,7 +56,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     enum Mode { case type, draw }
 
     enum Tool {
-        case pen, line, arrow, rectangle, ellipse, marker, highlighter, eraser
+        case pen, line, arrow, rectangle, ellipse, marker, select, highlighter, eraser
 
         var shape: InkShape? {
             switch self {
@@ -64,10 +64,13 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
             case .arrow: return .arrow
             case .rectangle: return .rectangle
             case .ellipse: return .ellipse
-            case .pen, .marker, .highlighter, .eraser: return nil
+            case .pen, .marker, .select, .highlighter, .eraser: return nil
             }
         }
     }
+
+    /// What Select picked: a stroke or shape, or a marker (by index).
+    enum Selection: Equatable { case item(Int), marker(Int) }
 
     /// What the editor asks the flow to do, with the note as it is now.
     enum Action: Equatable {
@@ -112,6 +115,8 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// The note before an eraser sweep or marker drag, for its one undo step.
     private var gestureStart: InkNoteDocument?
     private var draggedMarker: (index: Int, offset: CGPoint)?
+    private(set) var selection: Selection?
+    private var lastSelectDragPoint: CGPoint?
     private let scrollView = NSScrollView()
     let noteBar = EditorNotePreviewBar(text: "", maxHeight: 200)
     private(set) var markerNotePopover: NSPopover?
@@ -133,6 +138,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         switch tool {
         case .eraser: return Self.eraserCursor
         case .marker: return .crosshair
+        case .select: return .arrow
         default: return Self.penCursor
         }
     }
@@ -264,7 +270,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         // The screenshot editor's tool icons, in its order.
         let tools: [(Tool, String)] = [(.pen, "pencil.tip"), (.line, "line.diagonal"), (.arrow, "arrow.right"),
                                        (.rectangle, "square"), (.ellipse, "circle"), (.marker, "1.circle"),
-                                       (.highlighter, "highlighter"), (.eraser, "eraser")]
+                                       (.select, "rectangle.dashed"), (.highlighter, "highlighter"), (.eraser, "eraser")]
         for (tool, symbol) in tools { toolButtons[tool] = button(symbol, "", #selector(toolPressed(_:))) }
         swatchRow.spacing = 2
         rebuildSwatches()
@@ -286,7 +292,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         ]
 
         let modes: [NSView] = [Mode.type, .draw].compactMap { modeButtons[$0] }
-        let drawing: [NSView] = [Tool.pen, .line, .arrow, .rectangle, .ellipse, .marker].compactMap { toolButtons[$0] }
+        let drawing: [NSView] = [Tool.pen, .line, .arrow, .rectangle, .ellipse, .marker, .select].compactMap { toolButtons[$0] }
         let ink: [NSView] = [Tool.highlighter, .eraser].compactMap { toolButtons[$0] } + [swatchRow]
         let groups = [modes, drawing, ink, [undo, redo, clear], [close, copy, save]].map { EditorToolbarStyle.group($0) }
         // Groups keep their natural width; the spacer takes the spare width.
@@ -329,6 +335,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
                                             (.rectangle, "Rectangle, hold ⇧ for a square", kVK_ANSI_R),
                                             (.ellipse, "Ellipse, hold ⇧ for a circle", kVK_ANSI_E),
                                             (.marker, "Numbered marker, double-click one to write its note", kVK_ANSI_F),
+                                            (.select, "Select: click to pick, drag to move, Delete to remove", kVK_ANSI_S),
                                             (.highlighter, "Highlighter", kVK_ANSI_H), (.eraser, "Eraser", kVK_ANSI_X)]
         var hints: [EditorShortcutHint] = []
         for (tool, title, code) in tools {
@@ -402,6 +409,11 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     private func refresh() {
+        switch selection {
+        case .item(let index) where !noteDocument.items.indices.contains(index): selection = nil
+        case .marker(let index) where !noteDocument.markers.indices.contains(index): selection = nil
+        default: break
+        }
         // Undo can bring back older text; typing itself never comes this way.
         let text = InkNoteRenderer.pageText(noteDocument)
         if textView.string.trimmingCharacters(in: .whitespacesAndNewlines) != text { textView.string = text }
@@ -430,7 +442,56 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         context.saveGState()
         context.translateBy(x: pageOrigin.x, y: pageOrigin.y)
         InkNoteRenderer.draw(noteDocument, current: current, paths: paths, drawsText: false)
+        drawSelectionOutline()
         context.restoreGState()
+    }
+
+    /// The screenshot editor's selection outlines: orange dashes around a
+    /// stroke or shape, thin white dashes around a marker. Never saved.
+    private func drawSelectionOutline() {
+        let path: NSBezierPath
+        switch selection {
+        case .item(let index) where noteDocument.items.indices.contains(index):
+            path = NSBezierPath(rect: InkNoteRenderer.itemBounds(noteDocument.items[index]).insetBy(dx: -5, dy: -5))
+            path.setLineDash([5, 3], count: 2, phase: 0)
+            path.lineWidth = 2
+            NSColor.systemOrange.withAlphaComponent(0.95).setStroke()
+        case .marker(let index) where noteDocument.markers.indices.contains(index):
+            path = NSBezierPath(rect: InkNoteRenderer.markerBounds(noteDocument.markers[index]).insetBy(dx: -3, dy: -3))
+            path.setLineDash([4, 3], count: 2, phase: 0)
+            path.lineWidth = 1
+            NSColor.white.withAlphaComponent(0.8).setStroke()
+        default:
+            return
+        }
+        path.stroke()
+    }
+
+    /// The marker or stroke under `point`, topmost first, as Select sees it.
+    func selectable(at point: CGPoint) -> Selection? {
+        if let index = markerIndex(at: point) { return .marker(index) }
+        return noteDocument.items.indices.reversed().first { index in
+            let item = noteDocument.items[index]
+            return item.stroke.hits(CGPoint(x: point.x - item.x, y: point.y - item.y), padding: 8)
+        }.map { .item($0) }
+    }
+
+    /// Delete or Backspace with Select. A marker takes its Note box line along.
+    func deleteSelection() {
+        guard let selection else { return }
+        var new = noteDocument
+        switch selection {
+        case .item(let index) where new.items.indices.contains(index):
+            new.items.remove(at: index)
+        case .marker(let index) where new.markers.indices.contains(index):
+            new.markers.remove(at: index)
+            new.note = MarkerNoteLogic.removingLines(notIn: Set(new.markers.map(\.number)), from: new.note)
+        default:
+            break
+        }
+        self.selection = nil
+        setDocument(new)
+        textView.needsDisplay = true
     }
 
     /// Adds a finished stroke (in page coordinates) to the note.
@@ -490,6 +551,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         guard let start = gestureStart else { return }
         gestureStart = nil
         draggedMarker = nil
+        lastSelectDragPoint = nil
         var after = noteDocument
         after.note = MarkerNoteLogic.removingLines(notIn: Set(after.markers.map(\.number)), from: after.note)
         noteDocument = start
@@ -516,6 +578,13 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         case .eraser:
             gestureStart = noteDocument
             erase(at: point)
+        case .select:
+            selection = selectable(at: point)
+            if selection != nil {
+                gestureStart = noteDocument
+                lastSelectDragPoint = point
+            }
+            textView.needsDisplay = true
         case .marker:
             guard let index = markerIndex(at: point) else {
                 addMarker(at: point)
@@ -543,6 +612,18 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         if let drag = draggedMarker {
             noteDocument.markers[drag.index].x = point.x - drag.offset.x
             noteDocument.markers[drag.index].y = point.y - drag.offset.y
+            textView.needsDisplay = true
+        } else if let last = lastSelectDragPoint, let selection {
+            let dx = point.x - last.x, dy = point.y - last.y
+            switch selection {
+            case .item(let index):
+                noteDocument.items[index].x += dx
+                noteDocument.items[index].y += dy
+            case .marker(let index):
+                noteDocument.markers[index].x += dx
+                noteDocument.markers[index].y += dy
+            }
+            lastSelectDragPoint = point
             textView.needsDisplay = true
         } else if gestureStart != nil {
             erase(at: point)
@@ -651,12 +732,13 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     func setMode(_ new: Mode) {
         mode = new
-        if new == .type { current = nil; shapeDrag = nil }
+        if new == .type { current = nil; shapeDrag = nil; selection = nil }
         syncControls()
     }
 
     /// Picking a tool, by key or button, starts drawing.
     func setTool(_ new: Tool) {
+        if new != .select { selection = nil }
         tool = new
         setMode(.draw)
     }
@@ -690,7 +772,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     @objc private func undoPressed() { perform(.undo) }
     @objc private func redoPressed() { perform(.redo) }
     @objc private func clearPressed() { perform(.clearInk) }
-    @objc private func closePressed() { perform(.close) }
+    @objc private func closePressed() { onAction?(.close(noteDocument)) }
     @objc private func copyPressed() { perform(.copyAndSave) }
     @objc private func savePressed() { perform(.save) }
 
@@ -719,6 +801,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         case .tool(let tool): setTool(tool)
         case .nextColor: nextColor()
         case .clearInk: clearInk()
+        case .deleteSelection: deleteSelection()
         case .undo: undo()
         case .redo: redo()
         case .selectAll: textView.selectAll(nil)
@@ -727,7 +810,14 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         case .paste: textView.paste(nil)
         case .save: onAction?(.save(noteDocument))
         case .copyAndSave: onAction?(.copyAndSave(noteDocument))
-        case .close: onAction?(.close(noteDocument))
+        case .close:
+            // Esc lets go of a selection first, as in the screenshot editor.
+            if selection != nil {
+                selection = nil
+                textView.needsDisplay = true
+            } else {
+                onAction?(.close(noteDocument))
+            }
         case .backToNote: onAction?(.backToNote(noteDocument))
         }
         if let window, window.isVisible, window.firstResponder !== textView, markerNotePopover == nil {
@@ -736,12 +826,14 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     func undo() {
+        selection = nil
         textView.breakUndoCoalescing()
         if history.canUndo { history.undo() }
         textView.needsDisplay = true
     }
 
     func redo() {
+        selection = nil
         if history.canRedo { history.redo() }
         textView.needsDisplay = true
     }

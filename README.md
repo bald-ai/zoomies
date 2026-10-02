@@ -133,6 +133,7 @@ While drawing, the note editor uses the screenshot editor's keys, and a letter w
 | `Cmd+T` / `Cmd+D` | Type on the page / draw |
 | `W` / `D` / `A` / `R` / `E` | Pen / line / arrow / rectangle / ellipse; hold `Shift` for a square or circle |
 | `F` | Numbered marker: click to stamp anywhere on the page, drag to move, double-click to write its line in the Note box |
+| `S` | Select, as in the screenshot editor: click a stroke, shape or marker, drag to move it, `Delete` to remove it, `Esc` to let go |
 | `H` / `X` | Highlighter / eraser (erasing a marker removes its line) |
 | `Q` | Next color |
 | `Option+Backspace` | Clear the drawing and markers (undoable) |
