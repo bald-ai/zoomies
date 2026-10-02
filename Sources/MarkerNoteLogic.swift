@@ -54,6 +54,16 @@ enum MarkerNoteLogic {
         return max(0, limit - used)
     }
 
+    /// The typed text and the marker block, apart. Notes show the text on
+    /// the page and the marker lines in the Note box.
+    static func split(_ note: String) -> (text: String, markerLines: String) {
+        let lines = self.lines(of: note)
+        let block = markerBlock(in: lines)
+        guard !block.isEmpty else { return (trimmingTrailingWhitespace(note), "") }
+        return (trimmingTrailingWhitespace(lines[..<block.lowerBound].joined(separator: "\n")),
+                lines[block].joined(separator: "\n"))
+    }
+
     /// Pasted line breaks would split the marker's line; flatten them.
     static func sanitized(_ text: String) -> String {
         text.components(separatedBy: .newlines).joined(separator: " ")

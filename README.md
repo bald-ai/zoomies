@@ -122,16 +122,16 @@ Press `Option+Shift+1` for a new note. Notes use the same tab-swapping screens a
 
 - **Note window**: type the note. `Enter` saves, `Shift+Enter` adds a line, `Command+Enter` saves and copies, `Esc` closes. `Tab` opens the note editor; `Shift+Tab` goes to Rename.
 - **Rename**: name the file. `Enter` saves; `Tab` goes back to the note window.
-- **Note editor**: draw. Your note text sits in the Note box under the canvas. `Shift+Tab` goes back to the note window.
+- **Note editor**: your note text fills a dark page and you draw over it. Edit the text in the note window; `Shift+Tab` goes back there.
 
-A note saves as `Note <date> at <time>.png` on the Desktop: the drawing, cropped with a margin, with the Note box burned in below it, like a screenshot note. A text-only note is just the Note box. The editable note is stored inside the PNG, so selecting it in Finder and pressing `Option+Shift+2` reopens it on its note window; saving replaces the file. An untouched note leaves no file, and `Esc` asks before discarding unsaved text or drawing (turn that off with the close confirmation in Settings).
+A note saves as `Note <date> at <time>.png` on the Desktop: the page (text and drawing) cropped with a margin, with the marker lines burned in below it like a screenshot note. The editable note is stored inside the PNG, so selecting it in Finder and pressing `Option+Shift+2` reopens it on its note window; saving replaces the file. An untouched note leaves no file, and `Esc` asks before discarding unsaved text or drawing (turn that off with the close confirmation in Settings).
 
 The note editor only draws, so it uses the screenshot editor's keys and a letter without a tool does nothing. A tablet or Apple Pencil (Sidecar) uses its pressure.
 
 | Key | Action |
 | --- | --- |
 | `W` / `D` / `A` / `R` / `E` | Pen / line / arrow / rectangle / ellipse; hold `Shift` for a square or circle |
-| `F` | Numbered marker: click to stamp, drag to move, double-click to write its line in the Note box |
+| `F` | Numbered marker: click to stamp anywhere on the page, drag to move, double-click to write its line in the Note box |
 | `H` / `X` | Highlighter / eraser (erasing a marker removes its line) |
 | `Q` | Next color |
 | `Option+Backspace` | Clear the drawing and markers (undoable) |
@@ -143,7 +143,8 @@ The note editor only draws, so it uses the screenshot editor's keys and a letter
 
 Every toolbar button names its key in its tooltip.
 
-- Marker lines read `1: text` and sit at the end of the note, two blank lines below what you typed, exactly as in screenshot notes. They show in the note window too.
+- Marker lines read `1: text` and show in the Note box under the page. In the note window they sit at the end of the note, two blank lines below what you typed, exactly as in screenshot notes.
+- Drawings stay where you drew them on the page; editing the text in the note window does not move them.
 - Notes use your colors from **Settings → Colors**, skipping any too dark to see on the note background (black). Changes apply to open notes.
 - Notes saved by the earlier text-and-ink editor reopen as plain images.
 

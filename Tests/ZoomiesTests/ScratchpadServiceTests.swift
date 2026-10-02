@@ -48,8 +48,9 @@ final class ScratchpadServiceTests: XCTestCase {
         f.service.handleNoteAction(.goToEditor(text: "Check the header"))
         XCTAssertEqual(f.service.presentedPanel, .editor)
         let editor = try XCTUnwrap(f.shownEditors.last)
-        XCTAssertEqual(editor.noteDocument.note, "Check the header", "The note window's text is the editor's Note box")
-        XCTAssertEqual(editor.noteBar.text, "Check the header")
+        XCTAssertEqual(editor.noteDocument.note, "Check the header")
+        XCTAssertEqual(InkNoteRenderer.pageText(editor.noteDocument), "Check the header", "The note window's text is the page")
+        XCTAssertTrue(editor.noteBar.isHidden, "No marker lines yet, so no Note box")
         XCTAssertEqual(editor.window?.title, defaultName)
         XCTAssertNil(f.service.notePanel, "Only one screen of the flow is open at a time")
 

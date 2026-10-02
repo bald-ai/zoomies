@@ -2,6 +2,14 @@ import XCTest
 @testable import Zoomies
 
 final class MarkerNoteLogicTests: XCTestCase {
+    func testSplitSeparatesTypedTextFromTheMarkerBlock() {
+        XCTAssertTrue(MarkerNoteLogic.split("Fix it\n\n\n1: a\n2: b") == ("Fix it", "1: a\n2: b"))
+        XCTAssertTrue(MarkerNoteLogic.split("Steps\n1: not a marker line") == ("Steps\n1: not a marker line", ""),
+                      "A numbered line right under the text is typed text")
+        XCTAssertTrue(MarkerNoteLogic.split("1: only lines") == ("", "1: only lines"))
+        XCTAssertTrue(MarkerNoteLogic.split("") == ("", ""))
+    }
+
     func testFirstLineGetsBlankLinesAndLaterLinesFollowDirectly() {
         var note = MarkerNoteLogic.update(note: "Base", number: 1, newText: "one")
         note = MarkerNoteLogic.update(note: note, number: 2, newText: "two")

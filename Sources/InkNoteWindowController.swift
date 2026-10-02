@@ -29,9 +29,11 @@ final class InkNoteCanvasView: NSView {
     }
 }
 
-/// Note editor: a dark canvas for ink, shapes and numbered markers, with the
-/// note's text in the Note box underneath, as in the screenshot editor. It is
-/// the third screen of the note flow (rename ⇄ note ⇄ editor); the flow saves.
+/// Note editor: the note's text on a dark page, with ink, shapes and numbered
+/// markers drawn over it and the marker lines in the Note box underneath, as
+/// in the screenshot editor. The text is edited in the note window, so this
+/// editor only draws. It is the third screen of the note flow
+/// (rename ⇄ note ⇄ editor); the flow saves.
 @MainActor
 final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPopoverDelegate {
     enum Tool {
@@ -297,15 +299,29 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
 
     func windowDidResize(_ notification: Notification) { updateCanvasSize() }
 
-    /// The canvas fills the window and grows to hold everything drawn, so a
-    /// reopened note scrolls to drawings outside the window.
+    /// Where the page's text column sits in the canvas: centered, below a
+    /// margin. Note positions are page coordinates, so resizing the window
+    /// moves text and drawing together.
+    var pageOrigin: CGPoint {
+        CGPoint(x: max(InkNoteRenderer.margin, floor((scrollView.contentSize.width - InkNoteRenderer.columnWidth) / 2)),
+                y: InkNoteRenderer.margin)
+    }
+
+    private func viewRect(_ pageRect: CGRect) -> CGRect {
+        pageRect.offsetBy(dx: pageOrigin.x, dy: pageOrigin.y)
+    }
+
+    /// The canvas fills the window and grows to hold the whole page, so long
+    /// text and far-off drawings scroll into view.
     private func updateCanvasSize() {
         let visible = scrollView.contentSize
-        let bounds = InkNoteRenderer.drawingBounds(noteDocument)
-        let size = NSSize(width: max(visible.width, bounds.isNull ? 0 : bounds.maxX + InkNoteRenderer.margin),
-                          height: max(visible.height, bounds.isNull ? 0 : bounds.maxY + InkNoteRenderer.margin))
+        let bounds = InkNoteRenderer.contentBounds(noteDocument)
+        let content = bounds.isNull ? CGRect.zero : viewRect(bounds)
+        let size = NSSize(width: max(visible.width, content.maxX + InkNoteRenderer.margin),
+                          height: max(visible.height, content.maxY + InkNoteRenderer.margin))
         if canvas.frame.size != size { canvas.setFrameSize(size) }
         noteBar.maxHeight = max(60, (window?.contentView?.bounds.height ?? 600) / 3)
+        canvas.needsDisplay = true
     }
 
     // MARK: - Note
@@ -323,9 +339,10 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
     }
 
     private func refresh() {
-        let note = noteDocument.note.trimmingCharacters(in: .whitespacesAndNewlines)
-        noteBar.text = note
-        noteBar.isHidden = note.isEmpty
+        // The typed text is on the page; the Note box holds the marker lines.
+        let lines = InkNoteRenderer.markerLines(noteDocument)
+        noteBar.text = lines
+        noteBar.isHidden = lines.isEmpty
         updateCanvasSize()
         canvas.needsDisplay = true
     }
@@ -333,7 +350,11 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
     func drawCanvas() {
         if paths.count > noteDocument.items.count { paths = [] }
         paths += noteDocument.items[paths.count...].map { InkGeometry.path(for: $0.stroke) }
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.saveGState()
+        context.translateBy(x: pageOrigin.x, y: pageOrigin.y)
         InkNoteRenderer.draw(noteDocument, current: current, paths: paths)
+        context.restoreGState()
     }
 
     /// Adds a finished stroke (in canvas coordinates) to the note.
@@ -401,8 +422,10 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
 
     // MARK: - Mouse
 
+    /// The mouse in page coordinates.
     private func canvasPoint(_ event: NSEvent) -> CGPoint {
-        canvas.convert(event.locationInWindow, from: nil)
+        let point = canvas.convert(event.locationInWindow, from: nil)
+        return CGPoint(x: point.x - pageOrigin.x, y: point.y - pageOrigin.y)
     }
 
     private func inkPoint(_ event: NSEvent) -> InkPoint {
@@ -455,7 +478,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
             // Only the growing end of a stroke changes shape.
             let tail = InkStroke(tool: stroke.tool, color: stroke.color, width: stroke.width,
                                  points: Array(stroke.points.suffix(13)) + [inkPoint(event)])
-            canvas.setNeedsDisplay(tail.bounds.insetBy(dx: -stroke.width - 8, dy: -stroke.width - 8))
+            canvas.setNeedsDisplay(viewRect(tail.bounds.insetBy(dx: -stroke.width - 8, dy: -stroke.width - 8)))
         } else {
             return
         }
@@ -487,7 +510,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         stroke.points = shape.points(from: drag.start, to: drag.end, constrained: constrained)
             .map { InkPoint(x: $0.x, y: $0.y, pressure: -1) }
         current = stroke
-        canvas.setNeedsDisplay(old.union(stroke.bounds).insetBy(dx: -stroke.width - 4, dy: -stroke.width - 4))
+        canvas.setNeedsDisplay(viewRect(old.union(stroke.bounds).insetBy(dx: -stroke.width - 4, dy: -stroke.width - 4)))
     }
 
     func modifiersChanged(_ event: NSEvent) {
@@ -527,7 +550,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
             field?.handleEditingShortcut(event) ?? false
         }
         guard canvas.window != nil else { return }
-        popover.show(relativeTo: InkNoteRenderer.markerBounds(marker), of: canvas, preferredEdge: .maxY)
+        popover.show(relativeTo: viewRect(InkNoteRenderer.markerBounds(marker)), of: canvas, preferredEdge: .maxY)
         popover.contentViewController?.view.window?.makeFirstResponder(field)
     }
 

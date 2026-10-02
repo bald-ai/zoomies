@@ -93,12 +93,23 @@ final class InkNoteRendererTests: XCTestCase {
         return try XCTUnwrap(NSBitmapImageRep(cgImage: cgImage).colorAt(x: Int(x), y: Int(y))?.usingColorSpace(.sRGB))
     }
 
-    func testAnEmptyNoteHasNoPictureAndATextOnlyNoteIsJustTheNoteBox() throws {
+    func testTheTextIsThePageAndOnlyMarkerLinesAreBurnedBelow() throws {
         XCTAssertNil(InkNoteRenderer.image(for: InkNoteDocument(note: "  ")))
-        let image = try XCTUnwrap(InkNoteRenderer.image(for: InkNoteDocument(note: "Ship it")))
-        XCTAssertEqual(image.size.width, InkNoteRenderer.minimumWidth * InkNoteRenderer.scale)
-        XCTAssertGreaterThan(image.size.height, 20)
-        XCTAssertLessThan(image.size.height, 200, "No empty canvas above a text-only note")
+        let text = InkNoteDocument(note: "Ship it")
+        let page = try XCTUnwrap(InkNoteRenderer.image(for: text))
+        let scale = InkNoteRenderer.scale, margin = InkNoteRenderer.margin
+        XCTAssertEqual(page.size.width, (InkNoteRenderer.columnWidth + margin * 2) * scale)
+        XCTAssertEqual(page.size.height, (InkNoteRenderer.textRect(for: "Ship it").height + margin * 2) * scale,
+                       "A text-only note is its page, with no Note box")
+        XCTAssertGreaterThan(try pixel(page, x: (margin + 4) * scale, y: (margin + 8) * scale).redComponent, 0.5,
+                             "The text is drawn on the page")
+
+        var marked = InkNoteDocument(note: "Ship it\n\n\n1: the logo")
+        marked.markers = [.init(number: 1, x: 300, y: 8, color: "#ff3b30")]
+        let withLines = try XCTUnwrap(InkNoteRenderer.image(for: marked))
+        XCTAssertGreaterThan(withLines.size.height, page.size.height, "Marker lines are burned in below the page")
+        XCTAssertEqual(InkNoteRenderer.textRect(for: InkNoteRenderer.pageText(marked)), InkNoteRenderer.textRect(for: "Ship it"),
+                       "Marker lines are not part of the page text")
     }
 
     func testTheDrawingIsCroppedWithAMarginAndTheNoteBurnedBelowIt() throws {
@@ -174,7 +185,9 @@ final class InkNoteEditorTests: XCTestCase {
 
     private func mouse(_ editor: InkNoteWindowController, _ type: NSEvent.EventType, _ point: CGPoint,
                        clicks: Int = 1) throws -> NSEvent {
-        try XCTUnwrap(NSEvent.mouseEvent(with: type, location: editor.canvas.convert(point, to: nil), modifierFlags: [],
+        let origin = editor.pageOrigin
+        let inCanvas = CGPoint(x: point.x + origin.x, y: point.y + origin.y)
+        return try XCTUnwrap(NSEvent.mouseEvent(with: type, location: editor.canvas.convert(inCanvas, to: nil), modifierFlags: [],
                                          timestamp: 0, windowNumber: editor.window?.windowNumber ?? 0, context: nil,
                                          eventNumber: 0, clickCount: clicks, pressure: 1))
     }
@@ -226,7 +239,8 @@ final class InkNoteEditorTests: XCTestCase {
         editor.markerNotePopover?.close()
         editor.setMarkerNote(2, text: "wider field")
         XCTAssertEqual(editor.noteDocument.note, "Login page\n\n\n2: wider field")
-        XCTAssertEqual(editor.noteBar.text, "Login page\n\n\n2: wider field")
+        XCTAssertEqual(editor.noteBar.text, "2: wider field", "The Note box holds the marker lines")
+        XCTAssertEqual(InkNoteRenderer.pageText(editor.noteDocument), "Login page", "The typed text stays on the page")
         XCTAssertFalse(editor.noteBar.isHidden)
 
         editor.perform(.tool(.eraser))
@@ -298,14 +312,18 @@ final class InkNoteEditorTests: XCTestCase {
         XCTAssertEqual(editor.noteDocument, document)
     }
 
-    func testTheNoteBoxShowsTheNoteAndHidesWhenEmpty() {
-        let empty = editor()
-        defer { empty.window?.close() }
-        XCTAssertTrue(empty.noteBar.isHidden)
-        let note = editor(InkNoteDocument(note: "  Check the header  "))
-        defer { note.window?.close() }
-        XCTAssertFalse(note.noteBar.isHidden)
-        XCTAssertEqual(note.noteBar.text, "Check the header")
+    func testTextGoesOnThePageAndOnlyMarkerLinesGoInTheNoteBox() {
+        let text = editor(InkNoteDocument(note: "  Check the header  "))
+        defer { text.window?.close() }
+        XCTAssertTrue(text.noteBar.isHidden, "Typed text is on the page, not in the Note box")
+        XCTAssertEqual(InkNoteRenderer.pageText(text.noteDocument), "Check the header")
+        var document = InkNoteDocument(note: "Check the header\n\n\n1: logo")
+        document.markers = [.init(number: 1, x: 10, y: 10, color: "#fff")]
+        let marked = editor(document)
+        defer { marked.window?.close() }
+        XCTAssertEqual(marked.noteBar.text, "1: logo")
+        XCTAssertGreaterThan(marked.canvas.frame.height, 0)
+        XCTAssertGreaterThanOrEqual(marked.pageOrigin.x, InkNoteRenderer.margin, "The page is centered with a margin")
     }
 
     func testNotesUseTheSettingsPaletteWithoutColorsLostOnTheDarkBackground() throws {
