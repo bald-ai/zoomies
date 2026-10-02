@@ -34,7 +34,7 @@ final class HotKeyServiceTests: XCTestCase {
         service.registerShortcuts(settings: .default, areaHandler: { calls += 1 }, fullHandler: { calls += 1 },
             reopenFinderSelectionHandler: { calls += 1 }, openScratchpadHandler: { calls += 1 }, toggleRecordingHandler: { calls += 1 })
         XCTAssertEqual(failures.count, 5)
-        for (message, name) in zip(failures, ["Screenshot Area:", "Screenshot Full:", "Reopen Finder Selection:", "Scratchpad:", "Screen Recording:"]) {
+        for (message, name) in zip(failures, ["Screenshot Area:", "Screenshot Full:", "Reopen Finder Selection:", "Create Note:", "Screen Recording:"]) {
             XCTAssertTrue(message.hasPrefix(name))
         }
         XCTAssertEqual(calls, 0)
