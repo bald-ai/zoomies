@@ -4,9 +4,9 @@ import Carbon
 /// Simple keyboard shortcut recorder used in the Settings window.
 ///
 /// It displays the currently configured shortcut as text (for example,
-/// "⌘⇧6") and, when clicked, captures the next key press (with modifiers)
-/// to update the value. Validation of duplicates is handled by the
-/// settings controller.
+/// "⌘⇧6") and, when clicked or focused with Tab and given Space or Return,
+/// captures the next key press (with modifiers) to update the value.
+/// Validation of duplicates is handled by the settings controller.
 final class ShortcutRecorderView: NSControl {
     struct RecordedShortcut {
         var keyCode: UInt32
@@ -50,9 +50,19 @@ final class ShortcutRecorderView: NSControl {
     }
 
     override func mouseDown(with event: NSEvent) {
+        beginRecording()
+    }
+
+    private func beginRecording() {
         if let requestFocus { requestFocus(self) } else { focusForRecording() }
         isRecording = true
         needsDisplay = true
+    }
+
+    override var focusRingMaskBounds: NSRect { bounds }
+
+    override func drawFocusRingMask() {
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 4, yRadius: 4).fill()
     }
 
     private func focusForRecording() {
@@ -71,7 +81,9 @@ final class ShortcutRecorderView: NSControl {
 
     override func keyDown(with event: NSEvent) {
         guard isRecording else {
-            super.keyDown(with: event)
+            let plain = event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
+            let starts = [kVK_Space, kVK_Return, kVK_ANSI_KeypadEnter].map { UInt16($0) }.contains(event.keyCode)
+            if plain, starts { beginRecording() } else { super.keyDown(with: event) }
             return
         }
 
@@ -131,7 +143,7 @@ final class ShortcutRecorderView: NSControl {
                 carbonFlags: shortcut.carbonFlags
             )
         } else {
-            text = "Click to record"
+            text = "Click or press Space to record"
         }
 
         let attributes: [NSAttributedString.Key: Any] = [

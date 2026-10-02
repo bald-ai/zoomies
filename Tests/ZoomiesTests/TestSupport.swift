@@ -2,6 +2,23 @@ import XCTest
 import AppKit
 
 enum TestSupport {
+    /// Ends a bare view's responder chain so keys it passes on are dropped
+    /// quietly. With no window behind the view, AppKit plays the system alert
+    /// sound for every unhandled key, which makes `swift test` beep.
+    static func swallowingUnhandledKeys<View: NSView>(_ view: View) -> View {
+        view.nextResponder = unhandledKeySink
+        return view
+    }
+
+    private final class UnhandledKeySink: NSResponder {
+        override func keyDown(with event: NSEvent) {}
+        override func keyUp(with event: NSEvent) {}
+        override func noResponder(for eventSelector: Selector) {}
+    }
+
+    /// `nextResponder` is not retained, so the sink must outlive every view.
+    private static let unhandledKeySink = UnhandledKeySink()
+
     static func makeTemporaryDirectory(function: StaticString = #function) throws -> URL {
         let base = FileManager.default.temporaryDirectory
         let name = "zoomies_tests_\(function)_\(UUID().uuidString)"

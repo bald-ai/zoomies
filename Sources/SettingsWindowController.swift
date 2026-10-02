@@ -1,9 +1,51 @@
 import AppKit
+import Carbon
+
+/// Zoomies has no main menu, so Settings handles its own keys: Command+W or
+/// Escape closes, Command+1–4 picks a tab, and text fields get the standard
+/// editing keys. A shortcut recorder that is recording keeps every key for itself.
+final class SettingsWindow: NSWindow {
+    var tabCount = 0
+    var onSelectTab: ((Int) -> Void)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // A recorder that is recording takes any combo, Command+W included.
+        if (firstResponder as? ShortcutRecorderView)?.isRecordingShortcut == true {
+            return super.performKeyEquivalent(with: event)
+        }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock)
+        let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        if flags == [.command], chars == "w" {
+            performClose(nil)
+            return true
+        }
+        if flags == [.command], let digit = Int(chars), digit >= 1, digit <= tabCount {
+            onSelectTab?(digit - 1)
+            return true
+        }
+        if StandardEditingKeys.perform(event, in: self) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    // Reached only when nothing focused used the key.
+    override func keyDown(with event: NSEvent) {
+        let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        if event.keyCode == UInt16(kVK_Escape), flags.isEmpty {
+            performClose(nil)
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func cancelOperation(_ sender: Any?) { performClose(nil) }
+}
 
 /// Settings window with controls for max size, note prefix, and
 /// global shortcut configuration.
 final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
     private let settingsTabs = NSTabView()
+    private let tabTitles = ["Screenshots", "Videos", "Notes", "Colors"]
+    private let navigation = NSSegmentedControl()
 
     private let settingsFieldEditor: NSTextView = {
         let editor = NSTextView()
@@ -65,7 +107,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
         let contentRect = NSRect(x: 0, y: 0, width: 660, height: 700)
         let style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
-        let window = NSWindow(contentRect: contentRect, styleMask: style, backing: .buffered, defer: false)
+        let window = SettingsWindow(contentRect: contentRect, styleMask: style, backing: .buffered, defer: false)
         window.center()
         window.title = "Zoomies Settings"
         window.titleVisibility = .hidden
@@ -80,6 +122,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         super.init(window: window)
 
         window.delegate = self
+        window.tabCount = tabTitles.count
+        window.onSelectTab = { [weak self] in self?.selectTab($0) }
         configureContent()
         populateFromSettings()
     }
@@ -109,8 +153,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
         let tabs = settingsTabs
         tabs.tabViewType = .noTabsNoBorder
-        let navigation = NSSegmentedControl(labels: ["Screenshots", "Videos", "Notes", "Colors"], trackingMode: .selectOne,
-                                            target: self, action: #selector(settingsTabChanged(_:)))
+        navigation.segmentCount = tabTitles.count
+        for (index, title) in tabTitles.enumerated() {
+            navigation.setLabel(title, forSegment: index)
+            navigation.setToolTip("\(title) (Cmd+\(index + 1))", forSegment: index)
+        }
+        navigation.trackingMode = .selectOne
+        navigation.target = self
+        navigation.action = #selector(settingsTabChanged(_:))
         navigation.selectedSegment = 0
         navigation.selectedSegmentBezelColor = NSColor(srgbRed: 0.26, green: 0.34, blue: 0.38, alpha: 1)
         navigation.translatesAutoresizingMaskIntoConstraints = false
@@ -158,10 +208,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
 
-        let screenshots = page("Screenshots")
-        let videos = page("Videos")
-        let notes = page("Notes")
-        let colorsPage = page("Colors")
+        let pages = tabTitles.map(page)
+        let (screenshots, videos, notes, colorsPage) = (pages[0], pages[1], pages[2], pages[3])
         let paletteEditor = EditorPaletteSettingsView(settingsStore: settingsStore)
         colorsPage.addArrangedSubview(paletteEditor)
         paletteEditor.widthAnchor.constraint(equalTo: colorsPage.widthAnchor).isActive = true
@@ -213,7 +261,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         description("Videos use a generated Recording filename. You can rename each video after recording.", in: videos)
 
         addRow("Create note", control: scratchpadShortcutRecorder, to: notes)
-        description("Standalone notes are saved as Markdown files. You can name each note when creating it.", in: notes)
+        description("New notes open in the note editor and save as PNGs on the Desktop. Select a note PNG in Finder and press the Reopen Finder image shortcut to edit it again.", in: notes)
 
         // This preference currently applies to both image and video workflows.
         confirmBeforeClosingCheckbox.title = "Confirm before deleting or closing screenshots and videos"
@@ -245,8 +293,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     }
 
     @objc private func settingsTabChanged(_ sender: NSSegmentedControl) {
+        selectTab(sender.selectedSegment)
+    }
+
+    func selectTab(_ index: Int) {
+        guard settingsTabs.tabViewItems.indices.contains(index) else { return }
         window?.makeFirstResponder(nil)
-        settingsTabs.selectTabViewItem(at: sender.selectedSegment)
+        navigation.selectedSegment = index
+        settingsTabs.selectTabViewItem(at: index)
     }
 
     private func configureMaxSizePopUp() {

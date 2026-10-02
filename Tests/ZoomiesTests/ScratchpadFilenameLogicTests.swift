@@ -18,29 +18,4 @@ final class ScratchpadFilenameLogicTests: XCTestCase {
         let pattern = #"^Note \d{4}-\d{2}-\d{2} at \d{2}\.\d{2}\.\d{2}$"#
         XCTAssertNotNil(expected.range(of: pattern, options: .regularExpression))
     }
-
-    func testResolveBaseNameStripsMdExtension() {
-        let resolved = ScratchpadFilenameLogic.resolveBaseName(userInput: "meeting-notes.md", fallback: "Fallback")
-        XCTAssertEqual(resolved, "meeting-notes")
-    }
-
-    func testResolveBaseNameSanitizesSlashesAndColons() {
-        let resolved = ScratchpadFilenameLogic.resolveBaseName(userInput: "a/b:c", fallback: "Fallback")
-        XCTAssertEqual(resolved, "abc")
-    }
-
-    func testResolveBaseNameFallbackOnEmpty() {
-        let resolved = ScratchpadFilenameLogic.resolveBaseName(userInput: "", fallback: "Fallback")
-        XCTAssertEqual(resolved, "Fallback")
-    }
-
-    func testResolveBaseNameFallbackOnWhitespace() {
-        let resolved = ScratchpadFilenameLogic.resolveBaseName(userInput: "    ", fallback: "Fallback")
-        XCTAssertEqual(resolved, "Fallback")
-    }
-
-    func testResolveBaseNameFallbackOnNil() {
-        let resolved = ScratchpadFilenameLogic.resolveBaseName(userInput: nil, fallback: "Fallback")
-        XCTAssertEqual(resolved, "Fallback")
-    }
 }

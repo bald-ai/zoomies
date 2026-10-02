@@ -36,6 +36,17 @@ final class FloatingInputPanelCommandTests: XCTestCase {
         XCTAssertFalse(panel.isVisible)
     }
 
+    func testCommandSSavesLikeEnterOnlyWhenThePanelHasAHandler() {
+        let panel = FloatingInputPanel(contentRect: NSRect(x: 0, y: 0, width: 100, height: 80), sendEditingAction: { _, _ in false })
+        XCTAssertFalse(panel.performKeyEquivalent(with: event("s", .command)))
+        var received: [KeyCommand] = []
+        panel.keyCommandHandler = { received.append($0) }
+        XCTAssertTrue(panel.performKeyEquivalent(with: event("S", .command)))
+        XCTAssertTrue(panel.performKeyEquivalent(with: event("S", [.command, .capsLock])))
+        _ = panel.performKeyEquivalent(with: event("s", [.command, .shift]))
+        XCTAssertEqual(received, [.enter, .enter])
+    }
+
     func testUndoRedoUsesActualFirstResponderHistory() {
         let panel = FloatingInputPanel(contentRect: NSRect(x: 0, y: 0, width: 100, height: 80), sendEditingAction: { _, _ in
             XCTFail("Undo must use the text view's history"); return false
@@ -52,5 +63,17 @@ final class FloatingInputPanelCommandTests: XCTestCase {
         XCTAssertTrue(panel.performKeyEquivalent(with: event("z", [.command, .shift])))
         XCTAssertEqual(value.number, 7)
         XCTAssertFalse(panel.isVisible)
+    }
+
+    func testCapsLockDoesNotDisableStandardEditingKeys() {
+        var sent: [Selector] = []
+        let panel = FloatingInputPanel(contentRect: NSRect(x: 0, y: 0, width: 100, height: 80), sendEditingAction: { selector, _ in
+            sent.append(selector); return true
+        })
+        for (chars, selector) in [("C", #selector(NSText.copy(_:))), ("V", #selector(NSText.paste(_:))),
+                                  ("X", #selector(NSText.cut(_:))), ("A", #selector(NSText.selectAll(_:)))] {
+            XCTAssertTrue(panel.performKeyEquivalent(with: event(chars, [.command, .capsLock])))
+            XCTAssertEqual(sent.last, selector)
+        }
     }
 }

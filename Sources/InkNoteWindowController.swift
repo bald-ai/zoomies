@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 
 extension NSAttributedString.Key {
     /// Pins drawings to the character they were drawn on. It moves with the
@@ -52,7 +53,7 @@ final class InkNoteTextView: NSTextView {
     override func writeSelection(to pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
         guard type == .string, selectedRange().length > 0 else { return false }
         pboard.clearContents()
-        return pboard.setString(MarkdownTextView.plainText(attributedString().attributedSubstring(from: selectedRange())), forType: .string)
+        return pboard.setString(MarkdownMarkerAttachment.plainText(attributedString().attributedSubstring(from: selectedRange())), forType: .string)
     }
 }
 
@@ -78,8 +79,16 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     static let columnWidth: CGFloat = 640
-    static let palette: [EditorPaletteColor] = ["red", "blue", "green", "yellow", "white"].compactMap { id in
-        EditorPalette.available.first { $0.id == id }
+    /// The Settings colors, minus any too dark to see on the note background
+    /// (black is in the default palette).
+    static func noteColors(forPaletteIDs ids: [String]) -> [EditorPaletteColor] {
+        let visible = EditorPalette.colors(for: ids).filter { isVisibleOnBackground($0.color) }
+        return visible.isEmpty ? EditorPalette.available.filter { $0.id == "white" } : visible
+    }
+
+    static func isVisibleOnBackground(_ color: NSColor) -> Bool {
+        guard let rgb = color.usingColorSpace(.sRGB) else { return true }
+        return 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent > 0.12
     }
     private static let background = NSColor(srgbRed: 0.094, green: 0.098, blue: 0.118, alpha: 1)
     private static let penCursor = ringCursor(diameter: 8)
@@ -116,31 +125,44 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     let textView = InkNoteTextView(frame: .zero)
     let history = UndoManager()
     var onClose: (() -> Void)?
-    /// Puts the saved note file on the clipboard.
-    var copyFile: ((URL) -> Void)?
+    /// Returns whether the saved note file was published to the clipboard.
+    var copyFile: ((URL) -> Bool)?
 
     private(set) var items: [LiveItem] = []
     private(set) var mode: Mode = .type
     private(set) var tool: Tool = .pen
-    private(set) var colorHex: String = palette.first?.hex ?? "#ff3b30"
+    private(set) var palette: [EditorPaletteColor]
+    private(set) var colorHex: String
+    private let settingsStore: SettingsStore?
+    private var paletteObserver: NSObjectProtocol?
     private var holdingOption = false
     private var current: InkStroke?
     private var eraseStart: [LiveItem]?
     private var paths: [UUID: CGPath] = [:]
     private var savedDocument: InkNoteDocument
     private let scrollView = NSScrollView()
-    private let modeControl = NSSegmentedControl()
-    private let toolControl = NSSegmentedControl()
+    private var modeButtons: [Mode: NSButton] = [:]
+    private var toolButtons: [Tool: NSButton] = [:]
     private var swatches: [InkSwatchButton] = []
+    private var swatchRow = NSStackView()
+    private var keyMonitor: Any?
+    private var layoutObservation: KeyboardLayoutObservation?
+    private(set) var shortcutOverlay: EditorShortcutOverlayController?
+    private(set) var shortcutHints: [EditorShortcutHint] = []
+    private var fixedHints: [EditorShortcutHint] = []
+    private var markerButton = NSButton()
 
     var isDrawing: Bool { mode == .draw || holdingOption }
     var activeCursor: NSCursor? { isDrawing ? (tool == .eraser ? Self.eraserCursor : Self.penCursor) : nil }
     var hasUnsavedChanges: Bool { currentDocument() != savedDocument }
 
-    init(opened: Opened) {
+    init(opened: Opened, settingsStore: SettingsStore? = nil) {
         noteURL = opened.noteURL
         sourceURL = opened.sourceURL
         savedDocument = opened.document
+        self.settingsStore = settingsStore
+        palette = Self.noteColors(forPaletteIDs: settingsStore?.settings.editorColorIDs ?? EditorPalette.defaultIDs)
+        colorHex = palette.first?.hex ?? "#ff3b30"
         let window = EditorWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 720),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         super.init(window: window)
@@ -156,12 +178,28 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         load(opened.document)
         savedDocument = currentDocument()
         window.keyEquivalentInterceptor = { [weak self] event in self?.handleKey(event) ?? false }
+        shortcutOverlay = EditorShortcutOverlayController(window: window, helpPlacement: .belowBadges) { [weak self] in
+            self?.shortcutHints ?? []
+        }
+        refreshShortcutLabels()
+        layoutObservation = KeyboardLayoutObservation { [weak self] in self?.refreshShortcutLabels() }
+        if let settingsStore {
+            paletteObserver = NotificationCenter.default.addObserver(forName: SettingsStore.didChangeNotification, object: settingsStore,
+                                                                     queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reloadPalette() }
+            }
+        }
         syncControls()
         refresh()
     }
     required init?(coder: NSCoder) { nil }
 
+    deinit {
+        if let paletteObserver { NotificationCenter.default.removeObserver(paletteObserver) }
+    }
+
     func present() {
+        installKeyMonitor()
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
@@ -179,40 +217,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     private func buildUI() {
         guard let content = window?.contentView else { return }
-        modeControl.segmentCount = 2
-        modeControl.setLabel("Type", forSegment: 0)
-        modeControl.setLabel("Draw", forSegment: 1)
-        modeControl.setToolTip("Type (T or Esc)", forSegment: 0)
-        modeControl.setToolTip("Draw (⌘D, or hold ⌥ to draw for a moment)", forSegment: 1)
-        modeControl.trackingMode = .selectOne
-        modeControl.target = self
-        modeControl.action = #selector(modeClicked)
-        toolControl.segmentCount = 3
-        for (index, (symbol, tip)) in [("pencil.tip", "Pen (P)"), ("highlighter", "Highlighter (H)"), ("eraser", "Eraser (E)")].enumerated() {
-            toolControl.setImage(NSImage(systemSymbolName: symbol, accessibilityDescription: tip), forSegment: index)
-            toolControl.setToolTip(tip, forSegment: index)
-        }
-        toolControl.trackingMode = .selectOne
-        toolControl.target = self
-        toolControl.action = #selector(toolClicked)
-        for control in [modeControl, toolControl] { control.refusesFirstResponder = true }
-        swatches = Self.palette.enumerated().map { index, color in
-            let button = InkSwatchButton(hex: color.hex)
-            button.toolTip = "\(color.name) (\(index + 1))"
-            button.target = self
-            button.action = #selector(swatchClicked(_:))
-            return button
-        }
-        let swatchRow = NSStackView(views: swatches)
-        swatchRow.spacing = 6
-        let hint = NSTextField(labelWithString: "⌘D draw · hold ⌥ to sketch · ⌘F marker · ⌘S save · ⌘⇧C copy image")
-        hint.font = .systemFont(ofSize: 11)
-        hint.textColor = .secondaryLabelColor
-        hint.lineBreakMode = .byTruncatingTail
-        hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let bar = NSStackView(views: [modeControl, toolControl, swatchRow, hint])
-        bar.spacing = 16
-        bar.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        let bar = makeToolbar()
         bar.translatesAutoresizingMaskIntoConstraints = false
         let line = NSBox()
         line.boxType = .separator
@@ -269,6 +274,108 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         ])
         content.layoutSubtreeIfNeeded()
         updateLayoutMetrics()
+    }
+
+    /// The same grouped icon toolbar as the screenshot editor: mode, ink,
+    /// marker, history, then close / copy / save on the right.
+    private func makeToolbar() -> NSStackView {
+        func button(_ symbol: String, _ toolTip: String, _ action: Selector) -> NSButton {
+            let button = EditorToolbarStyle.iconButton(symbol: symbol, toolTip: toolTip)
+            button.target = self
+            button.action = action
+            return button
+        }
+        let type = button("character.cursor.ibeam", "", #selector(typePressed))
+        let draw = button("scribble.variable", "", #selector(drawPressed))
+        let pen = button("pencil.tip", "", #selector(toolPressed(_:)))
+        let highlighter = button("highlighter", "", #selector(toolPressed(_:)))
+        let eraser = button("eraser", "", #selector(toolPressed(_:)))
+        modeButtons = [.type: type, .draw: draw]
+        toolButtons = [.pen: pen, .highlighter: highlighter, .eraser: eraser]
+        swatchRow.spacing = 2
+        rebuildSwatches()
+        markerButton = button("1.circle", "", #selector(markerPressed))
+        let undo = button("arrow.uturn.left", "Undo (Cmd+Z)", #selector(undoPressed))
+        let redo = button("arrow.uturn.right", "Redo (Cmd+Shift+Z)", #selector(redoPressed))
+        let clear = button("trash", "Clear all ink (Option+Backspace while drawing)", #selector(clearPressed))
+        let close = button("xmark", "Close (Esc or Cmd+W)", #selector(closePressed))
+        let copy = button("doc.on.doc", "Copy + save and close (Cmd+Enter)", #selector(copyPressed))
+        let save = button("tray.and.arrow.down", "Save (Cmd+S)", #selector(savePressed))
+        fixedHints = [
+            .init(view: markerButton, key: "⌘F", label: "Numbered marker"),
+            .init(view: undo, key: "⌘Z", label: "Undo"),
+            .init(view: redo, key: "⌘⇧Z", label: "Redo"),
+            .init(view: clear, key: "⌥⌫", label: "Clear all ink, while drawing"),
+            .init(view: close, key: "Esc", label: "Close (⌘W also closes)"),
+            .init(view: copy, key: "⌘↩", label: "Copy + save and close"),
+            .init(view: save, key: "⌘S", label: "Save")
+        ]
+
+        let groups: [[NSView]] = [[type, draw], [pen, highlighter, eraser, swatchRow], [markerButton], [undo, redo, clear]]
+        let bar = NSStackView()
+        bar.spacing = 8
+        bar.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        bar.setViews(groups.map { EditorToolbarStyle.group($0) }, in: .leading)
+        bar.setViews([EditorToolbarStyle.group([close, copy, save])], in: .trailing)
+        return bar
+    }
+
+    private func rebuildSwatches() {
+        swatchRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        swatches = palette.map { color in
+            let button = InkSwatchButton(hex: color.hex, name: color.name)
+            button.target = self
+            button.action = #selector(swatchClicked(_:))
+            swatchRow.addArrangedSubview(button)
+            return button
+        }
+    }
+
+    /// Settings → Colors changes apply to open notes, as in the screenshot editor.
+    private func reloadPalette() {
+        let updated = Self.noteColors(forPaletteIDs: settingsStore?.settings.editorColorIDs ?? EditorPalette.defaultIDs)
+        guard updated.map(\.id) != palette.map(\.id) else { return }
+        palette = updated
+        if !palette.contains(where: { $0.hex == colorHex }) { colorHex = palette.first?.hex ?? colorHex }
+        rebuildSwatches()
+        refreshShortcutLabels()
+        syncControls()
+    }
+
+    /// Tool letters are physical keys, so their names follow the keyboard layout.
+    func refreshShortcutLabels() {
+        func key(_ code: Int) -> String { HotKeyService.describeShortcut(keyCode: UInt32(code), carbonFlags: 0) }
+        let type = key(kVK_ANSI_T), color = key(kVK_ANSI_Q), marker = key(kVK_ANSI_F)
+        var hints: [EditorShortcutHint] = []
+        if let button = modeButtons[.type] {
+            button.toolTip = "Type (\(type) or Esc while drawing)"
+            hints.append(.init(view: button, key: type, label: "Back to typing, while drawing (Esc also works)"))
+        }
+        if let button = modeButtons[.draw] {
+            button.toolTip = "Draw (Cmd+D, or hold Option to draw for a moment)"
+            hints.append(.init(view: button, key: "⌘D", label: "Draw (hold ⌥ to draw for a moment)"))
+        }
+        let tools: [(Tool, String, Int)] = [(.pen, "Pen", kVK_ANSI_W), (.highlighter, "Highlighter", kVK_ANSI_H),
+                                            (.eraser, "Eraser", kVK_ANSI_X)]
+        for (tool, title, code) in tools {
+            guard let button = toolButtons[tool] else { continue }
+            button.toolTip = "\(title) (\(key(code)) while drawing)"
+            hints.append(.init(view: button, key: key(code), label: "\(title), while drawing"))
+        }
+        for swatch in swatches { swatch.toolTip = "\(swatch.colorName) (\(color) while drawing picks the next color)" }
+        hints.append(.init(view: swatchRow, key: color, label: "Next color, while drawing"))
+        markerButton.toolTip = "Numbered marker (Cmd+F, or \(marker) while drawing)"
+        shortcutHints = hints + fixedHints
+        shortcutOverlay?.refreshLabels()
+    }
+
+    /// Feeds the Command-hold hints, like the screenshot editor's monitor.
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+            self?.shortcutOverlay?.handle(event)
+            return event
+        }
     }
 
     /// Centers the column and keeps the text view at least as tall as the
@@ -587,11 +694,23 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     func setColor(_ index: Int) {
-        guard Self.palette.indices.contains(index) else { return }
-        colorHex = Self.palette[index].hex
+        guard palette.indices.contains(index) else { return }
+        colorHex = palette[index].hex
         if tool == .eraser { tool = .pen }
         if mode != .draw && !holdingOption { mode = .draw }
         syncControls()
+    }
+
+    /// Q steps through the palette like the screenshot editor's color key.
+    func nextColor() {
+        let current = palette.firstIndex { $0.hex == colorHex } ?? -1
+        setColor((current + 1) % max(1, palette.count))
+    }
+
+    /// Option+Backspace while drawing, like Clear in the screenshot editor; undoable.
+    func clearInk() {
+        guard !items.isEmpty else { return }
+        setItems([])
     }
 
     func modifiersChanged(_ event: NSEvent) {
@@ -602,8 +721,8 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     private func syncControls() {
-        modeControl.selectedSegment = isDrawing ? 1 : 0
-        toolControl.selectedSegment = [.pen: 0, .highlighter: 1, .eraser: 2][tool] ?? 0
+        modeButtons.forEach { EditorToolbarStyle.setActive($0.value, ($0.key == .draw) == isDrawing) }
+        toolButtons.forEach { EditorToolbarStyle.setActive($0.value, $0.key == tool) }
         swatches.forEach { $0.isChosen = $0.hex == colorHex }
         window?.invalidateCursorRects(for: textView)
         if let window, textView.visibleRect.contains(textView.convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
@@ -611,14 +730,19 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         }
     }
 
-    @objc private func modeClicked() {
-        setMode(modeControl.selectedSegment == 1 ? .draw : .type)
-        window?.makeFirstResponder(textView)
-    }
+    // Toolbar clicks run the same commands as their keys, then hand focus back to the text.
+    @objc private func typePressed() { perform(.type) }
+    @objc private func drawPressed() { setMode(.draw); window?.makeFirstResponder(textView) }
+    @objc private func markerPressed() { perform(.marker) }
+    @objc private func undoPressed() { perform(.undo) }
+    @objc private func redoPressed() { perform(.redo) }
+    @objc private func clearPressed() { perform(.clearInk) }
+    @objc private func closePressed() { perform(.close) }
+    @objc private func copyPressed() { perform(.copyAndSave) }
+    @objc private func savePressed() { perform(.save) }
 
-    @objc private func toolClicked() {
-        setTool([.pen, .highlighter, .eraser][max(0, toolControl.selectedSegment)])
-        window?.makeFirstResponder(textView)
+    @objc private func toolPressed(_ sender: NSButton) {
+        if let tool = toolButtons.first(where: { $0.value === sender })?.key { perform(.tool(tool)) }
     }
 
     @objc private func swatchClicked(_ sender: InkSwatchButton) {
@@ -628,48 +752,36 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     func handleKey(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown else { return false }
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
-        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-        if flags == [.command] {
-            switch key {
-            case "a": textView.selectAll(nil)
-            case "c": textView.copy(nil)
-            case "x": textView.cut(nil)
-            case "v": textView.paste(nil)
-            case "z": undo()
-            case "s": save()
-            case "w": window?.performClose(nil)
-            case "d": setMode(mode == .draw ? .type : .draw)
-            case "f": insertMarker()
-            default: return false
-            }
-            return true
-        }
-        if flags == [.command, .shift] {
-            switch key {
-            case "z": redo()
-            case "c": copyImage()
-            default: return false
-            }
-            return true
-        }
-        if event.keyCode == 53, flags.isEmpty {
-            if mode == .draw { setMode(.type) } else { window?.performClose(nil) }
-            return true
-        }
-        guard mode == .draw, flags.isEmpty else { return false }
-        switch key {
-        case "p": setTool(.pen)
-        case "h": setTool(.highlighter)
-        case "e": setTool(.eraser)
-        case "t": setMode(.type)
-        case "1", "2", "3", "4", "5": setColor((Int(key) ?? 1) - 1)
-        default:
-            // Typing anything else goes straight back to writing.
-            setMode(.type)
+        guard let command = InkNoteKeymap.command(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers ?? "",
+                                                  flags: event.modifierFlags, isDrawing: mode == .draw) else {
+            // Typing anything else while drawing goes straight back to writing.
+            if mode == .draw, event.modifierFlags.intersection([.command, .control]).isEmpty { setMode(.type) }
             return false
         }
+        perform(command)
         return true
+    }
+
+    func perform(_ command: InkNoteKeymap.Command) {
+        switch command {
+        case .selectAll: textView.selectAll(nil)
+        case .copy: textView.copy(nil)
+        case .cut: textView.cut(nil)
+        case .paste: textView.paste(nil)
+        case .undo: undo()
+        case .redo: redo()
+        case .save: save()
+        case .copyAndSave: copyAndSave()
+        case .close: window?.performClose(nil)
+        case .toggleDraw: setMode(mode == .draw ? .type : .draw)
+        case .type: setMode(.type)
+        case .escape: if mode == .draw { setMode(.type) } else { window?.performClose(nil) }
+        case .marker: insertMarker()
+        case .nextColor: nextColor()
+        case .clearInk: clearInk()
+        case .tool(let tool): setTool(tool)
+        }
+        if let window, window.isVisible, window.firstResponder !== textView { window.makeFirstResponder(textView) }
     }
 
     func undo() {
@@ -720,6 +832,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
             guard let png = renderPNG(), let data = PNGMetadata.embed(intoPNG: png, inkNote: document) else {
                 throw NSError(domain: "InkNote", code: 3, userInfo: [NSLocalizedDescriptionKey: "The note could not be drawn into an image."])
             }
+            try FileManager.default.createDirectory(at: noteURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: noteURL, options: .atomic)
             savedDocument = document
             refresh()
@@ -730,13 +843,15 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         }
     }
 
-    /// Saves, then puts the note image on the clipboard for pasting to an agent.
-    func copyImage() {
+    /// Saves, puts the note image on the clipboard for pasting to an agent,
+    /// and closes, like Command+Return in the screenshot flow.
+    func copyAndSave() {
         guard save() else { return }
-        copyFile?(noteURL)
-        let subtitle = window?.subtitle ?? ""
-        window?.subtitle = "Copied \(noteURL.lastPathComponent)"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in self?.window?.subtitle = subtitle }
+        guard copyFile?(noteURL) == true else {
+            AlertPresenter.presentWarning(title: "Cannot Copy Note", message: "The note was saved, but could not be copied to the clipboard. Try Copy + Save again.")
+            return
+        }
+        close()
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -751,7 +866,12 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         }
     }
 
-    func windowWillClose(_ notification: Notification) { onClose?() }
+    func windowWillClose(_ notification: Notification) {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+        shortcutOverlay?.cancel()
+        onClose?()
+    }
 
     private static func ringCursor(diameter: CGFloat) -> NSCursor {
         let size = diameter + 6
@@ -771,10 +891,12 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
 
 final class InkSwatchButton: NSButton {
     let hex: String
+    let colorName: String
     var isChosen = false { didSet { needsDisplay = true } }
 
-    init(hex: String) {
+    init(hex: String, name: String) {
         self.hex = hex
+        colorName = name
         super.init(frame: NSRect(x: 0, y: 0, width: 22, height: 22))
         isBordered = false
         title = ""

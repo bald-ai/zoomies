@@ -6,7 +6,7 @@ _Take and copy paste screen in 2 seconds. Rename? 3 seconds. Rename + annotate w
 >
 > Zoomies builds natively on both Apple silicon and Intel Macs. Intel is supported but untested because I do not have an Intel Mac.
 
-Mac-only keyboard-first screenshot and scratchpad app for agentic coding.
+Mac-only keyboard-first screenshot and note app for agentic coding.
 Good for touchpad users too, especially if your wrist is already cooked from gaming.
 
 Fork it, pork it, change it, rebuild it. Have fun.
@@ -16,7 +16,7 @@ Fork it, pork it, change it, rebuild it. Have fun.
 - Captures the exact UI state you want a coding agent to understand.
 - Adds quick notes/prompts to screenshots so the context travels with the image.
 - Saves Zoomies edit data inside PNGs, so future reopens can edit/delete Zoomies-added arrows, text, pen strokes, shapes, pasted selections, and cut regions.
-- Creates quick scratchpad notes for errors, issues, and ideas you spot in one project while your head is still in another.
+- Creates quick notes you can type and draw on, saved as PNGs, for errors, issues, and ideas you spot in one project while your head is still in another.
 - Lets you rename, annotate, save, copy, or delete without breaking coding flow.
 - Reopens a selected Finder image through the Zoomies flow, or opens a Markdown file as a drawable note saved as PNG.
 
@@ -65,7 +65,7 @@ tested.**
 - `Option+Shift+4` -> area capture
 - `Option+Shift+3` -> full-screen capture
 - `Option+Shift+2` -> select an image, note PNG, or Markdown file in Finder, then press this to edit it with Zoomies
-- `Option+Shift+1` -> create a scratchpad note
+- `Option+Shift+1` -> create a new note (text + drawing, saved as PNG on the Desktop)
 - `Option+Shift+5` -> start/stop screen recording (requires macOS 15)
 
 The defaults intentionally avoid the standard macOS `Cmd+Shift` screenshot shortcuts.
@@ -76,9 +76,14 @@ the relevant shortcut code and build a new `.app` for you.
 
 ## Workflow Keybinds
 
+The same keys mean the same thing everywhere: `Cmd+S` saves, `Cmd+Enter` copies
+and saves, `Esc` cancels or closes, `Cmd+Z` / `Cmd+Shift+Z` undo and redo, `Q`
+picks the next color, `Option+Backspace` clears the drawing, and `F` is the numbered marker. Plain `Enter` saves
+wherever it is not typing a new line.
+
 | Screen | Key | Action |
 | --- | --- | --- |
-| Rename / Prompt | `Enter` | Save |
+| Rename / Prompt | `Enter` or `Cmd+S` | Save |
 | Rename / Prompt | `Cmd+Enter` | Copy + save |
 | Rename / Prompt | `Cmd+Backspace` | Copy + delete |
 | Rename / Prompt | `Esc` | Delete / close |
@@ -90,13 +95,17 @@ the relevant shortcut code and build a new `.app` for you.
 | Edit | `Option+Backspace` | Clear |
 | Edit | `Cmd+C` / `Cmd+X` / `Cmd+V` | Copy / cut / paste |
 | Edit | `Cmd +` / `Cmd -` / `Cmd 0` | Zoom in / out / reset |
-| Edit | `Enter` | Save |
+| Edit | `Enter` or `Cmd+S` | Save |
 | Edit | `Cmd+Enter` | Copy + save |
-| Edit | `Esc` | Cancel |
+| Edit | `Esc` or `Cmd+W` | Cancel (same as the window's close button) |
+| Note | see [Ink Note Editor](#ink-note-editor) | |
+| Settings | `Cmd+1`–`Cmd+4` | Screenshots / Videos / Notes / Colors tab |
+| Settings | `Cmd+W` or `Esc` | Close |
+| Settings | `Space` or `Enter` on a focused shortcut | Record a new shortcut |
 
 ### Editor shortcut hints
 
-Hold **⌘ alone for 0.5 seconds** to reveal shortcut badges beside the editor’s toolbar controls. A hint above the toolbar invites you to hover over a badge or control to read its action and shortcut in plain text. Release ⌘ to hide them. Another key or modifier dismisses the badges and lets the shortcut work normally.
+Hold **⌘ alone for 0.5 seconds** to reveal shortcut badges beside the toolbar controls of the screenshot editor and the note editor. A hint line near the toolbar invites you to hover over a badge or control to read its action and shortcut in plain text. Release ⌘ to hide them. Another key or modifier dismisses the badges and lets the shortcut work normally.
 
 ### Drawing from the window edges
 
@@ -114,15 +123,32 @@ New editor text and marker diameters grow with image width on a gentle curve: sm
 
 ## Ink Note Editor
 
-Select one `.md` or `.markdown` file in Finder and press `Option+Shift+2` to open it as a drawable note. Markdown files must be valid UTF-8 and at most 1 MB. Footnotes (`[^1]` and `[^1]: note`) become numbered circles, with each note as a circle line at the end.
+Press `Option+Shift+1` for a new note. It saves as `Note <date> at <time>.png` on the Desktop when you press `Command+S` (or `Command+Enter` to save, copy, and close). Closing an untouched note leaves no file.
+
+To start from existing Markdown, select one `.md` or `.markdown` file in Finder and press `Option+Shift+2`. Markdown files must be valid UTF-8 and at most 1 MB. Footnotes (`[^1]` and `[^1]: note`) become numbered circles, with each note as a circle line at the end.
 
 Notes save as PNGs: the picture is what you paste to an agent, and the editable text and ink are stored inside it. `Command+S` writes `name.png` next to the Markdown file and never changes the `.md`. If a picture with that name already exists and is not a Zoomies note, the note gets a new name instead. Pressing `Option+Shift+2` on the note PNG, or on the Markdown file again, reopens the note.
 
-- `Command+D` switches between typing and drawing. Hold `Option` to draw for a moment while typing. A tablet or Apple Pencil (Sidecar) always draws and uses its pressure.
-- While drawing: `P` pen, `H` highlighter, `E` eraser, `1`–`5` colors, `T` or Escape back to typing. Typing any other key goes back to writing.
+The note editor has two modes. While typing, letters are text, so its commands use `Command`. While drawing, plain letters pick tools with the same letters as the screenshot editor; any other key goes back to typing and types itself. A tablet or Apple Pencil (Sidecar) always draws and uses its pressure.
+
+| Key | Action |
+| --- | --- |
+| `Cmd+D` | Switch between typing and drawing |
+| Hold `Option` | Draw for a moment while typing |
+| `W` / `H` / `X` (while drawing) | Pen / highlighter / eraser |
+| `Q` (while drawing) | Next color |
+| `Option+Backspace` (while drawing) | Clear all ink (undoable); while typing it still deletes a word |
+| `F` (while drawing) or `Cmd+F` | Numbered marker at the cursor, with its note line at the end |
+| `T` or `Esc` (while drawing) | Back to typing |
+| `Cmd+Z` / `Cmd+Shift+Z` | Undo / redo text and ink in one history |
+| `Cmd+S` | Save and keep editing |
+| `Cmd+Enter` | Save, copy the note image, and close |
+| `Esc` (while typing) or `Cmd+W` | Close; asks to Save, Discard, or Cancel when there are unsaved changes |
+
+Every toolbar button names its key in its tooltip.
+
 - Each stroke pins to the word under it, so it moves with that word as text above it changes. Strokes drawn right after and next to each other (an arrow and its head) move together. Deleting the word hides its ink; undo brings both back. The text column has a fixed width, so resizing the window never rewraps lines.
-- `Command+F` drops a circle at the cursor and starts its note line at the end.
-- `Command+Z` and `Command+Shift+Z` undo and redo text and ink in one history. `Command+Shift+C` saves and copies the note image. `Command+W` or Escape prompts to Save, Discard, or Cancel when there are unsaved changes.
+- Notes use your colors from **Settings → Colors**, skipping any too dark to see on the note background (black). Changes apply to open notes.
 
 ## Editor Select Tool
 
@@ -144,8 +170,7 @@ Editable objects are remembered only for PNGs saved by this version of Zoomies o
 
 ## Screen Recording
 
-`Option+Shift+5` or the menu-bar icon's Start Recording begins a display
-recording. There is no display picker: recording starts on the display under
+`Option+Shift+5` begins a display recording, and pressing it again stops it. There is no display picker: recording starts on the display under
 the pointer and follows the pointer to another monitor after it stays there
 for half a second. It keeps recording across app and Space changes, includes
 the cursor, excludes Zoomies' own windows, and stops automatically after 60
@@ -156,10 +181,11 @@ Video is 30, 60, or 120 fps (selectable in Settings, default 30), SDR, H.264 MP4
 margins where needed). The menu bar shows only the elapsed seconds, from `0` to `60`, in red. The finished video is saved beside screenshots with a unique
 `Recording_...` filename and revealed in Finder.
 
-Only one Zoomies operation runs at a time: recording blocks
-screenshots/notes/Finder-reopen, and those workflows block recording startup.
-Screen recording requires macOS 15 or later; on macOS 14 the menu command
-explains it is unavailable while screenshots and notes keep working.
+While recording, screenshots, new notes, and Finder-reopen are blocked, and an
+unfinished screenshot or Finder-reopen flow blocks recording startup. Open note
+windows never block anything: you can capture or record with notes open.
+Screen recording requires macOS 15 or later; on macOS 14 the shortcut
+shows an "unavailable" message while screenshots and notes keep working.
 
 ## Temporary Clipboard Files
 
@@ -206,8 +232,8 @@ it does not make the app notarized for distribution.
 
 ## Editor colors
 
-Press **Q** or click the color swatch to cycle to the next color. In **Settings → Colors**, choose 1–6 active colors from 15 options and use the up/down arrows to set their order. The last color wraps back to the first. Changes also apply to an already-open editor.
+Press **Q** or click the color swatch to cycle to the next color (in the note editor, Q while drawing). In **Settings → Colors**, choose 1–6 active colors from 15 options and use the up/down arrows to set their order. The last color wraps back to the first. Changes also apply to an already-open editor.
 
-Standalone Markdown notes accept up to 100,000 characters. Image notes keep their 1,000-character limit. Input that would exceed the limit is rejected with a visible limit message, so an oversized paste does not silently lose its ending.
+Screenshot notes keep their 1,000-character limit. Input that would exceed the limit is rejected with a visible limit message, so an oversized paste does not silently lose its ending.
 
 After placing or selecting editor text, click outside it to return to the pen. Typed text is kept; empty text boxes are discarded. The dismissing click does not draw a stroke.

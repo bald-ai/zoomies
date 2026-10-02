@@ -28,11 +28,6 @@ class NotePanelController: NSWindowController {
     private let limitLabel = NSTextField(labelWithString: "")
     private let shortcutLabel = NSTextField(labelWithString: "")
     private var escapeKeyDeletesFile: Bool = true
-    private var showsCopyAndDelete: Bool = true
-    private var showsEditorShortcut: Bool = true
-    private var showsNewlineShortcut: Bool = false
-
-    static let standaloneMaxLength = 100_000
     private var maxLength = 1000
     private var layout = ScreenshotNotePanelController.layout
 
@@ -42,12 +37,9 @@ class NotePanelController: NSWindowController {
     }
 
     init(initialText: String,
-                     escapeKeyDeletesFile: Bool = true,
-                     showsCopyAndDelete: Bool = true,
-                     showsEditorShortcut: Bool = true,
-                     showsNewlineShortcut: Bool = false,
-                     maxLength: Int = 1000,
-                     layout: NotePanelLayout = ScreenshotNotePanelController.layout) {
+         escapeKeyDeletesFile: Bool = true,
+         maxLength: Int = 1000,
+         layout: NotePanelLayout = ScreenshotNotePanelController.layout) {
         let contentRect = NSRect(origin: .zero, size: layout.size)
         let panel = FloatingInputPanel(contentRect: contentRect)
         panel.titleVisibility = .hidden
@@ -58,10 +50,8 @@ class NotePanelController: NSWindowController {
         self.maxLength = max(1, maxLength)
         textView.characterLimit = self.maxLength
         self.escapeKeyDeletesFile = escapeKeyDeletesFile
-        self.showsCopyAndDelete = showsCopyAndDelete
-        self.showsEditorShortcut = showsEditorShortcut
-        self.showsNewlineShortcut = showsNewlineShortcut
         configureUI(initialText: initialText)
+        panel.keyCommandHandler = { [weak self] in self?.handleKeyCommand($0) }
     }
 
     override init(window: NSWindow?) {
@@ -78,9 +68,9 @@ class NotePanelController: NSWindowController {
             .enter: .save(text: value),
             .commandEnter: .copyAndSave(text: value),
             .commandShiftEnter: .copyAndSave(text: value),
-            .commandBackspace: showsCopyAndDelete ? .copyAndDelete(text: value) : nil,
+            .commandBackspace: .copyAndDelete(text: value),
             .escape: escapeKeyDeletesFile ? .delete : .close,
-            .tab: showsEditorShortcut ? .goToEditor(text: value) : nil,
+            .tab: .goToEditor(text: value),
             .shiftTab: .backToRename(text: value)
         ]
         if let action = actions[command] ?? nil { onAction?(action) }
@@ -138,19 +128,8 @@ class NotePanelController: NSWindowController {
         shortcutLabel.textColor = NSColor.secondaryLabelColor
         shortcutLabel.lineBreakMode = .byWordWrapping
         let escapeLabel = escapeKeyDeletesFile ? "Delete" : "Close"
-        var shortcutParts = ["Enter: Save"]
-        if showsNewlineShortcut {
-            shortcutParts.append("Shift+↩: new line")
-        }
-        shortcutParts.append("⌘↩: Copy+Save")
-        if showsCopyAndDelete {
-            shortcutParts.append("⌘⌫: Copy+Delete")
-        }
-        shortcutParts.append("Esc: \(escapeLabel)")
-        shortcutParts.append("Shift+Tab: Rename")
-        if showsEditorShortcut {
-            shortcutParts.append("Tab: Editor")
-        }
+        let shortcutParts = ["Enter: Save", "⌘↩: Copy+Save", "⌘⌫: Copy+Delete",
+                             "Esc: \(escapeLabel)", "Shift+Tab: Rename", "Tab: Editor"]
         shortcutLabel.stringValue = shortcutParts.joined(separator: "    ")
 
         NSLayoutConstraint.activate([

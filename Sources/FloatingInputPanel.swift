@@ -5,6 +5,8 @@ final class FloatingInputPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     private let sendEditingAction: (Selector, Any?) -> Bool
+    /// Command+S saves, the same as Enter, so saving uses one key app-wide.
+    var keyCommandHandler: ((KeyCommand) -> Void)?
 
     init(contentRect: NSRect,
          sendEditingAction: @escaping (Selector, Any?) -> Bool = { NSApp.sendAction($0, to: nil, from: $1) }) {
@@ -33,27 +35,36 @@ final class FloatingInputPanel: NSPanel {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock)
         let chars = event.charactersIgnoringModifiers?.lowercased()
 
-        if performTextUndo(chars: chars, flags: flags) { return true }
-        if flags == [.command], let chars,
-           let selector = Self.editingSelectors[chars], sendEditingAction(selector, self) {
+        if flags == [.command], chars == "s", let keyCommandHandler {
+            keyCommandHandler(.enter)
             return true
         }
+        if StandardEditingKeys.perform(event, in: self, send: sendEditingAction) { return true }
         return super.performKeyEquivalent(with: event)
     }
+}
 
-    // NSText has no undo: action; its first-responder undo manager owns edits.
-    private func performTextUndo(chars: String?, flags: NSEvent.ModifierFlags) -> Bool {
-        guard chars == "z", let textView = firstResponder as? NSTextView else { return false }
-        if flags == [.command] { textView.undoManager?.undo(); return true }
-        if flags == [.command, .shift] { textView.undoManager?.redo(); return true }
-        return false
-    }
-
-    private static let editingSelectors: [String: Selector] = [
+/// Zoomies has no main menu, so windows with text fields route the standard
+/// Edit-menu keys themselves: copy, paste, cut, select all, undo and redo.
+enum StandardEditingKeys {
+    private static let selectors: [String: Selector] = [
         "c": #selector(NSText.copy(_:)), "v": #selector(NSText.paste(_:)),
         "x": #selector(NSText.cut(_:)), "a": #selector(NSText.selectAll(_:))
     ]
+
+    static func perform(_ event: NSEvent, in window: NSWindow,
+                        send: (Selector, Any?) -> Bool = { NSApp.sendAction($0, to: nil, from: $1) }) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock)
+        let chars = event.charactersIgnoringModifiers?.lowercased()
+        // NSText has no undo: action; its first-responder undo manager owns edits.
+        if chars == "z", let textView = window.firstResponder as? NSTextView {
+            if flags == [.command] { textView.undoManager?.undo(); return true }
+            if flags == [.command, .shift] { textView.undoManager?.redo(); return true }
+        }
+        guard flags == [.command], let chars, let selector = selectors[chars] else { return false }
+        return send(selector, window)
+    }
 }

@@ -141,7 +141,7 @@ final class HotKeyService {
         case .screenshotArea: return "Screenshot Area"
         case .screenshotFull: return "Screenshot Full"
         case .reopenFinderSelection: return "Reopen Finder Selection"
-        case .openScratchpad: return "Scratchpad"
+        case .openScratchpad: return "Create Note"
         case .toggleRecording: return "Screen Recording"
         }
     }

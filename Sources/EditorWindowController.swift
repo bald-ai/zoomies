@@ -711,7 +711,7 @@ final class EditorWindowController: NSWindowController {
             .init(view: zoomLabel, key: "⌘0", label: "Reset zoom"),
             .init(view: zoomInButton, key: "⌘+", label: "Zoom in"),
             .init(view: cancelButton, key: "Esc", label: "Cancel"),
-            .init(view: saveButton, key: "↩", label: "Save (⌘↩ to copy and save)")
+            .init(view: saveButton, key: "↩", label: "Save, also ⌘S (⌘↩ to copy and save)")
         ]
 
         let drawingTools = makeToolbarGroup([
@@ -731,27 +731,7 @@ final class EditorWindowController: NSWindowController {
     }
 
     private func makeToolbarGroup(_ controls: [NSView]) -> NSView {
-        let surface = NSView()
-        surface.translatesAutoresizingMaskIntoConstraints = false
-        surface.wantsLayer = true
-        surface.layer?.cornerRadius = 9
-        surface.layer?.backgroundColor = NSColor(hex: "#2b2e2e").cgColor
-        surface.layer?.borderWidth = 0.5
-        surface.layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
-
-        let controlsStack = NSStackView(views: controls)
-        controlsStack.orientation = .horizontal
-        controlsStack.alignment = .centerY
-        controlsStack.spacing = 2
-        controlsStack.translatesAutoresizingMaskIntoConstraints = false
-        surface.addSubview(controlsStack)
-        NSLayoutConstraint.activate([
-            controlsStack.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 3),
-            controlsStack.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -3),
-            controlsStack.topAnchor.constraint(equalTo: surface.topAnchor, constant: 3),
-            controlsStack.bottomAnchor.constraint(equalTo: surface.bottomAnchor, constant: -3)
-        ])
-        return surface
+        EditorToolbarStyle.group(controls)
     }
 
     private func makeToolButton(symbol: String, tool: EditorTool, toolTip: String) -> NSButton {
@@ -770,26 +750,12 @@ final class EditorWindowController: NSWindowController {
     }
 
     private func makeIconButton(symbol: String, toolTip: String) -> NSButton {
-        let button = NSButton(frame: .zero)
-        button.isBordered = false
-        button.bezelStyle = .shadowlessSquare
-        button.refusesFirstResponder = true
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        button.imagePosition = .imageOnly
-        button.contentTintColor = NSColor(hex: "#dedfe0")
-        button.toolTip = toolTip
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 6
-        button.layer?.backgroundColor = NSColor.clear.cgColor
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 26).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 26).isActive = true
-        return button
+        EditorToolbarStyle.iconButton(symbol: symbol, toolTip: toolTip)
     }
 
     private func makeSaveButton() -> NSButton {
         let button = makeActionButton(symbol: "tray.and.arrow.down",
-                                      toolTip: "Save (Enter)",
+                                      toolTip: "Save (Enter or Cmd+S)",
                                       action: #selector(savePressed))
         button.title = ""
         return button
@@ -832,11 +798,7 @@ final class EditorWindowController: NSWindowController {
     private func selectTool(_ tool: EditorTool) {
         canvasView.setTool(tool)
         for (key, button) in toolButtons {
-            let isActive = key == tool
-            button.layer?.backgroundColor = isActive
-                ? NSColor(hex: "#253e54").cgColor
-                : NSColor.clear.cgColor
-            button.contentTintColor = isActive ? NSColor(hex: "#8ac5ff") : NSColor(hex: "#dedfe0")
+            EditorToolbarStyle.setActive(button, key == tool)
         }
     }
 

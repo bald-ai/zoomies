@@ -1754,9 +1754,14 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             return true
         }
         guard flags.contains(.command), let chars = event.charactersIgnoringModifiers?.lowercased() else { return false }
+        if let close = closeCommand(chars: chars, flags: flags) {
+            onKeyCommand?(close)
+            return true
+        }
         let commands: [String: KeyCommand] = ["=": .zoomIn, "+": .zoomIn, "-": .zoomOut,
             "0": .zoomReset, "c": .copyToClipboard, "x": .cutSelectionToClipboard,
-            "v": .pasteSelectionInCanvas, "z": flags.contains(.shift) ? .redo : .undo]
+            "v": .pasteSelectionInCanvas, "z": flags.contains(.shift) ? .redo : .undo,
+            "s": .finalAction(.saveOnly)]
         guard let command = commands[chars] else { return false }
         onKeyCommand?(command)
         return true
@@ -1806,18 +1811,26 @@ final class EditorCanvasView: NSView, NSTextViewDelegate {
             return super.performKeyEquivalent(with: event)
         }
 
-        guard let command = Self.keyEquivalentCommand(chars: chars, flags: flags) else {
+        guard let command = closeCommand(chars: chars, flags: flags) ?? Self.keyEquivalentCommand(chars: chars, flags: flags) else {
             return super.performKeyEquivalent(with: event)
         }
         onKeyCommand?(command)
         return true
     }
 
+    /// Command+W closes like Escape and the window's close button: a fresh
+    /// capture is deleted (after the confirmation, when that setting is on).
+    private func closeCommand(chars: String, flags: NSEvent.ModifierFlags) -> KeyCommand? {
+        chars == "w" && flags.subtracting(.capsLock) == [.command] ? .finalAction(escapeFinalAction) : nil
+    }
+
     private static func keyEquivalentCommand(chars: String, flags: NSEvent.ModifierFlags) -> KeyCommand? {
         if chars == "z", flags == [.command, .shift] { return .redo }
         guard flags == [.command] else { return nil }
+        // Command+S saves like Enter, matching the note editor and the panels.
         let commands: [String: KeyCommand] = ["z": .undo, "c": .copyToClipboard,
-                                              "x": .cutSelectionToClipboard, "v": .pasteSelectionInCanvas]
+                                              "x": .cutSelectionToClipboard, "v": .pasteSelectionInCanvas,
+                                              "s": .finalAction(.saveOnly)]
         return commands[chars]
     }
 

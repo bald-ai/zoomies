@@ -2,81 +2,93 @@ import XCTest
 import AppKit
 @testable import Zoomies
 
+@MainActor
 final class ScratchpadServiceTests: XCTestCase {
-    func testWriteWritesUTF8MarkdownFile() throws {
-        let desktop = try TestSupport.makeTemporaryDirectory()
-        defer { TestSupport.removeIfExists(desktop) }
-        let writer = ScratchpadNoteWriter(directory: desktop)
-
-        let url = try writer.write(text: "hello", baseName: "Note A")
-
-        XCTAssertEqual(url.pathExtension, "md")
-        XCTAssertEqual(url.deletingPathExtension().lastPathComponent, "Note A")
-        let contents = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertEqual(contents, "hello")
+    @MainActor private final class Fixture {
+        let root: URL
+        var presented: [InkNoteWindowController] = []
+        var copied: [URL] = []
+        var acceptsClipboard = true
+        var service: ScratchpadService!
+        init() throws {
+            _ = NSApplication.shared
+            root = try TestSupport.makeTemporaryDirectory()
+            let clipboard = ClipboardService(cacheDirectory: root.appendingPathComponent("cache"), pasteboardWriter: { [unowned self] objects in
+                guard acceptsClipboard else { return false }
+                copied.append(objects[0] as! URL); return true
+            })
+            service = ScratchpadService(clipboardService: clipboard, desktopDirectory: root.appendingPathComponent("desktop"),
+                                        present: { [unowned self] in presented.append($0) })
+        }
+        deinit { TestSupport.removeIfExists(root) }
     }
 
-    func testWriteCreatesUniqueFilenameOnCollision() throws {
-        let desktop = try TestSupport.makeTemporaryDirectory()
-        defer { TestSupport.removeIfExists(desktop) }
-        let writer = ScratchpadNoteWriter(directory: desktop)
+    private var date: Date { Date(timeIntervalSince1970: 1_790_000_000) }
 
-        let first = try writer.write(text: "a", baseName: "Dup")
-        let second = try writer.write(text: "b", baseName: "Dup")
-
-        XCTAssertEqual(first.lastPathComponent, "Dup.md")
-        XCTAssertEqual(second.lastPathComponent, "Dup_2.md")
-        XCTAssertNotEqual(first, second)
+    func testNewNoteIsADrawablePNGNoteAndNeverMarkdown() throws {
+        let f = try Fixture()
+        var opened: [InkNoteWindowController] = []
+        f.service.onOpen = { opened.append($0) }
+        let editor = f.service.open(date: date)
+        defer { editor.window?.close() }
+        XCTAssertTrue(f.presented == [editor] && opened == [editor])
+        XCTAssertEqual(editor.noteURL.deletingLastPathComponent().lastPathComponent, "desktop")
+        XCTAssertEqual(editor.noteURL.lastPathComponent, ScratchpadFilenameLogic.defaultBaseName(date: date) + ".png")
+        XCTAssertEqual(editor.textView.string, "")
+        XCTAssertFalse(editor.hasUnsavedChanges, "An untouched note closes without asking and leaves no file")
+        XCTAssertFalse(f.service.isBusyForUserCommands)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: f.root.appendingPathComponent("desktop").path))
     }
 
-    func testRepeatBaseNameNeverOverwritesExistingNote() throws {
-        let desktop = try TestSupport.makeTemporaryDirectory()
-        defer { TestSupport.removeIfExists(desktop) }
-        let writer = ScratchpadNoteWriter(directory: desktop)
-
-        let first = try writer.write(text: "original", baseName: "Note")
-        let second = try writer.write(text: "repeat", baseName: "Note")
-
-        XCTAssertNotEqual(first, second)
-        XCTAssertEqual(try String(contentsOf: first, encoding: .utf8), "original")
-        XCTAssertEqual(try String(contentsOf: second, encoding: .utf8), "repeat")
+    func testSavingWritesOnlyThePNGAndCopyPutsItOnTheClipboard() throws {
+        let f = try Fixture()
+        let editor = f.service.open(date: date)
+        defer { editor.window?.close() }
+        editor.textView.insertText("Fix the label clipping.", replacementRange: NSRange(location: 0, length: 0))
+        editor.copyAndSave()
+        XCTAssertEqual(f.copied, [editor.noteURL])
+        let files = try FileManager.default.contentsOfDirectory(atPath: f.root.appendingPathComponent("desktop").path)
+        XCTAssertEqual(files, [editor.noteURL.lastPathComponent])
+        let note = try XCTUnwrap(PNGMetadata.extractInkNote(fromPNG: Data(contentsOf: editor.noteURL)))
+        XCTAssertEqual(note.text, "Fix the label clipping.")
     }
 
-    func testWriteCreatesDirectoryIfMissing() throws {
-        let base = try TestSupport.makeTemporaryDirectory()
-        defer { TestSupport.removeIfExists(base) }
-        let missingDesktop = base.appendingPathComponent("nested/desktop", isDirectory: true)
-        let writer = ScratchpadNoteWriter(directory: missingDesktop)
-
-        let url = try writer.write(text: "x", baseName: "N")
-
-        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    func testNotesOpenedInTheSameSecondGetSeparateFiles() throws {
+        let f = try Fixture()
+        let first = f.service.open(date: date)
+        let second = f.service.open(date: date)
+        defer { first.window?.close(); second.window?.close() }
+        XCTAssertNotEqual(first.noteURL, second.noteURL)
+        XCTAssertEqual(second.noteURL.pathExtension, "png")
     }
 
-    func testWriteAllowsEmptyAndWhitespaceOnlyText() throws {
-        let desktop = try TestSupport.makeTemporaryDirectory()
-        defer { TestSupport.removeIfExists(desktop) }
-        let writer = ScratchpadNoteWriter(directory: desktop)
+    func testCopyFailureSavesKeepsTheNoteOpenAndAllowsRetry() throws {
+        let f = try Fixture()
+        let runner = AlertPresenter.modalRunner
+        let activator = AlertPresenter.appActivator
+        defer { AlertPresenter.modalRunner = runner; AlertPresenter.appActivator = activator }
+        var warnings: [String] = []
+        AlertPresenter.appActivator = {}
+        AlertPresenter.modalRunner = { warnings.append($0.messageText); return .alertFirstButtonReturn }
+        let editor = f.service.open(date: date)
+        defer { editor.window?.close() }
+        var closed = false
+        editor.onClose = { closed = true }
+        editor.textView.insertText("Keep this note", replacementRange: NSRange(location: 0, length: 0))
+        f.acceptsClipboard = false
 
-        let emptyURL = try writer.write(text: "", baseName: "Empty")
-        XCTAssertEqual(try String(contentsOf: emptyURL, encoding: .utf8), "")
+        editor.copyAndSave()
 
-        let whitespaceURL = try writer.write(text: "   \n  ", baseName: "Whitespace")
-        XCTAssertEqual(try String(contentsOf: whitespaceURL, encoding: .utf8), "   \n  ")
-    }
+        XCTAssertEqual(warnings, ["Cannot Copy Note"])
+        XCTAssertFalse(closed, "Clipboard failure must leave the note available for retry")
+        XCTAssertTrue(f.copied.isEmpty)
+        XCTAssertFalse(editor.hasUnsavedChanges, "The successful save is retained")
+        XCTAssertEqual(PNGMetadata.extractInkNote(fromPNG: try Data(contentsOf: editor.noteURL))?.text, "Keep this note")
 
-    func testOpenPresentsNotePanelFirst() throws {
-        let base = try TestSupport.makeTemporaryDirectory()
-        defer { TestSupport.removeIfExists(base) }
-        let cache = base.appendingPathComponent("clipboard", isDirectory: true)
-        let clipboard = ClipboardService(fileManager: .default, cacheDirectory: cache, pasteboardWriter: { _ in true })
-        let service = ScratchpadService(fileManager: .default,
-                                        clipboardService: clipboard,
-                                        desktopDirectory: base.appendingPathComponent("desktop", isDirectory: true),
-                                        showNote: { _ in }, showRename: { _ in })
-
-        service.open()
-
-        XCTAssertEqual(service.presentedPanel, .note, "Opening the scratchpad must land on the note panel so Enter saves immediately.")
+        f.acceptsClipboard = true
+        editor.copyAndSave()
+        XCTAssertEqual(f.copied, [editor.noteURL])
+        XCTAssertTrue(closed)
+        XCTAssertEqual(warnings.count, 1)
     }
 }

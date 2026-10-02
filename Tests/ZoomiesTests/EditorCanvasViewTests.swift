@@ -354,6 +354,7 @@ final class EditorCanvasViewTests: XCTestCase {
                                                  color: .init(.systemRed), lineWidth: 4)
         let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80),
                                       initialState: EditorCanvasState(baseImagePNG: basePNG, items: [arrow]))
+        _ = TestSupport.swallowingUnhandledKeys(canvas)
         var finalActions: [ScreenshotFinalAction] = []
         canvas.onKeyCommand = { command in
             if case .finalAction(let action) = command { finalActions.append(action) }
