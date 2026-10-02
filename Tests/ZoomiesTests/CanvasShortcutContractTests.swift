@@ -19,8 +19,6 @@ final class CanvasShortcutContractTests: XCTestCase {
             (8, .command, "c", .copyToClipboard), (7, .command, "x", .cutSelectionToClipboard),
             (9, .command, "v", .pasteSelectionInCanvas), (51, .option, "", .clear),
             (36, [], "", .finalAction(.saveOnly)), (76, [], "", .finalAction(.saveOnly)),
-            (1, .command, "s", .finalAction(.saveOnly)),
-            (13, .command, "w", .finalAction(.deleteOnly)),
             (36, .command, "", .finalAction(.copyAndSave)), (76, .command, "", .finalAction(.copyAndSave)),
             (51, .command, "", .finalAction(.copyAndDelete)), (53, [], "", .finalAction(.deleteOnly)),
             (48, .shift, "", .backToNote)
@@ -31,14 +29,6 @@ final class CanvasShortcutContractTests: XCTestCase {
             canvas.keyDown(with: event(key, flags, chars))
             XCTAssertEqual(received, [expected], "key \(key), flags \(flags)")
         }
-    }
-
-    func testCommandWClosesLikeEscapeForFinderOriginals() {
-        let canvas = EditorCanvasView(image: TestSupport.solidImage(), escapeFinalAction: .closeOnly)
-        var received: [EditorCanvasView.KeyCommand] = []
-        canvas.onKeyCommand = { received.append($0) }
-        XCTAssertTrue(canvas.performKeyEquivalent(with: event(13, .command, "w")))
-        XCTAssertEqual(received, [.finalAction(.closeOnly)])
     }
 
     func testPhysicalToolKeysRespectModifiersAndCapsLock() {

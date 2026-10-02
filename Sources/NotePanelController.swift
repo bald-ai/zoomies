@@ -51,7 +51,6 @@ class NotePanelController: NSWindowController {
         textView.characterLimit = self.maxLength
         self.escapeKeyDeletesFile = escapeKeyDeletesFile
         configureUI(initialText: initialText)
-        panel.keyCommandHandler = { [weak self] in self?.handleKeyCommand($0) }
     }
 
     override init(window: NSWindow?) {

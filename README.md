@@ -76,14 +76,9 @@ the relevant shortcut code and build a new `.app` for you.
 
 ## Workflow Keybinds
 
-The same keys mean the same thing everywhere: `Cmd+S` saves, `Cmd+Enter` copies
-and saves, `Esc` cancels or closes, `Cmd+Z` / `Cmd+Shift+Z` undo and redo, `Q`
-picks the next color, `Option+Backspace` clears the drawing, and `F` is the numbered marker. Plain `Enter` saves
-wherever it is not typing a new line.
-
 | Screen | Key | Action |
 | --- | --- | --- |
-| Rename / Prompt | `Enter` or `Cmd+S` | Save |
+| Rename / Prompt | `Enter` | Save |
 | Rename / Prompt | `Cmd+Enter` | Copy + save |
 | Rename / Prompt | `Cmd+Backspace` | Copy + delete |
 | Rename / Prompt | `Esc` | Delete / close |
@@ -95,9 +90,9 @@ wherever it is not typing a new line.
 | Edit | `Option+Backspace` | Clear |
 | Edit | `Cmd+C` / `Cmd+X` / `Cmd+V` | Copy / cut / paste |
 | Edit | `Cmd +` / `Cmd -` / `Cmd 0` | Zoom in / out / reset |
-| Edit | `Enter` or `Cmd+S` | Save |
+| Edit | `Enter` | Save |
 | Edit | `Cmd+Enter` | Copy + save |
-| Edit | `Esc` or `Cmd+W` | Cancel (same as the window's close button) |
+| Edit | `Esc` | Cancel |
 | Note | see [Ink Note Editor](#ink-note-editor) | |
 | Settings | `Cmd+1`–`Cmd+4` | Screenshots / Videos / Notes / Colors tab |
 | Settings | `Cmd+W` or `Esc` | Close |

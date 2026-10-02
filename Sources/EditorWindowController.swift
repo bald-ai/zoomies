@@ -711,7 +711,7 @@ final class EditorWindowController: NSWindowController {
             .init(view: zoomLabel, key: "⌘0", label: "Reset zoom"),
             .init(view: zoomInButton, key: "⌘+", label: "Zoom in"),
             .init(view: cancelButton, key: "Esc", label: "Cancel"),
-            .init(view: saveButton, key: "↩", label: "Save, also ⌘S (⌘↩ to copy and save)")
+            .init(view: saveButton, key: "↩", label: "Save (⌘↩ to copy and save)")
         ]
 
         let drawingTools = makeToolbarGroup([
@@ -755,7 +755,7 @@ final class EditorWindowController: NSWindowController {
 
     private func makeSaveButton() -> NSButton {
         let button = makeActionButton(symbol: "tray.and.arrow.down",
-                                      toolTip: "Save (Enter or Cmd+S)",
+                                      toolTip: "Save (Enter)",
                                       action: #selector(savePressed))
         button.title = ""
         return button
