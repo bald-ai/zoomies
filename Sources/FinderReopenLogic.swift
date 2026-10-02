@@ -5,8 +5,8 @@ import Foundation
 /// needed to evaluate a selection result.
 enum FinderReopenDecision: Equatable {
     case open(URL)
-    /// A Markdown file or a note PNG, both edited in the ink note editor.
-    case openInkNote(URL)
+    /// A note PNG, reopened in the note flow with its text and drawing.
+    case openNote(URL, InkNoteDocument)
     case warning(title: String, message: String, settingsURL: String?)
 }
 
@@ -21,46 +21,28 @@ enum FinderReopenLogic {
     private static func resolve(_ selection: FinderSelectionService.Selection) -> FinderReopenDecision {
         switch selection {
         case .none:
-            return .warning(title: "No Finder Selection", message: "Select an image or Markdown file in Finder, then press the shortcut again.", settingsURL: nil)
+            return .warning(title: "No Finder Selection", message: "Select an image in Finder, then press the shortcut again.", settingsURL: nil)
         case .multiple(let count):
-            return .warning(title: "Multiple Finder Items Selected", message: "Select exactly 1 image or Markdown file in Finder (you selected \(count)), then press the shortcut again.", settingsURL: nil)
+            return .warning(title: "Multiple Finder Items Selected", message: "Select exactly 1 image in Finder (you selected \(count)), then press the shortcut again.", settingsURL: nil)
         case .single(let url):
             return inspect(url)
         }
     }
 
     private static func inspect(_ url: URL) -> FinderReopenDecision {
-        if ["md", "markdown"].contains(url.pathExtension.lowercased()) {
-            do {
-                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                guard size <= MarkdownMarkerLogic.maximumFileSize else {
-                    return .warning(title: "Markdown file is too large", message: "Choose a Markdown file no larger than 1 MB.", settingsURL: nil)
-                }
-                let data = try Data(contentsOf: url)
-                guard data.count <= MarkdownMarkerLogic.maximumFileSize else {
-                    return .warning(title: "Markdown file is too large", message: "Choose a Markdown file no larger than 1 MB.", settingsURL: nil)
-                }
-                guard String(data: data, encoding: .utf8) != nil else {
-                    return .warning(title: "Invalid UTF-8", message: "The selected Markdown file is not valid UTF-8.", settingsURL: nil)
-                }
-                return .openInkNote(url)
-            } catch {
-                return .warning(title: "Cannot Open Markdown", message: error.localizedDescription, settingsURL: nil)
-            }
-        }
         switch ImageSafety.inspectFile(at: url) {
         case .tooLarge:
             return .warning(title: "Image is too large", message: "This image is too large to open safely. Choose a smaller screenshot and try again.", settingsURL: nil)
         case .notAnImage:
             return .warning(title: "Not an Image", message: "The selected Finder item is not a readable image.", settingsURL: nil)
         case .safe:
-            return isInkNote(url) ? .openInkNote(url) : .open(url)
+            return note(at: url).map { .openNote(url, $0) } ?? .open(url)
         }
     }
 
-    private static func isInkNote(_ url: URL) -> Bool {
-        guard url.pathExtension.lowercased() == "png", let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return false }
-        return PNGMetadata.extractInkNote(fromPNG: data) != nil
+    private static func note(at url: URL) -> InkNoteDocument? {
+        guard url.pathExtension.lowercased() == "png", let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+        return PNGMetadata.extractInkNote(fromPNG: data)
     }
 
     private static func resolve(_ error: Error) -> FinderReopenDecision {

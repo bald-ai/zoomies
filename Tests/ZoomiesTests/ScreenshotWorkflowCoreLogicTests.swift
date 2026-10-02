@@ -48,6 +48,14 @@ final class ScreenshotWorkflowCoreLogicTests: XCTestCase {
         XCTAssertEqual(longWord, ["abcd", "efgh", "ijk"])
     }
 
+    func testWrapTextCanKeepLineBreaksForNotes() {
+        let note = "fix the header now\n\n\n1: one\n2: two"
+        XCTAssertEqual(WorkflowTextWrapLogic.wrapText(note, maxWidth: 10, keepingLineBreaks: true) { CGFloat($0.count) },
+                       ["fix the", "header now", "", "", "1: one", "2: two"])
+        XCTAssertEqual(WorkflowTextWrapLogic.wrapText("a\nb", maxWidth: 10) { CGFloat($0.count) }, ["a b"],
+                       "Screenshot notes still flow as one paragraph")
+    }
+
     func testWrapTextReturnsSingleEmptyLineForEmptyInput() {
         let lines = WorkflowTextWrapLogic.wrapText("   ", maxWidth: 10) { CGFloat($0.count) }
         XCTAssertEqual(lines, [""])

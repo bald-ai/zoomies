@@ -16,7 +16,7 @@ final class AppDelegateContractTests: XCTestCase {
         var areaCalls = 0
         var fullCalls = 0
         var workflows: [ScreenshotWorkflowController] = []
-        var notes: [InkNoteWindowController] = []
+        var notes: [DedicatedNotePanelController] = []
         var videos: [VideoRenameWorkflowController] = []
         var settings: [SettingsWindowController] = []
         var welcome: [String] = []
@@ -34,7 +34,7 @@ final class AppDelegateContractTests: XCTestCase {
             captureScreen: { [unowned self] _ in fullCalls += 1; return nil },
             workflowPresenter: { [unowned self] in workflows.append($0) }, errorPresenter: { _, _ in })
         lazy var scratchpad = ScratchpadService(clipboardService: clipboard, desktopDirectory: root.appendingPathComponent("notes"),
-            present: { [unowned self] in notes.append($0) })
+            showNote: { [unowned self] in notes.append($0) }, showRename: { _ in }, showEditor: { _ in })
         let recording: ScreenRecordingService
         lazy var app = AppDelegate(settingsStore: store, makeServices: { [unowned self] settings in
             XCTAssertTrue(settings === store)
@@ -91,11 +91,11 @@ final class AppDelegateContractTests: XCTestCase {
         f.command(3)
         try await waitUntil { f.notes.count == 1 }
         XCTAssertFalse(try XCTUnwrap(f.notes[0].window).isVisible)
-        XCTAssertEqual(f.notes[0].noteURL.pathExtension, "png")
+        XCTAssertEqual(f.scratchpad.presentedPanel, .note, "A new note starts on the note window")
         // An open note never blocks a capture.
         f.command(0)
         try await waitUntil { f.areaCalls == 2 && !f.screenshot.isBusyForUserCommands }
-        f.notes[0].window?.close()
+        f.scratchpad.handleNoteAction(.close)
         f.tray?.menu.performActionForItem(at: 0)
         try await waitUntil { f.settings.count == 1 }
         f.tray?.menu.performActionForItem(at: 0)

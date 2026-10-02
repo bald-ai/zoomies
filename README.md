@@ -18,7 +18,7 @@ Fork it, pork it, change it, rebuild it. Have fun.
 - Saves Zoomies edit data inside PNGs, so future reopens can edit/delete Zoomies-added arrows, text, pen strokes, shapes, pasted selections, and cut regions.
 - Creates quick notes you can type and draw on, saved as PNGs, for errors, issues, and ideas you spot in one project while your head is still in another.
 - Lets you rename, annotate, save, copy, or delete without breaking coding flow.
-- Reopens a selected Finder image through the Zoomies flow, or opens a Markdown file as a drawable note saved as PNG.
+- Reopens a selected Finder image through the Zoomies flow, or a saved note in the note flow.
 
 When you edit and save a non-PNG image such as a JPEG or HEIC, Zoomies saves the
 edited result as a PNG and removes the original non-PNG file.
@@ -64,8 +64,8 @@ tested.**
 
 - `Option+Shift+4` -> area capture
 - `Option+Shift+3` -> full-screen capture
-- `Option+Shift+2` -> select an image, note PNG, or Markdown file in Finder, then press this to edit it with Zoomies
-- `Option+Shift+1` -> create a new note (text + drawing, saved as PNG on the Desktop)
+- `Option+Shift+2` -> select an image or note PNG in Finder, then press this to edit it with Zoomies
+- `Option+Shift+1` -> create a new note (text, plus an optional drawing, saved as PNG on the Desktop)
 - `Option+Shift+5` -> start/stop screen recording (requires macOS 15)
 
 The defaults intentionally avoid the standard macOS `Cmd+Shift` screenshot shortcuts.
@@ -93,7 +93,7 @@ the relevant shortcut code and build a new `.app` for you.
 | Edit | `Enter` | Save |
 | Edit | `Cmd+Enter` | Copy + save |
 | Edit | `Esc` | Cancel |
-| Note | see [Ink Note Editor](#ink-note-editor) | |
+| Note | see [Notes](#notes) | |
 | Settings | `Cmd+1`–`Cmd+4` | Screenshots / Videos / Notes / Colors tab |
 | Settings | `Cmd+W` or `Esc` | Close |
 | Settings | `Space` or `Enter` on a focused shortcut | Record a new shortcut |
@@ -116,36 +116,36 @@ New editor text and marker diameters grow with image width on a gentle curve: sm
 - Drag an existing marker to move it or press `Delete` to remove it. Repeated clicks select the marker; number editing is currently disabled. Removing a marker never renumbers the others, and the next number continues past the highest existing marker.
 - Reference the numbers in your note text — the note is saved below the image, so prompts like "fix 1 and 3" travel with the screenshot.
 
-## Ink Note Editor
+## Notes
 
-Press `Option+Shift+1` for a new note. It saves as `Note <date> at <time>.png` on the Desktop when you press `Command+S` (or `Command+Enter` to save, copy, and close). Closing an untouched note leaves no file.
+Press `Option+Shift+1` for a new note. Notes use the same tab-swapping screens as screenshots, starting on the note window:
 
-To start from existing Markdown, select one `.md` or `.markdown` file in Finder and press `Option+Shift+2`. Markdown files must be valid UTF-8 and at most 1 MB. Footnotes (`[^1]` and `[^1]: note`) become numbered circles, with each note as a circle line at the end.
+- **Note window**: type the note. `Enter` saves, `Shift+Enter` adds a line, `Command+Enter` saves and copies, `Esc` closes. `Tab` opens the note editor; `Shift+Tab` goes to Rename.
+- **Rename**: name the file. `Enter` saves; `Tab` goes back to the note window.
+- **Note editor**: draw. Your note text sits in the Note box under the canvas. `Shift+Tab` goes back to the note window.
 
-Notes save as PNGs: the picture is what you paste to an agent, and the editable text and ink are stored inside it. `Command+S` writes `name.png` next to the Markdown file and never changes the `.md`. If a picture with that name already exists and is not a Zoomies note, the note gets a new name instead. Pressing `Option+Shift+2` on the note PNG, or on the Markdown file again, reopens the note.
+A note saves as `Note <date> at <time>.png` on the Desktop: the drawing, cropped with a margin, with the Note box burned in below it, like a screenshot note. A text-only note is just the Note box. The editable note is stored inside the PNG, so selecting it in Finder and pressing `Option+Shift+2` reopens it on its note window; saving replaces the file. An untouched note leaves no file, and `Esc` asks before discarding unsaved text or drawing (turn that off with the close confirmation in Settings).
 
-The note editor has two modes. While typing, letters are text, so its commands use `Command`. While drawing, plain letters pick tools with the same letters as the screenshot editor; any other key goes back to typing and types itself. A tablet or Apple Pencil (Sidecar) always draws and uses its pressure.
+The note editor only draws, so it uses the screenshot editor's keys and a letter without a tool does nothing. A tablet or Apple Pencil (Sidecar) uses its pressure.
 
 | Key | Action |
 | --- | --- |
-| `Cmd+T` / `Cmd+D` | Type / draw |
-| Hold `Option` | Draw for a moment while typing |
-| `W` / `D` / `A` / `R` / `E` (while drawing) | Pen / line / arrow / rectangle / ellipse; hold `Shift` for a square or circle |
-| `H` / `X` (while drawing) | Highlighter / eraser |
-| `Q` (while drawing) | Next color |
-| `Option+Backspace` (while drawing) | Clear all ink (undoable); while typing it still deletes a word |
-| `F` (while drawing) or `Cmd+F` | Numbered marker at the cursor, with its note line at the end |
-| `Esc` (while drawing) | Back to typing |
-| `Cmd+Z` / `Cmd+Shift+Z` | Undo / redo text and ink in one history |
-| `Cmd+S` | Save and keep editing |
-| `Cmd+Enter` | Save, copy the note image, and close |
-| `Esc` (while typing) or `Cmd+W` | Close; asks to Save, Discard, or Cancel when there are unsaved changes |
+| `W` / `D` / `A` / `R` / `E` | Pen / line / arrow / rectangle / ellipse; hold `Shift` for a square or circle |
+| `F` | Numbered marker: click to stamp, drag to move, double-click to write its line in the Note box |
+| `H` / `X` | Highlighter / eraser (erasing a marker removes its line) |
+| `Q` | Next color |
+| `Option+Backspace` | Clear the drawing and markers (undoable) |
+| `Cmd+Z` / `Cmd+Shift+Z` | Undo / redo |
+| `Enter` | Save |
+| `Cmd+Enter` | Save and copy the note image |
+| `Shift+Tab` | Back to the note window |
+| `Esc` | Close |
 
 Every toolbar button names its key in its tooltip.
 
-- Lines, arrows, rectangles and ellipses look like the screenshot editor's, and pin, erase and undo like any other stroke.
-- Each stroke pins to the word under it, so it moves with that word as text above it changes. Strokes drawn right after and next to each other (an arrow and its head) move together. Deleting the word hides its ink; undo brings both back. The text column has a fixed width, so resizing the window never rewraps lines.
+- Marker lines read `1: text` and sit at the end of the note, two blank lines below what you typed, exactly as in screenshot notes. They show in the note window too.
 - Notes use your colors from **Settings → Colors**, skipping any too dark to see on the note background (black). Changes apply to open notes.
+- Notes saved by the earlier text-and-ink editor reopen as plain images.
 
 ## Editor Select Tool
 
@@ -179,8 +179,8 @@ margins where needed). The menu bar shows only the elapsed seconds, from `0` to 
 `Recording_...` filename and revealed in Finder.
 
 While recording, screenshots, new notes, and Finder-reopen are blocked, and an
-unfinished screenshot or Finder-reopen flow blocks recording startup. Open note
-windows never block anything: you can capture or record with notes open.
+unfinished screenshot or Finder-reopen flow blocks recording startup. An open
+note never blocks anything: you can capture or record with a note open.
 Screen recording requires macOS 15 or later; on macOS 14 the shortcut
 shows an "unavailable" message while screenshots and notes keep working.
 
@@ -229,7 +229,7 @@ it does not make the app notarized for distribution.
 
 ## Editor colors
 
-Press **Q** or click the color swatch to cycle to the next color (in the note editor, Q while drawing). In **Settings → Colors**, choose 1–6 active colors from 15 options and use the up/down arrows to set their order. The last color wraps back to the first. Changes also apply to an already-open editor.
+Press **Q** or click the color swatch to cycle to the next color (Q in the note editor too). In **Settings → Colors**, choose 1–6 active colors from 15 options and use the up/down arrows to set their order. The last color wraps back to the first. Changes also apply to an already-open editor.
 
 Screenshot notes keep their 1,000-character limit. Input that would exceed the limit is rejected with a visible limit message, so an oversized paste does not silently lose its ending.
 

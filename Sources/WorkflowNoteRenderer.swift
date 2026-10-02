@@ -28,7 +28,7 @@ enum WorkflowNoteRenderer {
         return WorkflowPreparedNote(identity: identity, rendered: rendered)
     }
 
-    static func burn(note text: String, into image: NSImage) -> NSImage? {
+    static func burn(note text: String, into image: NSImage, keepingLineBreaks: Bool = false) -> NSImage? {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return nil
         }
@@ -54,7 +54,7 @@ enum WorkflowNoteRenderer {
         ]
 
         let availableTextWidth = effectiveWidth - padding * 2
-        let lines = wrapText(text, maxWidth: availableTextWidth, attributes: attributes)
+        let lines = wrapText(text, maxWidth: availableTextWidth, keepingLineBreaks: keepingLineBreaks, attributes: attributes)
         let noteHeight = ceil(CGFloat(lines.count) * lineHeight + padding * 2)
 
         let outputSize = NSSize(width: effectiveWidth, height: baseHeight + noteHeight)
@@ -107,8 +107,9 @@ enum WorkflowNoteRenderer {
 
     private static func wrapText(_ text: String,
                                  maxWidth: CGFloat,
+                                 keepingLineBreaks: Bool,
                                  attributes: [NSAttributedString.Key: Any]) -> [String] {
-        WorkflowTextWrapLogic.wrapText(text, maxWidth: maxWidth) { value in
+        WorkflowTextWrapLogic.wrapText(text, maxWidth: maxWidth, keepingLineBreaks: keepingLineBreaks) { value in
             (value as NSString).size(withAttributes: attributes).width
         }
     }

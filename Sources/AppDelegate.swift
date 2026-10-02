@@ -3,7 +3,6 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: TrayService!
-    private var inkNoteEditors: [URL: InkNoteWindowController] = [:]
     private var settingsWindowController: SettingsWindowController?
 
     private let settingsStore: SettingsStore
@@ -96,7 +95,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clipboardService = services.clipboard
         screenshotService = services.screenshot
         scratchpadService = services.scratchpad
-        scratchpadService.onOpen = { [weak self] in self?.track($0) }
         hotKeyService = services.hotKeys
         recordingService = services.recording
         screenshotSoundPlayer = services.sound
@@ -154,9 +152,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        for editor in Array(inkNoteEditors.values) {
-            if let window = editor.window, !editor.windowShouldClose(window) { return .terminateCancel }
-        }
         guard recordingService.isBusyForUserCommands else {
             return .terminateNow
         }
@@ -227,35 +222,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         videoRenameController?.isBusyForUserCommands == true
     }
 
-    /// Keeps a note window alive while open, keyed by its file, so reopening
-    /// the same note brings its window forward instead of opening another.
-    private func track(_ editor: InkNoteWindowController) {
-        let key = editor.noteURL.standardizedFileURL
-        inkNoteEditors[key] = editor
-        editor.onClose = { [weak self, weak editor] in
-            if self?.inkNoteEditors[key] === editor { self?.inkNoteEditors[key] = nil }
-        }
-    }
-
     private func handleFinderSelectionResult(_ result: Result<FinderSelectionService.Selection, Error>) {
         switch FinderReopenLogic.resolve(result) {
         case .open(let url):
             screenshotService.beginPostCaptureFlow(forExistingFileAt: url, on: nil, escapeKeyDeletesFile: false)
-        case .openInkNote(let url):
-            do {
-                let opened = try InkNoteWindowController.resolve(url.resolvingSymlinksInPath().standardizedFileURL)
-                let key = opened.noteURL.standardizedFileURL
-                if let existing = inkNoteEditors[key] {
-                    existing.present()
-                    return
-                }
-                let editor = InkNoteWindowController(opened: opened, settingsStore: settingsStore)
-                editor.copyFile = { [weak self] url in self?.clipboardService.copyFile(at: url, useCache: false) != nil }
-                track(editor)
-                editor.present()
-            } catch {
-                presentError(title: "Cannot Open Note", message: error.localizedDescription)
-            }
+        case .openNote(let url, let document):
+            scratchpadService.open(existing: url, document: document)
         case .warning(let title, let message, let settingsURL):
             if let settingsURL {
                 AlertPresenter.presentWarningWithSettingsButton(title: title, message: message, settingsURL: settingsURL)

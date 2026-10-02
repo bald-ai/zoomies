@@ -18,12 +18,15 @@ enum PNGMetadata {
     /// Keyword for the JSON-encoded editable canvas state.
     static let editorStateKeyword = "Zoomies-EditorState-v1"
     /// Keyword for the JSON-encoded text + ink of a drawn note.
-    static let inkNoteKeyword = "Zoomies-InkNote-v1"
+    static let inkNoteKeyword = "Zoomies-Note-v2"
+    /// Notes from the retired text-and-ink editor. Still stripped on save, but
+    /// no longer opened as notes: those PNGs reopen as plain images.
+    static let legacyInkNoteKeyword = "Zoomies-InkNote-v1"
     static let maximumInkNoteChunkBytes = 16 * 1024 * 1024
 
     private static let signature: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
     private static let iTXtType = Array("iTXt".utf8)
-    private static let zoomiesKeywords = [originalPNGKeyword, promptKeyword, editorStateKeyword, inkNoteKeyword]
+    private static let zoomiesKeywords = [originalPNGKeyword, promptKeyword, editorStateKeyword, inkNoteKeyword, legacyInkNoteKeyword]
 
     /// Inserts the original PNG bytes and prompt as `iTXt` chunks just before
     /// `IEND`. Returns nil if either input is not a PNG, or the input PNG is
@@ -146,8 +149,8 @@ enum PNGMetadata {
         return editorState
     }
 
-    /// Replaces any Zoomies chunks with the note's text + ink, so the PNG
-    /// reopens in the note editor.
+    /// Replaces any Zoomies chunks with the editable note, so the PNG reopens
+    /// in the note flow.
     static func embed(intoPNG pngData: Data, inkNote: InkNoteDocument) -> Data? {
         let bytes = [UInt8](pngData)
         guard hasPNGSignature(bytes), let iendStart = indexOfChunk(named: "IEND", in: bytes),

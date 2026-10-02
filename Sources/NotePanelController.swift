@@ -28,6 +28,8 @@ class NotePanelController: NSWindowController {
     private let limitLabel = NSTextField(labelWithString: "")
     private let shortcutLabel = NSTextField(labelWithString: "")
     private var escapeKeyDeletesFile: Bool = true
+    private var showsCopyAndDelete: Bool = true
+    private var showsNewlineShortcut: Bool = false
     private var maxLength = 1000
     private var layout = ScreenshotNotePanelController.layout
 
@@ -38,6 +40,8 @@ class NotePanelController: NSWindowController {
 
     init(initialText: String,
          escapeKeyDeletesFile: Bool = true,
+         showsCopyAndDelete: Bool = true,
+         showsNewlineShortcut: Bool = false,
          maxLength: Int = 1000,
          layout: NotePanelLayout = ScreenshotNotePanelController.layout) {
         let contentRect = NSRect(origin: .zero, size: layout.size)
@@ -50,6 +54,8 @@ class NotePanelController: NSWindowController {
         self.maxLength = max(1, maxLength)
         textView.characterLimit = self.maxLength
         self.escapeKeyDeletesFile = escapeKeyDeletesFile
+        self.showsCopyAndDelete = showsCopyAndDelete
+        self.showsNewlineShortcut = showsNewlineShortcut
         configureUI(initialText: initialText)
     }
 
@@ -67,7 +73,7 @@ class NotePanelController: NSWindowController {
             .enter: .save(text: value),
             .commandEnter: .copyAndSave(text: value),
             .commandShiftEnter: .copyAndSave(text: value),
-            .commandBackspace: .copyAndDelete(text: value),
+            .commandBackspace: showsCopyAndDelete ? .copyAndDelete(text: value) : nil,
             .escape: escapeKeyDeletesFile ? .delete : .close,
             .tab: .goToEditor(text: value),
             .shiftTab: .backToRename(text: value)
@@ -127,8 +133,11 @@ class NotePanelController: NSWindowController {
         shortcutLabel.textColor = NSColor.secondaryLabelColor
         shortcutLabel.lineBreakMode = .byWordWrapping
         let escapeLabel = escapeKeyDeletesFile ? "Delete" : "Close"
-        let shortcutParts = ["Enter: Save", "⌘↩: Copy+Save", "⌘⌫: Copy+Delete",
-                             "Esc: \(escapeLabel)", "Shift+Tab: Rename", "Tab: Editor"]
+        var shortcutParts = ["Enter: Save"]
+        if showsNewlineShortcut { shortcutParts.append("Shift+↩: new line") }
+        shortcutParts.append("⌘↩: Copy+Save")
+        if showsCopyAndDelete { shortcutParts.append("⌘⌫: Copy+Delete") }
+        shortcutParts += ["Esc: \(escapeLabel)", "Shift+Tab: Rename", "Tab: Editor"]
         shortcutLabel.stringValue = shortcutParts.joined(separator: "    ")
 
         NSLayoutConstraint.activate([

@@ -121,114 +121,47 @@ extension InkStroke: Codable {
     }
 }
 
-/// Everything needed to reopen a note: its text and its ink. Markers and ink
-/// anchors are UTF-16 offsets into `text`; markers sit on U+FFFC characters.
+/// Everything needed to reopen a note: the Note box text and the drawing.
+/// Strokes and markers sit at canvas positions, so the note reopens exactly
+/// as it was drawn. Marker lines ("1: text") live in the note text itself.
 struct InkNoteDocument: Codable, Equatable {
-    struct Marker: Codable, Equatable {
-        var index: Int
-        var number: Int
-    }
-
-    struct Anchor: Codable, Equatable {
-        var index: Int
-        var id: String
-    }
-
-    /// `x`/`y` offset the stroke from its anchor character's top-left, or from
-    /// the text column's top-left when the note had no text to pin to.
+    /// `x`/`y` place a stroke's own origin on the canvas.
     struct Item: Codable, Equatable {
         var stroke: InkStroke
-        var anchor: String?
         var x: CGFloat
         var y: CGFloat
     }
 
-    static let maximumTextLength = 200_000
+    struct Marker: Codable, Equatable {
+        var number: Int
+        var x: CGFloat
+        var y: CGFloat
+        var color: String
+    }
+
+    static let maximumNoteLength = 10_000
     static let maximumItems = 5_000
     static let maximumPoints = 400_000
-    static let attachmentCharacter: Character = "\u{FFFC}"
+    static let maximumMarkers = 999
 
-    var version = 1
-    var text: String
-    var markers: [Marker] = []
-    var anchors: [Anchor] = []
+    var version = 2
+    var note: String
     var items: [Item] = []
+    var markers: [Marker] = []
+
+    var isEmpty: Bool {
+        note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && items.isEmpty && markers.isEmpty
+    }
 
     var isSafeToRestore: Bool {
-        let units = Array(text.utf16)
-        guard version == 1, units.count <= Self.maximumTextLength, items.count <= Self.maximumItems,
+        guard version == 2, note.count <= Self.maximumNoteLength, items.count <= Self.maximumItems,
+              markers.count <= Self.maximumMarkers,
               items.reduce(0, { $0 + $1.stroke.points.count }) <= Self.maximumPoints else { return false }
-        let range = 0..<units.count
-        guard markers.allSatisfy({ range.contains($0.index) && units[$0.index] == 0xFFFC && $0.number > 0 }),
-              anchors.allSatisfy({ range.contains($0.index) && !$0.id.isEmpty }) else { return false }
+        let finite = { (value: CGFloat) in value.isFinite && abs(value) <= 100_000 }
         return items.allSatisfy { item in
-            item.x.isFinite && item.y.isFinite && item.stroke.width.isFinite && item.stroke.width > 0 && item.stroke.width <= 200
-                && item.stroke.points.allSatisfy { $0.x.isFinite && $0.y.isFinite && $0.pressure.isFinite }
-        }
-    }
-
-    /// Starts a note from Markdown. Footnote anchors become marker circles and
-    /// their definitions become circle lines at the end, so nothing is lost.
-    static func fromMarkdown(_ markdown: String) -> InkNoteDocument {
-        let source = MarkdownMarkerLogic.read(markdown)
-        let main = source.mainText as NSString
-        var text = ""
-        var markers: [Marker] = []
-        var cursor = 0
-        func appendMarker(_ number: Int) {
-            markers.append(Marker(index: text.utf16.count, number: number))
-            text.append(attachmentCharacter)
-        }
-        for anchor in MarkdownMarkerLogic.anchors(in: source.mainText) {
-            text += main.substring(with: NSRange(location: cursor, length: anchor.range.location - cursor))
-            appendMarker(anchor.number)
-            cursor = NSMaxRange(anchor.range)
-        }
-        text += main.substring(from: cursor)
-        if !source.notes.isEmpty {
-            while text.hasSuffix("\n") || text.hasSuffix("\r") { text.removeLast() }
-            if !text.isEmpty { text += "\n\n" }
-            for (offset, number) in source.notes.keys.sorted().enumerated() {
-                if offset > 0 { text += "\n" }
-                appendMarker(number)
-                text += " " + (source.notes[number] ?? "")
-            }
-        }
-        return InkNoteDocument(text: text, markers: markers)
-    }
-}
-
-/// Where a new stroke pins itself to the text.
-enum InkAnchorLogic {
-    /// Loops pin at their middle, flat lines at their left end, and anything
-    /// else (an arrow, a tick) at the point where the pen lifted.
-    static func anchorPoint(for points: [CGPoint]) -> CGPoint {
-        guard let first = points.first, let last = points.last else { return .zero }
-        var rect = CGRect(origin: first, size: .zero)
-        for point in points { rect = rect.union(CGRect(origin: point, size: .zero)) }
-        let closed = hypot(last.x - first.x, last.y - first.y) < max(rect.width, rect.height) * 0.35
-        if closed { return CGPoint(x: rect.midX, y: rect.midY) }
-        if rect.height < rect.width * 0.3 { return first.x < last.x ? first : last }
-        return last
-    }
-
-    /// Moves back to the first character of the word containing `index`.
-    static func wordStart(in text: NSString, at index: Int) -> Int {
-        var position = min(max(index, 0), text.length)
-        let whitespace = CharacterSet.whitespacesAndNewlines
-        while position > 0, let scalar = UnicodeScalar(text.character(at: position - 1)), !whitespace.contains(scalar) {
-            position -= 1
-        }
-        return position
-    }
-
-    /// A stroke drawn right after and right next to the previous one (an arrow
-    /// head, a second underline) shares its anchor, so the two move as one.
-    static func joinsPrevious(previous: CGRect, next: CGRect, elapsed: TimeInterval) -> Bool {
-        guard elapsed < 1.5 else { return false }
-        let dx = max(0, previous.minX - next.maxX, next.minX - previous.maxX)
-        let dy = max(0, previous.minY - next.maxY, next.minY - previous.maxY)
-        return hypot(dx, dy) < 16
+            finite(item.x) && finite(item.y) && item.stroke.width.isFinite && item.stroke.width > 0 && item.stroke.width <= 200
+                && item.stroke.points.allSatisfy { finite($0.x) && finite($0.y) && $0.pressure.isFinite }
+        } && markers.allSatisfy { finite($0.x) && finite($0.y) && (1...EditorDrawing.MarkerItem.maxNumber).contains($0.number) }
     }
 }
 

@@ -49,11 +49,19 @@ enum WorkflowFilenameLogic {
 }
 
 enum WorkflowTextWrapLogic {
+    /// `keepingLineBreaks` wraps each line of the text on its own, so blank
+    /// lines and one-per-line lists (a note's marker lines) survive.
     static func wrapText(_ text: String,
                          maxWidth: CGFloat,
+                         keepingLineBreaks: Bool = false,
                          measure: (String) -> CGFloat) -> [String] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [""] }
+        if keepingLineBreaks {
+            return trimmed.components(separatedBy: .newlines).flatMap {
+                wrapText($0, maxWidth: maxWidth, measure: measure)
+            }
+        }
 
         let words = trimmed
             .split(whereSeparator: { $0.isWhitespace })

@@ -14,4 +14,14 @@ enum ScratchpadFilenameLogic {
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
         return "Note \(formatter.string(from: date))"
     }
+
+    /// The name typed in the rename panel, cleaned like a screenshot name and
+    /// without its extension; notes always save as `.png`.
+    static func resolveBaseName(userInput: String?, fallback: String) -> String {
+        let raw = (userInput ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return fallback }
+        let sanitized = WorkflowFilenameLogic.sanitizeFilename(raw, preservingExtensionOf: URL(fileURLWithPath: "/tmp/note.png"))
+        let withoutExtension = (sanitized as NSString).deletingPathExtension
+        return withoutExtension.isEmpty ? fallback : withoutExtension
+    }
 }

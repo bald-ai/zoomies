@@ -28,20 +28,28 @@ final class FinderReopenLogicTests: XCTestCase {
         XCTAssertEqual(title, "Image is too large")
     }
 
-    func testMarkdownRoutingValidatesSizeAndEncodingBeforeImageInspection() throws {
+    func testNotePNGsReopenAsNotesAndEverythingElseAsImages() throws {
         let root = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(root) }
-        for name in ["plan.md", "plan.markdown", "plan.MD"] {
-            let file = root.appendingPathComponent(name)
-            try Data("# Plan\n".utf8).write(to: file)
-            XCTAssertEqual(FinderReopenLogic.resolve(.success(.single(url: file))), .openInkNote(file))
-            try Data([0xff, 0xfe]).write(to: file)
-            guard case .warning(let title, _, _) = FinderReopenLogic.resolve(.success(.single(url: file))) else { return XCTFail("Invalid encoding opened") }
-            XCTAssertEqual(title, "Invalid UTF-8")
-            try Data(repeating: 65, count: MarkdownMarkerLogic.maximumFileSize + 1).write(to: file)
-            guard case .warning(let title, _, _) = FinderReopenLogic.resolve(.success(.single(url: file))) else { return XCTFail("Oversized file opened") }
-            XCTAssertEqual(title, "Markdown file is too large")
+        let png = try TestSupport.solidImagePNGData()
+        let document = InkNoteDocument(note: "Fix the label")
+        let note = root.appendingPathComponent("note.png")
+        try XCTUnwrap(PNGMetadata.embed(intoPNG: png, inkNote: document)).write(to: note)
+        XCTAssertEqual(FinderReopenLogic.resolve(.success(.single(url: note))), .openNote(note, document))
+
+        var old = document
+        old.version = 1
+        let legacy = root.appendingPathComponent("legacy.png")
+        try XCTUnwrap(PNGMetadata.embed(intoPNG: png, inkNote: old)).write(to: legacy)
+        XCTAssertEqual(FinderReopenLogic.resolve(.success(.single(url: legacy))), .open(legacy),
+                       "Notes from the old ink editor open as plain images")
+
+        let markdown = root.appendingPathComponent("plan.md")
+        try Data("# Plan\n".utf8).write(to: markdown)
+        guard case .warning(let title, _, _) = FinderReopenLogic.resolve(.success(.single(url: markdown))) else {
+            return XCTFail("Markdown no longer opens as a note")
         }
+        XCTAssertEqual(title, "Not an Image")
     }
 
     func testSelectionCountsAndErrorsHaveDistinctRecoveryMessages() {
