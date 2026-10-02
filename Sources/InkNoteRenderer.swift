@@ -60,10 +60,11 @@ enum InkNoteRenderer {
 
     /// Paints the page into the current (flipped) graphics context: text,
     /// then ink, then markers. `paths` caches stroke outlines by item index.
-    static func draw(_ document: InkNoteDocument, current: InkStroke? = nil, paths: [CGPath] = []) {
+    /// The editor's text view draws the text itself, so it skips it here.
+    static func draw(_ document: InkNoteDocument, current: InkStroke? = nil, paths: [CGPath] = [], drawsText: Bool = true) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         let text = pageText(document)
-        if !text.isEmpty {
+        if drawsText, !text.isEmpty {
             (text as NSString).draw(with: textRect(for: text), options: [.usesLineFragmentOrigin, .usesFontLeading],
                                     attributes: textAttributes)
         }

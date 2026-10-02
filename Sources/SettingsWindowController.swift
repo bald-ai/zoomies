@@ -261,7 +261,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         description("Videos use a generated Recording filename. You can rename each video after recording.", in: videos)
 
         addRow("Create note", control: scratchpadShortcutRecorder, to: notes)
-        description("New notes open on the note window; Tab opens the note editor, where the text fills a page you draw over. Notes save as PNGs on the Desktop. Select a note PNG in Finder and press the Reopen Finder image shortcut to edit it again.", in: notes)
+        description("New notes open on the note window; Tab opens the note editor, where the text fills a page you draw over (Cmd+T types, Cmd+D draws). Notes save as PNGs on the Desktop. Select a note PNG in Finder and press the Reopen Finder image shortcut to edit it again.", in: notes)
 
         // This preference currently applies to both image and video workflows.
         confirmBeforeClosingCheckbox.title = "Confirm before deleting or closing screenshots and videos"

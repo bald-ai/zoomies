@@ -138,8 +138,25 @@ final class InkNoteRendererTests: XCTestCase {
 }
 
 final class InkNoteKeymapTests: XCTestCase {
-    private func command(_ key: Int, _ chars: String = "", _ flags: NSEvent.ModifierFlags = []) -> InkNoteKeymap.Command? {
-        InkNoteKeymap.command(keyCode: UInt16(key), characters: chars, flags: flags)
+    private func command(_ key: Int, _ chars: String = "", _ flags: NSEvent.ModifierFlags = [],
+                         drawing: Bool = true) -> InkNoteKeymap.Command? {
+        InkNoteKeymap.command(keyCode: UInt16(key), characters: chars, flags: flags, isDrawing: drawing)
+    }
+
+    func testCommandTTypesAndCommandDDrawsFromEitherMode() {
+        for drawing in [true, false] {
+            XCTAssertEqual(command(kVK_ANSI_T, "t", .command, drawing: drawing), .type)
+            XCTAssertEqual(command(kVK_ANSI_D, "d", .command, drawing: drawing), .draw)
+            XCTAssertEqual(command(kVK_Return, "\r", .command, drawing: drawing), .copyAndSave)
+            XCTAssertEqual(command(kVK_Tab, "\t", .shift, drawing: drawing), .backToNote)
+            XCTAssertEqual(command(kVK_ANSI_Z, "z", .command, drawing: drawing), .undo)
+        }
+        XCTAssertEqual(command(kVK_Escape, "\u{1b}", drawing: false), .draw, "Esc leaves typing for drawing")
+        for (key, chars) in [(kVK_ANSI_W, "w"), (kVK_ANSI_Q, "q"), (kVK_Return, "\r"), (kVK_ANSI_K, "k")] {
+            XCTAssertNil(command(key, chars, drawing: false), "While typing, \(chars) is text")
+        }
+        XCTAssertNil(command(kVK_Delete, "", .option, drawing: false), "Option+Backspace deletes a word while typing")
+        XCTAssertEqual(command(kVK_ANSI_V, "v", .command, drawing: false), .paste)
     }
 
     func testToolLettersMatchTheScreenshotEditorAndOtherLettersDoNothing() {
@@ -187,7 +204,7 @@ final class InkNoteEditorTests: XCTestCase {
                        clicks: Int = 1) throws -> NSEvent {
         let origin = editor.pageOrigin
         let inCanvas = CGPoint(x: point.x + origin.x, y: point.y + origin.y)
-        return try XCTUnwrap(NSEvent.mouseEvent(with: type, location: editor.canvas.convert(inCanvas, to: nil), modifierFlags: [],
+        return try XCTUnwrap(NSEvent.mouseEvent(with: type, location: editor.textView.convert(inCanvas, to: nil), modifierFlags: [],
                                          timestamp: 0, windowNumber: editor.window?.windowNumber ?? 0, context: nil,
                                          eventNumber: 0, clickCount: clicks, pressure: 1))
     }
@@ -198,6 +215,9 @@ final class InkNoteEditorTests: XCTestCase {
         editor.canvasMouseDragged(try mouse(editor, .leftMouseDragged, end))
         editor.canvasMouseUp(try mouse(editor, .leftMouseUp, end))
     }
+
+    /// Ends the undo group, as the run loop does between real events.
+    private func settle() { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
 
     private func click(_ editor: InkNoteWindowController, _ point: CGPoint, clicks: Int = 1) throws {
         editor.canvasMouseDown(try mouse(editor, .leftMouseDown, point, clicks: clicks))
@@ -218,8 +238,10 @@ final class InkNoteEditorTests: XCTestCase {
         XCTAssertEqual(item.stroke.tool, .shape)
         XCTAssertEqual(item.stroke.points.count, 6, "One arrow from the last drag position, not a trail")
         XCTAssertEqual(item.x + item.stroke.bounds.maxX, 300, accuracy: 1, "Drawn where the mouse was")
+        settle()
         editor.perform(.undo)
         XCTAssertTrue(editor.noteDocument.items.isEmpty, "A shape is one undo step")
+        settle()
         editor.perform(.redo)
         XCTAssertEqual(editor.noteDocument.items.count, 1)
     }
@@ -242,11 +264,13 @@ final class InkNoteEditorTests: XCTestCase {
         XCTAssertEqual(editor.noteBar.text, "2: wider field", "The Note box holds the marker lines")
         XCTAssertEqual(InkNoteRenderer.pageText(editor.noteDocument), "Login page", "The typed text stays on the page")
         XCTAssertFalse(editor.noteBar.isHidden)
+        settle()
 
         editor.perform(.tool(.eraser))
         try click(editor, CGPoint(x: 400, y: 200))
         XCTAssertEqual(editor.noteDocument.markers.map(\.number), [1])
         XCTAssertEqual(editor.noteDocument.note, "Login page", "Erasing a marker removes its line")
+        settle()
         editor.perform(.undo)
         XCTAssertEqual(editor.noteDocument.markers.map(\.number), [1, 2])
         XCTAssertEqual(editor.noteDocument.note, "Login page\n\n\n2: wider field")
@@ -261,12 +285,40 @@ final class InkNoteEditorTests: XCTestCase {
         defer { editor.window?.close() }
         editor.perform(.tool(.marker))
         try click(editor, CGPoint(x: 100, y: 100))
+        settle()
         try drag(editor, from: CGPoint(x: 102, y: 101), to: CGPoint(x: 302, y: 201))
         XCTAssertEqual(editor.noteDocument.markers.count, 1)
         XCTAssertEqual(editor.noteDocument.markers[0].x, 300, accuracy: 0.01)
         XCTAssertEqual(editor.noteDocument.markers[0].y, 200, accuracy: 0.01)
+        settle()
         editor.perform(.undo)
         XCTAssertEqual(editor.noteDocument.markers[0].x, 100, accuracy: 0.01)
+    }
+
+    func testTypingOnThePageEditsTheNoteAndKeepsMarkerLines() throws {
+        var document = InkNoteDocument(note: "Header\n\n\n1: logo")
+        document.markers = [.init(number: 1, x: 10, y: 10, color: "#fff")]
+        let editor = editor(document)
+        defer { editor.window?.close() }
+        XCTAssertEqual(editor.mode, .draw, "The editor opens for drawing")
+        XCTAssertEqual(editor.textView.string, "Header", "The page shows the typed text, not the marker lines")
+        editor.perform(.type)
+        XCTAssertEqual(editor.mode, .type)
+        editor.textView.setSelectedRange(NSRange(location: 6, length: 0))
+        editor.textView.insertText(" overlaps", replacementRange: editor.textView.selectedRange())
+        XCTAssertEqual(editor.noteDocument.note, "Header overlaps\n\n\n1: logo")
+        XCTAssertEqual(editor.noteBar.text, "1: logo")
+        settle()
+        editor.perform(.tool(.marker))
+        XCTAssertEqual(editor.mode, .draw, "Picking a tool starts drawing")
+        try click(editor, CGPoint(x: 300, y: 200))
+        XCTAssertEqual(editor.noteDocument.markers.count, 2)
+        settle()
+        editor.perform(.undo)
+        XCTAssertEqual(editor.noteDocument.markers.count, 1)
+        settle()
+        editor.perform(.undo)
+        XCTAssertEqual(editor.textView.string, "Header", "Typing and drawing share one undo history")
     }
 
     func testStrayLettersNeverChangeAnything() throws {
@@ -278,7 +330,8 @@ final class InkNoteEditorTests: XCTestCase {
             windowNumber: 0, context: nil, characters: "k", charactersIgnoringModifiers: "k", isARepeat: false,
             keyCode: UInt16(kVK_ANSI_K)))
         XCTAssertFalse(editor.handleKey(letter))
-        editor.canvas.keyDown(with: letter)
+        editor.textView.keyDown(with: letter)
+        XCTAssertEqual(editor.textView.string, "", "A stray letter is not typed while drawing")
         XCTAssertEqual(editor.tool, .rectangle, "A stray letter keeps the tool")
         XCTAssertEqual(editor.noteDocument, before)
     }
@@ -308,6 +361,7 @@ final class InkNoteEditorTests: XCTestCase {
         editor.perform(.clearInk)
         XCTAssertTrue(editor.noteDocument.items.isEmpty && editor.noteDocument.markers.isEmpty)
         XCTAssertEqual(editor.noteDocument.note, "Text")
+        settle()
         editor.perform(.undo)
         XCTAssertEqual(editor.noteDocument, document)
     }
@@ -322,7 +376,7 @@ final class InkNoteEditorTests: XCTestCase {
         let marked = editor(document)
         defer { marked.window?.close() }
         XCTAssertEqual(marked.noteBar.text, "1: logo")
-        XCTAssertGreaterThan(marked.canvas.frame.height, 0)
+        XCTAssertGreaterThan(marked.textView.frame.height, 0)
         XCTAssertGreaterThanOrEqual(marked.pageOrigin.x, InkNoteRenderer.margin, "The page is centered with a margin")
     }
 
@@ -354,7 +408,7 @@ final class InkNoteEditorTests: XCTestCase {
         }
         let hinted = Set(editor.shortcutHints.map { ObjectIdentifier($0.view) })
         let toolbarButtons = buttons(in: host)
-        XCTAssertEqual(toolbarButtons.filter { !($0 is InkSwatchButton) }.count, 14)
+        XCTAssertEqual(toolbarButtons.filter { !($0 is InkSwatchButton) }.count, 16)
         for button in toolbarButtons {
             let tip = try XCTUnwrap(button.toolTip)
             XCTAssertTrue(tip.contains("(") && tip.contains(")"), "Tooltip names a shortcut: \(tip)")

@@ -8,6 +8,9 @@ final class MarkerNoteLogicTests: XCTestCase {
                       "A numbered line right under the text is typed text")
         XCTAssertTrue(MarkerNoteLogic.split("1: only lines") == ("", "1: only lines"))
         XCTAssertTrue(MarkerNoteLogic.split("") == ("", ""))
+        XCTAssertEqual(MarkerNoteLogic.joined(text: "Fix it\n", markerLines: "1: a"), "Fix it\n\n\n1: a")
+        XCTAssertEqual(MarkerNoteLogic.joined(text: "", markerLines: "1: a"), "1: a")
+        XCTAssertEqual(MarkerNoteLogic.joined(text: "Fix it", markerLines: ""), "Fix it")
     }
 
     func testFirstLineGetsBlankLinesAndLaterLinesFollowDirectly() {

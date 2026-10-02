@@ -64,6 +64,14 @@ enum MarkerNoteLogic {
                 lines[block].joined(separator: "\n"))
     }
 
+    /// The inverse of `split`: typed text with the marker block two blank
+    /// lines below it.
+    static func joined(text: String, markerLines: String) -> String {
+        let text = trimmingTrailingWhitespace(text)
+        guard !markerLines.isEmpty else { return text }
+        return text.isEmpty ? markerLines : text + "\n\n\n" + markerLines
+    }
+
     /// Pasted line breaks would split the marker's line; flatten them.
     static func sanitized(_ text: String) -> String {
         text.components(separatedBy: .newlines).joined(separator: " ")

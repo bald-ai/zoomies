@@ -1,41 +1,60 @@
 import AppKit
 import Carbon
 
-/// The note editor's drawing surface: flipped and dark. Mouse input becomes
-/// ink, shapes and markers; the controller owns the note.
-final class InkNoteCanvasView: NSView {
+/// The note editor's page: the note's text in a fixed column, with the ink
+/// drawn over it. While typing it is an ordinary text view; while drawing,
+/// mouse input becomes ink, shapes and markers and stray keys are dropped.
+final class InkNoteTextView: NSTextView {
     weak var editor: InkNoteWindowController?
 
-    override var isFlipped: Bool { true }
-    override var acceptsFirstResponder: Bool { true }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
     override func draw(_ dirtyRect: NSRect) {
-        InkNoteRenderer.background.setFill()
-        dirtyRect.fill()
-        editor?.drawCanvas()
+        // Text drawing leaves the context clipped to the text column, which
+        // would cut off ink in the margins around it.
+        NSGraphicsContext.saveGraphicsState()
+        super.draw(dirtyRect)
+        NSGraphicsContext.restoreGraphicsState()
+        editor?.drawInk()
     }
-    override func mouseDown(with event: NSEvent) { editor?.canvasMouseDown(event) }
-    override func mouseDragged(with event: NSEvent) { editor?.canvasMouseDragged(event) }
-    override func mouseUp(with event: NSEvent) { editor?.canvasMouseUp(event) }
+    override func mouseDown(with event: NSEvent) {
+        if editor?.isDrawing == true { editor?.canvasMouseDown(event) } else { super.mouseDown(with: event) }
+    }
+    override func mouseDragged(with event: NSEvent) {
+        if editor?.isDrawing == true { editor?.canvasMouseDragged(event) } else { super.mouseDragged(with: event) }
+    }
+    override func mouseUp(with event: NSEvent) {
+        if editor?.isDrawing == true { editor?.canvasMouseUp(event) } else { super.mouseUp(with: event) }
+    }
+    override func mouseMoved(with event: NSEvent) {
+        if let cursor = editor?.drawingCursor { cursor.set() } else { super.mouseMoved(with: event) }
+    }
+    override func cursorUpdate(with event: NSEvent) {
+        if let cursor = editor?.drawingCursor { cursor.set() } else { super.cursorUpdate(with: event) }
+    }
+    override func resetCursorRects() {
+        if let cursor = editor?.drawingCursor { addCursorRect(visibleRect, cursor: cursor) } else { super.resetCursorRects() }
+    }
     override func flagsChanged(with event: NSEvent) {
         editor?.modifiersChanged(event)
         super.flagsChanged(with: event)
     }
-    /// Keys without a command are dropped: a stray letter never stops drawing.
-    override func keyDown(with event: NSEvent) { editor?.handleKey(event) }
-    override func resetCursorRects() {
-        if let cursor = editor?.cursor { addCursorRect(visibleRect, cursor: cursor) }
+    override func keyDown(with event: NSEvent) {
+        if editor?.handleKey(event) == true { return }
+        // While drawing, a key without a command does nothing: drawing only
+        // stops for Command+T or Esc.
+        if editor?.isDrawing == true { return }
+        super.keyDown(with: event)
     }
 }
 
 /// Note editor: the note's text on a dark page, with ink, shapes and numbered
 /// markers drawn over it and the marker lines in the Note box underneath, as
-/// in the screenshot editor. The text is edited in the note window, so this
-/// editor only draws. It is the third screen of the note flow
-/// (rename ⇄ note ⇄ editor); the flow saves.
+/// in the screenshot editor. Command+T types on the page and Command+D draws.
+/// It is the third screen of the note flow (rename ⇄ note ⇄ editor); the flow
+/// saves.
 @MainActor
-final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPopoverDelegate {
+final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTextViewDelegate, NSPopoverDelegate {
+    enum Mode { case type, draw }
+
     enum Tool {
         case pen, line, arrow, rectangle, ellipse, marker, highlighter, eraser
 
@@ -78,7 +97,9 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
     var onAction: ((Action) -> Void)?
     private(set) var noteDocument: InkNoteDocument
     let history = UndoManager()
-    let canvas = InkNoteCanvasView()
+    let textView = InkNoteTextView(frame: .zero)
+    /// The editor opens for drawing: Tab from the note window is how you get here to draw.
+    private(set) var mode: Mode = .draw
     private(set) var tool: Tool = .pen
     private(set) var palette: [EditorPaletteColor]
     private(set) var colorHex: String
@@ -94,6 +115,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
     private let scrollView = NSScrollView()
     let noteBar = EditorNotePreviewBar(text: "", maxHeight: 200)
     private(set) var markerNotePopover: NSPopover?
+    private var modeButtons: [Mode: NSButton] = [:]
     private var toolButtons: [Tool: NSButton] = [:]
     private var swatches: [InkSwatchButton] = []
     private let swatchRow = NSStackView()
@@ -103,7 +125,11 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
     private(set) var shortcutHints: [EditorShortcutHint] = []
     private var fixedHints: [EditorShortcutHint] = []
 
-    var cursor: NSCursor {
+    var isDrawing: Bool { mode == .draw }
+
+    /// The tool's cursor while drawing; `nil` while typing (the I-beam).
+    var drawingCursor: NSCursor? {
+        guard isDrawing else { return nil }
         switch tool {
         case .eraser: return Self.eraserCursor
         case .marker: return .crosshair
@@ -122,12 +148,13 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         window.isReleasedWhenClosed = false
         AppTheme.apply(to: window)
         window.title = title
-        window.minSize = NSSize(width: 720, height: 400)
+        window.minSize = NSSize(width: 760, height: 400)
         window.backgroundColor = InkNoteRenderer.background
         window.delegate = self
+        window.acceptsMouseMovedEvents = true
         window.center()
-        history.groupsByEvent = false
         buildUI()
+        textView.string = InkNoteRenderer.pageText(noteDocument)
         restoreKeyInterceptor()
         shortcutOverlay = EditorShortcutOverlayController(window: window, helpPlacement: .belowBadges) { [weak self] in
             self?.shortcutHints ?? []
@@ -154,8 +181,8 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
-        window?.makeFirstResponder(canvas)
-        updateCanvasSize()
+        window?.makeFirstResponder(textView)
+        updateLayout()
     }
 
     // MARK: - Building
@@ -166,18 +193,45 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         let line = NSBox()
         line.boxType = .separator
 
-        canvas.editor = self
+        textView.editor = self
+        textView.delegate = self
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        // A fixed column, laid out exactly like the saved picture.
+        textView.textContainer?.widthTracksTextView = false
+        textView.textContainer?.containerSize = NSSize(width: InkNoteRenderer.columnWidth, height: .greatestFiniteMagnitude)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainerInset = NSSize(width: InkNoteRenderer.margin, height: InkNoteRenderer.margin)
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.allowsUndo = true
+        textView.drawsBackground = true
+        textView.backgroundColor = InkNoteRenderer.background
+        textView.insertionPointColor = .white
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.isGrammarCheckingEnabled = false
+        textView.isAutomaticLinkDetectionEnabled = false
+        textView.isAutomaticDataDetectionEnabled = false
+        textView.isAutomaticTextCompletionEnabled = false
+        textView.typingAttributes = InkNoteRenderer.textAttributes
+
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
         scrollView.backgroundColor = InkNoteRenderer.background
-        scrollView.documentView = canvas
+        scrollView.documentView = textView
         scrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
         scrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
-        // The Note box looks like the note burned into the saved picture.
+        // The Note box looks like the marker lines burned into the saved picture.
         noteBar.wantsLayer = true
         noteBar.layer?.backgroundColor = WorkflowNoteRenderer.noteBackgroundColor.cgColor
 
@@ -196,8 +250,8 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         content.layoutSubtreeIfNeeded()
     }
 
-    /// The screenshot editor's grouped icon toolbar: tools, ink, history,
-    /// then close / copy / save on the right.
+    /// The screenshot editor's grouped icon toolbar: mode, tools, ink,
+    /// history, then close / copy / save on the right.
     private func makeToolbar() -> NSStackView {
         func button(_ symbol: String, _ toolTip: String, _ action: Selector) -> NSButton {
             let button = EditorToolbarStyle.iconButton(symbol: symbol, toolTip: toolTip)
@@ -205,6 +259,8 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
             button.action = action
             return button
         }
+        modeButtons = [.type: button("character.cursor.ibeam", "Type on the page (Cmd+T)", #selector(typePressed)),
+                       .draw: button("scribble.variable", "Draw (Cmd+D)", #selector(drawPressed))]
         // The screenshot editor's tool icons, in its order.
         let tools: [(Tool, String)] = [(.pen, "pencil.tip"), (.line, "line.diagonal"), (.arrow, "arrow.right"),
                                        (.rectangle, "square"), (.ellipse, "circle"), (.marker, "1.circle"),
@@ -214,22 +270,25 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         rebuildSwatches()
         let undo = button("arrow.uturn.left", "Undo (Cmd+Z)", #selector(undoPressed))
         let redo = button("arrow.uturn.right", "Redo (Cmd+Shift+Z)", #selector(redoPressed))
-        let clear = button("trash", "Clear drawing and markers (Option+Backspace)", #selector(clearPressed))
-        let close = button("xmark", "Close (Esc)", #selector(closePressed))
+        let clear = button("trash", "Clear drawing and markers (Option+Backspace while drawing)", #selector(clearPressed))
+        let close = button("xmark", "Close (Esc while drawing)", #selector(closePressed))
         let copy = button("doc.on.doc", "Copy + save (Cmd+Enter)", #selector(copyPressed))
-        let save = button("tray.and.arrow.down", "Save (Enter)", #selector(savePressed))
+        let save = button("tray.and.arrow.down", "Save (Enter while drawing)", #selector(savePressed))
         fixedHints = [
+            .init(view: modeButtons[.type]!, key: "⌘T", label: "Type on the page (Esc goes back to drawing)"),
+            .init(view: modeButtons[.draw]!, key: "⌘D", label: "Draw"),
             .init(view: undo, key: "⌘Z", label: "Undo"),
             .init(view: redo, key: "⌘⇧Z", label: "Redo"),
-            .init(view: clear, key: "⌥⌫", label: "Clear drawing and markers"),
-            .init(view: close, key: "Esc", label: "Close"),
+            .init(view: clear, key: "⌥⌫", label: "Clear drawing and markers, while drawing"),
+            .init(view: close, key: "Esc", label: "Close, while drawing"),
             .init(view: copy, key: "⌘↩", label: "Copy + save"),
-            .init(view: save, key: "↩", label: "Save (⇧⇥ goes back to the note)")
+            .init(view: save, key: "↩", label: "Save, while drawing (⇧⇥ goes back to the note)")
         ]
 
+        let modes: [NSView] = [Mode.type, .draw].compactMap { modeButtons[$0] }
         let drawing: [NSView] = [Tool.pen, .line, .arrow, .rectangle, .ellipse, .marker].compactMap { toolButtons[$0] }
         let ink: [NSView] = [Tool.highlighter, .eraser].compactMap { toolButtons[$0] } + [swatchRow]
-        let groups = [drawing, ink, [undo, redo, clear], [close, copy, save]].map { EditorToolbarStyle.group($0) }
+        let groups = [modes, drawing, ink, [undo, redo, clear], [close, copy, save]].map { EditorToolbarStyle.group($0) }
         // Groups keep their natural width; the spacer takes the spare width.
         groups.forEach { $0.setContentHuggingPriority(.init(999), for: .horizontal) }
         let spacer = NSView()
@@ -274,12 +333,12 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         var hints: [EditorShortcutHint] = []
         for (tool, title, code) in tools {
             guard let button = toolButtons[tool] else { continue }
-            button.toolTip = "\(title) (\(key(code)))"
-            hints.append(.init(view: button, key: key(code), label: title))
+            button.toolTip = "\(title) (\(key(code)) while drawing)"
+            hints.append(.init(view: button, key: key(code), label: "\(title), while drawing"))
         }
         let color = key(kVK_ANSI_Q)
-        for swatch in swatches { swatch.toolTip = "\(swatch.colorName) (\(color) picks the next color)" }
-        hints.append(.init(view: swatchRow, key: color, label: "Next color"))
+        for swatch in swatches { swatch.toolTip = "\(swatch.colorName) (\(color) while drawing picks the next color)" }
+        hints.append(.init(view: swatchRow, key: color, label: "Next color, while drawing"))
         shortcutHints = hints + fixedHints
         shortcutOverlay?.refreshLabels()
     }
@@ -297,67 +356,84 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         (window as? EditorWindow)?.keyEquivalentInterceptor = { [weak self] event in self?.handleKey(event) ?? false }
     }
 
-    func windowDidResize(_ notification: Notification) { updateCanvasSize() }
+    func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? { history }
 
-    /// Where the page's text column sits in the canvas: centered, below a
+    func windowDidResize(_ notification: Notification) { updateLayout() }
+
+    /// Where the page's text column sits in the text view: centered, below a
     /// margin. Note positions are page coordinates, so resizing the window
     /// moves text and drawing together.
-    var pageOrigin: CGPoint {
-        CGPoint(x: max(InkNoteRenderer.margin, floor((scrollView.contentSize.width - InkNoteRenderer.columnWidth) / 2)),
-                y: InkNoteRenderer.margin)
-    }
+    var pageOrigin: CGPoint { textView.textContainerOrigin }
 
     private func viewRect(_ pageRect: CGRect) -> CGRect {
         pageRect.offsetBy(dx: pageOrigin.x, dy: pageOrigin.y)
     }
 
-    /// The canvas fills the window and grows to hold the whole page, so long
-    /// text and far-off drawings scroll into view.
-    private func updateCanvasSize() {
+    /// Centers the column and keeps the page at least as big as the window
+    /// and everything drawn, so far-off drawings scroll into view.
+    private func updateLayout() {
         let visible = scrollView.contentSize
-        let bounds = InkNoteRenderer.contentBounds(noteDocument)
-        let content = bounds.isNull ? CGRect.zero : viewRect(bounds)
-        let size = NSSize(width: max(visible.width, content.maxX + InkNoteRenderer.margin),
-                          height: max(visible.height, content.maxY + InkNoteRenderer.margin))
-        if canvas.frame.size != size { canvas.setFrameSize(size) }
+        let side = max(InkNoteRenderer.margin, floor((visible.width - InkNoteRenderer.columnWidth) / 2))
+        if textView.textContainerInset.width != side {
+            textView.textContainerInset = NSSize(width: side, height: InkNoteRenderer.margin)
+        }
+        let drawing = InkNoteRenderer.contentBounds(noteDocument)
+        let content = drawing.isNull ? CGRect.zero : viewRect(drawing)
+        textView.minSize = NSSize(width: max(visible.width, content.maxX + InkNoteRenderer.margin),
+                                  height: max(visible.height, content.maxY + InkNoteRenderer.margin))
+        textView.frame.size.width = textView.minSize.width
+        textView.sizeToFit()
         noteBar.maxHeight = max(60, (window?.contentView?.bounds.height ?? 600) / 3)
-        canvas.needsDisplay = true
+        textView.needsDisplay = true
     }
 
     // MARK: - Note
 
-    /// Every change goes through here, so ⌘Z steps back through it.
+    /// Every drawing change goes through here, so ⌘Z steps through ink and
+    /// text in the order they happened.
     private func setDocument(_ new: InkNoteDocument) {
         let old = noteDocument
         guard new != old else { return }
-        history.beginUndoGrouping()
+        textView.breakUndoCoalescing()
         history.registerUndo(withTarget: self) { $0.setDocument(old) }
-        history.endUndoGrouping()
         if !new.items.starts(with: old.items) { paths = [] }
         noteDocument = new
         refresh()
     }
 
     private func refresh() {
+        // Undo can bring back older text; typing itself never comes this way.
+        let text = InkNoteRenderer.pageText(noteDocument)
+        if textView.string.trimmingCharacters(in: .whitespacesAndNewlines) != text { textView.string = text }
         // The typed text is on the page; the Note box holds the marker lines.
         let lines = InkNoteRenderer.markerLines(noteDocument)
         noteBar.text = lines
         noteBar.isHidden = lines.isEmpty
-        updateCanvasSize()
-        canvas.needsDisplay = true
+        updateLayout()
     }
 
-    func drawCanvas() {
+    /// Typing on the page edits the note's text; its marker lines stay.
+    func textDidChange(_ notification: Notification) {
+        noteDocument.note = MarkerNoteLogic.joined(text: textView.string, markerLines: InkNoteRenderer.markerLines(noteDocument))
+        updateLayout()
+    }
+
+    func textView(_ textView: NSTextView, shouldChangeTypingAttributes oldTypingAttributes: [String: Any] = [:],
+                  toAttributes newTypingAttributes: [NSAttributedString.Key: Any] = [:]) -> [NSAttributedString.Key: Any] {
+        InkNoteRenderer.textAttributes
+    }
+
+    func drawInk() {
         if paths.count > noteDocument.items.count { paths = [] }
         paths += noteDocument.items[paths.count...].map { InkGeometry.path(for: $0.stroke) }
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.saveGState()
         context.translateBy(x: pageOrigin.x, y: pageOrigin.y)
-        InkNoteRenderer.draw(noteDocument, current: current, paths: paths)
+        InkNoteRenderer.draw(noteDocument, current: current, paths: paths, drawsText: false)
         context.restoreGState()
     }
 
-    /// Adds a finished stroke (in canvas coordinates) to the note.
+    /// Adds a finished stroke (in page coordinates) to the note.
     func commit(_ absolute: InkStroke) {
         var stroke = absolute
         let origin = stroke.localize()
@@ -395,11 +471,11 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         noteDocument.markers.removeAll { InkNoteRenderer.markerBounds($0).contains(point) }
         if before != (noteDocument.items.count, noteDocument.markers.count) {
             paths = []
-            canvas.needsDisplay = true
+            textView.needsDisplay = true
         }
     }
 
-    /// Option+Backspace, like Clear in the screenshot editor; one undo step.
+    /// Option+Backspace while drawing, like Clear in the screenshot editor; one undo step.
     func clearInk() {
         var new = noteDocument
         new.items = []
@@ -424,7 +500,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
 
     /// The mouse in page coordinates.
     private func canvasPoint(_ event: NSEvent) -> CGPoint {
-        let point = canvas.convert(event.locationInWindow, from: nil)
+        let point = textView.convert(event.locationInWindow, from: nil)
         return CGPoint(x: point.x - pageOrigin.x, y: point.y - pageOrigin.y)
     }
 
@@ -434,7 +510,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
     }
 
     func canvasMouseDown(_ event: NSEvent) {
-        window?.makeFirstResponder(canvas)
+        window?.makeFirstResponder(textView)
         let point = canvasPoint(event)
         switch tool {
         case .eraser:
@@ -455,7 +531,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         case .pen, .highlighter:
             current = InkStroke(tool: tool == .highlighter ? .highlighter : .pen, color: colorHex,
                                 width: tool == .highlighter ? 17 : 3.2, points: [inkPoint(event)])
-            canvas.needsDisplay = true
+            textView.needsDisplay = true
         case .line, .arrow, .rectangle, .ellipse:
             shapeDrag = (point, point)
             current = InkStroke(tool: .shape, color: colorHex, width: Self.shapeWidth, points: [])
@@ -467,7 +543,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         if let drag = draggedMarker {
             noteDocument.markers[drag.index].x = point.x - drag.offset.x
             noteDocument.markers[drag.index].y = point.y - drag.offset.y
-            canvas.needsDisplay = true
+            textView.needsDisplay = true
         } else if gestureStart != nil {
             erase(at: point)
         } else if shapeDrag != nil {
@@ -478,11 +554,11 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
             // Only the growing end of a stroke changes shape.
             let tail = InkStroke(tool: stroke.tool, color: stroke.color, width: stroke.width,
                                  points: Array(stroke.points.suffix(13)) + [inkPoint(event)])
-            canvas.setNeedsDisplay(viewRect(tail.bounds.insetBy(dx: -stroke.width - 8, dy: -stroke.width - 8)))
+            textView.setNeedsDisplay(viewRect(tail.bounds.insetBy(dx: -stroke.width - 8, dy: -stroke.width - 8)))
         } else {
             return
         }
-        canvas.autoscroll(with: event)
+        textView.autoscroll(with: event)
     }
 
     func canvasMouseUp(_ event: NSEvent) {
@@ -496,7 +572,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
             shapeDrag = nil
             // A click with a shape tool draws nothing, as in the screenshot editor.
             guard stroke.bounds.width >= 2 || stroke.bounds.height >= 2 else {
-                canvas.needsDisplay = true
+                textView.needsDisplay = true
                 return
             }
         }
@@ -510,7 +586,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         stroke.points = shape.points(from: drag.start, to: drag.end, constrained: constrained)
             .map { InkPoint(x: $0.x, y: $0.y, pressure: -1) }
         current = stroke
-        canvas.setNeedsDisplay(viewRect(old.union(stroke.bounds).insetBy(dx: -stroke.width - 4, dy: -stroke.width - 4)))
+        textView.setNeedsDisplay(viewRect(old.union(stroke.bounds).insetBy(dx: -stroke.width - 4, dy: -stroke.width - 4)))
     }
 
     func modifiersChanged(_ event: NSEvent) {
@@ -549,8 +625,8 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         (window as? EditorWindow)?.keyEquivalentInterceptor = { [weak field] event in
             field?.handleEditingShortcut(event) ?? false
         }
-        guard canvas.window != nil else { return }
-        popover.show(relativeTo: viewRect(InkNoteRenderer.markerBounds(marker)), of: canvas, preferredEdge: .maxY)
+        guard textView.window != nil else { return }
+        popover.show(relativeTo: viewRect(InkNoteRenderer.markerBounds(marker)), of: textView, preferredEdge: .maxY)
         popover.contentViewController?.view.window?.makeFirstResponder(field)
     }
 
@@ -559,7 +635,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         markerNotePopover?.close()
         markerNotePopover = nil
         restoreKeyInterceptor()
-        window?.makeFirstResponder(canvas)
+        window?.makeFirstResponder(textView)
         setMarkerNote(sender.tag, text: text)
     }
 
@@ -571,18 +647,25 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
         restoreKeyInterceptor()
     }
 
-    // MARK: - Tools and keys
+    // MARK: - Modes, tools and keys
 
+    func setMode(_ new: Mode) {
+        mode = new
+        if new == .type { current = nil; shapeDrag = nil }
+        syncControls()
+    }
+
+    /// Picking a tool, by key or button, starts drawing.
     func setTool(_ new: Tool) {
         tool = new
-        syncControls()
+        setMode(.draw)
     }
 
     func setColor(_ index: Int) {
         guard palette.indices.contains(index) else { return }
         colorHex = palette[index].hex
         if tool == .eraser { tool = .pen }
-        syncControls()
+        setMode(.draw)
     }
 
     /// Q steps through the palette like the screenshot editor's color key.
@@ -592,15 +675,18 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
     }
 
     private func syncControls() {
-        toolButtons.forEach { EditorToolbarStyle.setActive($0.value, $0.key == tool) }
+        modeButtons.forEach { EditorToolbarStyle.setActive($0.value, $0.key == mode) }
+        toolButtons.forEach { EditorToolbarStyle.setActive($0.value, isDrawing && $0.key == tool) }
         swatches.forEach { $0.isChosen = $0.hex == colorHex }
-        window?.invalidateCursorRects(for: canvas)
-        if let window, canvas.visibleRect.contains(canvas.convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
-            cursor.set()
+        window?.invalidateCursorRects(for: textView)
+        if let window, textView.visibleRect.contains(textView.convert(window.mouseLocationOutsideOfEventStream, from: nil)) {
+            (drawingCursor ?? .iBeam).set()
         }
     }
 
-    // Toolbar clicks run the same commands as their keys.
+    // Toolbar clicks run the same commands as their keys, then hand focus back to the page.
+    @objc private func typePressed() { perform(.type) }
+    @objc private func drawPressed() { perform(.draw) }
     @objc private func undoPressed() { perform(.undo) }
     @objc private func redoPressed() { perform(.redo) }
     @objc private func clearPressed() { perform(.clearInk) }
@@ -614,33 +700,50 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSPop
 
     @objc private func swatchClicked(_ sender: InkSwatchButton) {
         if let index = swatches.firstIndex(where: { $0 === sender }) { setColor(index) }
-        window?.makeFirstResponder(canvas)
+        window?.makeFirstResponder(textView)
     }
 
     @discardableResult
     func handleKey(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown,
               let command = InkNoteKeymap.command(keyCode: event.keyCode, characters: event.charactersIgnoringModifiers ?? "",
-                                                  flags: event.modifierFlags) else { return false }
+                                                  flags: event.modifierFlags, isDrawing: isDrawing) else { return false }
         perform(command)
         return true
     }
 
     func perform(_ command: InkNoteKeymap.Command) {
         switch command {
+        case .type: setMode(.type)
+        case .draw: setMode(.draw)
         case .tool(let tool): setTool(tool)
         case .nextColor: nextColor()
         case .clearInk: clearInk()
-        case .undo: if history.canUndo { history.undo() }
-        case .redo: if history.canRedo { history.redo() }
+        case .undo: undo()
+        case .redo: redo()
+        case .selectAll: textView.selectAll(nil)
+        case .copy: textView.copy(nil)
+        case .cut: textView.cut(nil)
+        case .paste: textView.paste(nil)
         case .save: onAction?(.save(noteDocument))
         case .copyAndSave: onAction?(.copyAndSave(noteDocument))
         case .close: onAction?(.close(noteDocument))
         case .backToNote: onAction?(.backToNote(noteDocument))
         }
-        if let window, window.isVisible, window.firstResponder !== canvas, markerNotePopover == nil {
-            window.makeFirstResponder(canvas)
+        if let window, window.isVisible, window.firstResponder !== textView, markerNotePopover == nil {
+            window.makeFirstResponder(textView)
         }
+    }
+
+    func undo() {
+        textView.breakUndoCoalescing()
+        if history.canUndo { history.undo() }
+        textView.needsDisplay = true
+    }
+
+    func redo() {
+        if history.canRedo { history.redo() }
+        textView.needsDisplay = true
     }
 
     /// The red close button closes like Esc; the flow decides whether to ask.

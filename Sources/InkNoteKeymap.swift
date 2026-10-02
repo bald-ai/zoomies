@@ -1,15 +1,18 @@
 import AppKit
 import Carbon
 
-/// The note editor's keys: the screenshot editor's, plus highlighter and
-/// eraser. The note editor only draws, so tool letters always pick tools and
-/// letters without a tool do nothing. Command shortcuts follow the typed
-/// character and single-letter tool keys follow the physical key, exactly as
-/// in the screenshot editor.
+/// The note editor's keys. Command+T types and Command+D draws, from either
+/// mode. While drawing, the keys are the screenshot editor's (plus
+/// highlighter and eraser) and a letter without a tool does nothing; while
+/// typing, letters, Return and Option+Backspace are text. Command shortcuts
+/// follow the typed character and single-letter tool keys follow the
+/// physical key, exactly as in the screenshot editor.
 enum InkNoteKeymap {
     enum Command: Equatable {
+        case type, draw
         case tool(InkNoteWindowController.Tool)
         case nextColor, clearInk, undo, redo
+        case selectAll, copy, cut, paste
         case save, copyAndSave, close, backToNote
     }
 
@@ -27,15 +30,23 @@ enum InkNoteKeymap {
         UInt16(kVK_ANSI_Q): .nextColor
     ]
 
-    static func command(keyCode: UInt16, characters: String, flags rawFlags: NSEvent.ModifierFlags) -> Command? {
+    private static let commandKeys: [String: Command] = [
+        "t": .type, "d": .draw, "z": .undo, "a": .selectAll, "c": .copy, "x": .cut, "v": .paste
+    ]
+
+    static func command(keyCode: UInt16, characters: String, flags rawFlags: NSEvent.ModifierFlags,
+                        isDrawing: Bool) -> Command? {
         let flags = rawFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
         let isReturn = keyCode == UInt16(kVK_Return) || keyCode == UInt16(kVK_ANSI_KeypadEnter)
-        if isReturn { return flags.contains(.command) ? .copyAndSave : (flags.isEmpty ? .save : nil) }
-        if flags == [.command] { return characters.lowercased() == "z" ? .undo : nil }
+        if isReturn, flags.contains(.command) { return .copyAndSave }
+        if flags == [.command] { return commandKeys[characters.lowercased()] }
         if flags == [.command, .shift] { return characters.lowercased() == "z" ? .redo : nil }
-        if flags == [.option], keyCode == UInt16(kVK_Delete) { return .clearInk }
         if flags == [.shift], keyCode == UInt16(kVK_Tab) { return .backToNote }
+        // While typing, Esc leaves for drawing and everything else is text.
+        guard isDrawing else { return flags.isEmpty && keyCode == UInt16(kVK_Escape) ? .draw : nil }
+        if flags == [.option], keyCode == UInt16(kVK_Delete) { return .clearInk }
         guard flags.isEmpty else { return nil }
+        if isReturn { return .save }
         if keyCode == UInt16(kVK_Escape) { return .close }
         return toolKeys[keyCode]
     }
