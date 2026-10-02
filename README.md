@@ -181,8 +181,9 @@ Video is 30, 60, or 120 fps (selectable in Settings, default 30), SDR, H.264 MP4
 margins where needed). The menu bar shows only the elapsed seconds, from `0` to `60`, in red. The finished video is saved beside screenshots with a unique
 `Recording_...` filename and revealed in Finder.
 
-Only one Zoomies operation runs at a time: recording blocks
-screenshots/notes/Finder-reopen, and those workflows block recording startup.
+While recording, screenshots, new notes, and Finder-reopen are blocked, and an
+unfinished screenshot or Finder-reopen flow blocks recording startup. Open note
+windows never block anything: you can capture or record with notes open.
 Screen recording requires macOS 15 or later; on macOS 14 the shortcut
 shows an "unavailable" message while screenshots and notes keep working.
 
