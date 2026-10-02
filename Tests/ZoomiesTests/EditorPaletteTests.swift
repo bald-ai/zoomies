@@ -64,7 +64,7 @@ final class EditorPaletteTests: XCTestCase {
     }
 
     func testOnlyUnmodifiedQCyclesColor() throws {
-        let canvas = EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80))
+        let canvas = TestSupport.swallowingUnhandledKeys(EditorCanvasView(image: TestSupport.solidImage(width: 100, height: 80)))
         var cycles = 0
         canvas.onKeyCommand = { command in
             if case .cycleColor = command { cycles += 1 }

@@ -42,7 +42,7 @@ final class CanvasShortcutContractTests: XCTestCase {
     }
 
     func testPhysicalToolKeysRespectModifiersAndCapsLock() {
-        let canvas = EditorCanvasView(image: TestSupport.solidImage())
+        let canvas = TestSupport.swallowingUnhandledKeys(EditorCanvasView(image: TestSupport.solidImage()))
         let keys: [(UInt16, EditorTool)] = [(13, .pen), (2, .line), (0, .arrow), (15, .rectangle),
             (14, .ellipse), (17, .text), (3, .marker), (1, .selection)]
         for (key, tool) in keys {
@@ -59,7 +59,7 @@ final class CanvasShortcutContractTests: XCTestCase {
     }
 
     func testQCyclesColorAndPaletteKeysSendNothing() {
-        let canvas = EditorCanvasView(image: TestSupport.solidImage())
+        let canvas = TestSupport.swallowingUnhandledKeys(EditorCanvasView(image: TestSupport.solidImage()))
         var received: [EditorCanvasView.KeyCommand] = []
         canvas.onKeyCommand = { received.append($0) }
         canvas.keyDown(with: event(UInt16(kVK_ANSI_Q)))

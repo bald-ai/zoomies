@@ -17,7 +17,7 @@ final class ShortcutRecorderContractTests: XCTestCase {
 
     func testSpaceOrReturnStartsRecordingSoTheRecorderNeedsNoMouse() throws {
         for code in [kVK_Space, kVK_Return, kVK_ANSI_KeypadEnter] {
-            let view = ShortcutRecorderView()
+            let view = TestSupport.swallowingUnhandledKeys(ShortcutRecorderView())
             view.keyDown(with: try key(UInt16(code), flags: .command))
             XCTAssertFalse(view.isRecordingShortcut, "Modified keys do not start recording")
             view.keyDown(with: try key(UInt16(code)))
