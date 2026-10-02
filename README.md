@@ -128,13 +128,14 @@ The note editor has two modes. While typing, letters are text, so its commands u
 
 | Key | Action |
 | --- | --- |
-| `Cmd+D` | Switch between typing and drawing |
+| `Cmd+T` / `Cmd+D` | Type / draw |
 | Hold `Option` | Draw for a moment while typing |
-| `W` / `H` / `X` (while drawing) | Pen / highlighter / eraser |
+| `W` / `D` / `A` / `R` / `E` (while drawing) | Pen / line / arrow / rectangle / ellipse; hold `Shift` for a square or circle |
+| `H` / `X` (while drawing) | Highlighter / eraser |
 | `Q` (while drawing) | Next color |
 | `Option+Backspace` (while drawing) | Clear all ink (undoable); while typing it still deletes a word |
 | `F` (while drawing) or `Cmd+F` | Numbered marker at the cursor, with its note line at the end |
-| `T` or `Esc` (while drawing) | Back to typing |
+| `Esc` (while drawing) | Back to typing |
 | `Cmd+Z` / `Cmd+Shift+Z` | Undo / redo text and ink in one history |
 | `Cmd+S` | Save and keep editing |
 | `Cmd+Enter` | Save, copy the note image, and close |
@@ -142,6 +143,7 @@ The note editor has two modes. While typing, letters are text, so its commands u
 
 Every toolbar button names its key in its tooltip.
 
+- Lines, arrows, rectangles and ellipses look like the screenshot editor's, and pin, erase and undo like any other stroke.
 - Each stroke pins to the word under it, so it moves with that word as text above it changes. Strokes drawn right after and next to each other (an arrow and its head) move together. Deleting the word hides its ink; undo brings both back. The text column has a fixed width, so resizing the window never rewraps lines.
 - Notes use your colors from **Settings → Colors**, skipping any too dark to see on the note background (black). Changes apply to open notes.
 

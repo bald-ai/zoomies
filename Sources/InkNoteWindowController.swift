@@ -13,7 +13,11 @@ final class InkNoteTextView: NSTextView {
     weak var ink: InkNoteWindowController?
 
     override func draw(_ dirtyRect: NSRect) {
+        // Text drawing leaves the context clipped to the text column, which
+        // would cut off ink in the margins around it.
+        NSGraphicsContext.saveGraphicsState()
         super.draw(dirtyRect)
+        NSGraphicsContext.restoreGraphicsState()
         ink?.drawInk()
     }
     override func mouseDown(with event: NSEvent) {
@@ -64,7 +68,19 @@ final class InkNoteTextView: NSTextView {
 @MainActor
 final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTextViewDelegate, @preconcurrency NSLayoutManagerDelegate {
     enum Mode { case type, draw }
-    enum Tool { case pen, highlighter, eraser }
+    enum Tool {
+        case pen, line, arrow, rectangle, ellipse, highlighter, eraser
+
+        var shape: InkShape? {
+            switch self {
+            case .line: return .line
+            case .arrow: return .arrow
+            case .rectangle: return .rectangle
+            case .ellipse: return .ellipse
+            case .pen, .highlighter, .eraser: return nil
+            }
+        }
+    }
 
     struct Opened {
         let noteURL: URL
@@ -79,6 +95,8 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     static let columnWidth: CGFloat = 640
+    /// About as heavy as an average pen stroke, which thins and thickens.
+    static let shapeWidth: CGFloat = 2.5
     /// The Settings colors, minus any too dark to see on the note background
     /// (black is in the default palette).
     static func noteColors(forPaletteIDs ids: [String]) -> [EditorPaletteColor] {
@@ -137,6 +155,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     private var paletteObserver: NSObjectProtocol?
     private var holdingOption = false
     private var current: InkStroke?
+    private var shapeDrag: (start: CGPoint, end: CGPoint)?
     private var eraseStart: [LiveItem]?
     private var paths: [UUID: CGPath] = [:]
     private var savedDocument: InkNoteDocument
@@ -287,11 +306,17 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         }
         let type = button("character.cursor.ibeam", "", #selector(typePressed))
         let draw = button("scribble.variable", "", #selector(drawPressed))
+        // The screenshot editor's tool icons, in its order.
         let pen = button("pencil.tip", "", #selector(toolPressed(_:)))
+        let line = button("line.diagonal", "", #selector(toolPressed(_:)))
+        let arrow = button("arrow.right", "", #selector(toolPressed(_:)))
+        let rectangle = button("square", "", #selector(toolPressed(_:)))
+        let ellipse = button("circle", "", #selector(toolPressed(_:)))
         let highlighter = button("highlighter", "", #selector(toolPressed(_:)))
         let eraser = button("eraser", "", #selector(toolPressed(_:)))
         modeButtons = [.type: type, .draw: draw]
-        toolButtons = [.pen: pen, .highlighter: highlighter, .eraser: eraser]
+        toolButtons = [.pen: pen, .line: line, .arrow: arrow, .rectangle: rectangle, .ellipse: ellipse,
+                       .highlighter: highlighter, .eraser: eraser]
         swatchRow.spacing = 2
         rebuildSwatches()
         markerButton = button("1.circle", "", #selector(markerPressed))
@@ -311,7 +336,8 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
             .init(view: save, key: "⌘S", label: "Save")
         ]
 
-        let groups: [[NSView]] = [[type, draw], [pen, highlighter, eraser, swatchRow], [markerButton], [undo, redo, clear]]
+        let groups: [[NSView]] = [[type, draw], [pen, line, arrow, rectangle, ellipse], [highlighter, eraser, swatchRow],
+                                  [markerButton], [undo, redo, clear]]
         let bar = NSStackView()
         bar.spacing = 8
         bar.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
@@ -345,18 +371,20 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     /// Tool letters are physical keys, so their names follow the keyboard layout.
     func refreshShortcutLabels() {
         func key(_ code: Int) -> String { HotKeyService.describeShortcut(keyCode: UInt32(code), carbonFlags: 0) }
-        let type = key(kVK_ANSI_T), color = key(kVK_ANSI_Q), marker = key(kVK_ANSI_F)
+        let color = key(kVK_ANSI_Q), marker = key(kVK_ANSI_F)
         var hints: [EditorShortcutHint] = []
         if let button = modeButtons[.type] {
-            button.toolTip = "Type (\(type) or Esc while drawing)"
-            hints.append(.init(view: button, key: type, label: "Back to typing, while drawing (Esc also works)"))
+            button.toolTip = "Type (Cmd+T, or Esc while drawing)"
+            hints.append(.init(view: button, key: "⌘T", label: "Type (Esc also leaves drawing)"))
         }
         if let button = modeButtons[.draw] {
             button.toolTip = "Draw (Cmd+D, or hold Option to draw for a moment)"
             hints.append(.init(view: button, key: "⌘D", label: "Draw (hold ⌥ to draw for a moment)"))
         }
-        let tools: [(Tool, String, Int)] = [(.pen, "Pen", kVK_ANSI_W), (.highlighter, "Highlighter", kVK_ANSI_H),
-                                            (.eraser, "Eraser", kVK_ANSI_X)]
+        let tools: [(Tool, String, Int)] = [(.pen, "Pen", kVK_ANSI_W), (.line, "Line", kVK_ANSI_D), (.arrow, "Arrow", kVK_ANSI_A),
+                                            (.rectangle, "Rectangle, hold ⇧ for a square", kVK_ANSI_R),
+                                            (.ellipse, "Ellipse, hold ⇧ for a circle", kVK_ANSI_E),
+                                            (.highlighter, "Highlighter", kVK_ANSI_H), (.eraser, "Eraser", kVK_ANSI_X)]
         for (tool, title, code) in tools {
             guard let button = toolButtons[tool] else { continue }
             button.toolTip = "\(title) (\(key(code)) while drawing)"
@@ -610,13 +638,14 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         context.translateBy(x: origin.x, y: origin.y)
         context.addPath(path)
         let color = NSColor(hex: stroke.color).cgColor
-        if stroke.tool == .highlighter {
-            context.setStrokeColor(color.copy(alpha: 0.36) ?? color)
+        switch stroke.tool {
+        case .highlighter, .shape:
+            context.setStrokeColor(stroke.tool == .highlighter ? color.copy(alpha: 0.36) ?? color : color)
             context.setLineWidth(stroke.width)
             context.setLineCap(.round)
             context.setLineJoin(.round)
             context.strokePath()
-        } else {
+        case .pen:
             context.setFillColor(color)
             context.fillPath()
         }
@@ -641,16 +670,39 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
             erase(at: CGPoint(x: point.x, y: point.y))
             return true
         }
+        if tool.shape != nil {
+            let start = CGPoint(x: point.x, y: point.y)
+            shapeDrag = (start, start)
+            current = InkStroke(tool: .shape, color: colorHex, width: Self.shapeWidth, points: [])
+            return true
+        }
         current = InkStroke(tool: tool == .highlighter ? .highlighter : .pen, color: colorHex,
                             width: tool == .highlighter ? 17 : 3.2, points: [point])
         textView.needsDisplay = true
         return true
     }
 
+    /// Redraws the shape being dragged; Shift makes a square or a circle.
+    private func updateShape(constrained: Bool) {
+        guard let drag = shapeDrag, let shape = tool.shape, var stroke = current else { return }
+        let old = stroke.bounds
+        stroke.points = shape.points(from: drag.start, to: drag.end, constrained: constrained)
+            .map { InkPoint(x: $0.x, y: $0.y, pressure: -1) }
+        current = stroke
+        let changed = old.isNull ? stroke.bounds : old.union(stroke.bounds)
+        textView.setNeedsDisplay(changed.insetBy(dx: -stroke.width - 4, dy: -stroke.width - 4))
+    }
+
     func inkMouseDragged(_ event: NSEvent) -> Bool {
         let point = inkPoint(event)
         if eraseStart != nil {
             erase(at: CGPoint(x: point.x, y: point.y))
+            return true
+        }
+        if shapeDrag != nil {
+            shapeDrag?.end = CGPoint(x: point.x, y: point.y)
+            updateShape(constrained: event.modifierFlags.contains(.shift))
+            textView.autoscroll(with: event)
             return true
         }
         guard current != nil else { return false }
@@ -676,6 +728,14 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         }
         guard let stroke = current else { return false }
         current = nil
+        if shapeDrag != nil {
+            shapeDrag = nil
+            // A click with a shape tool draws nothing, as in the screenshot editor.
+            guard stroke.bounds.width >= 2 || stroke.bounds.height >= 2 else {
+                textView.needsDisplay = true
+                return true
+            }
+        }
         commit(stroke)
         return true
     }
@@ -714,6 +774,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
     }
 
     func modifiersChanged(_ event: NSEvent) {
+        if shapeDrag != nil { updateShape(constrained: event.modifierFlags.contains(.shift)) }
         let holding = event.modifierFlags.contains(.option)
         guard holding != holdingOption else { return }
         holdingOption = holding
@@ -732,7 +793,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
 
     // Toolbar clicks run the same commands as their keys, then hand focus back to the text.
     @objc private func typePressed() { perform(.type) }
-    @objc private func drawPressed() { setMode(.draw); window?.makeFirstResponder(textView) }
+    @objc private func drawPressed() { perform(.draw) }
     @objc private func markerPressed() { perform(.marker) }
     @objc private func undoPressed() { perform(.undo) }
     @objc private func redoPressed() { perform(.redo) }
@@ -773,7 +834,7 @@ final class InkNoteWindowController: NSWindowController, NSWindowDelegate, NSTex
         case .save: save()
         case .copyAndSave: copyAndSave()
         case .close: window?.performClose(nil)
-        case .toggleDraw: setMode(mode == .draw ? .type : .draw)
+        case .draw: setMode(.draw)
         case .type: setMode(.type)
         case .escape: if mode == .draw { setMode(.type) } else { window?.performClose(nil) }
         case .marker: insertMarker()

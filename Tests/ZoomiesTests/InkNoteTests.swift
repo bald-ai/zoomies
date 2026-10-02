@@ -69,11 +69,39 @@ final class InkNoteModelTests: XCTestCase {
         XCTAssertFalse(InkGeometry.outline([InkPoint(x: 5, y: 5, pressure: -1)], width: 4).isEmpty, "A tap still leaves a dot")
     }
 
+    func testShapesMatchTheScreenshotEditorAndHitAlongTheirSides() {
+        let start = CGPoint(x: 10, y: 10), end = CGPoint(x: 70, y: 30)
+        let rectangle = InkShape.rectangle.points(from: start, to: end, constrained: false)
+        XCTAssertEqual(rectangle, [CGPoint(x: 10, y: 10), CGPoint(x: 70, y: 10), CGPoint(x: 70, y: 30), CGPoint(x: 10, y: 30),
+                                   CGPoint(x: 10, y: 10)])
+        let square = InkShape.rectangle.points(from: end, to: start, constrained: true)
+        XCTAssertEqual(square, [CGPoint(x: 10, y: -30), CGPoint(x: 70, y: -30), CGPoint(x: 70, y: 30), CGPoint(x: 10, y: 30),
+                                CGPoint(x: 10, y: -30)],
+                       "Shift makes a square from the start corner, in any direction")
+        let circle = InkShape.ellipse.points(from: start, to: end, constrained: true)
+        let xs = circle.map(\.x), ys = circle.map(\.y)
+        XCTAssertEqual(xs.max()! - xs.min()!, ys.max()! - ys.min()!, accuracy: 0.01)
+        let arrow = InkShape.arrow.points(from: start, to: end, constrained: false)
+        XCTAssertEqual(arrow.last, end, "Arrows end on the tip")
+        let wings = EditorImageRenderer.arrowHeadPoints(from: start, to: end)
+        XCTAssertTrue(arrow.contains(wings.0) && arrow.contains(wings.1), "Same arrowhead as the screenshot editor")
+        XCTAssertEqual(InkShape.line.points(from: start, to: end, constrained: true), [start, end])
+
+        let stroke = InkStroke(tool: .shape, color: "#fff", width: 2.5,
+                               points: rectangle.map { InkPoint(x: $0.x, y: $0.y, pressure: -1) })
+        XCTAssertTrue(stroke.hits(CGPoint(x: 40, y: 11)), "The middle of a side has no point but still hits")
+        XCTAssertFalse(stroke.hits(CGPoint(x: 40, y: 20)), "The inside of an outline does not")
+        XCTAssertEqual(InkGeometry.path(for: stroke).boundingBoxOfPath, CGRect(x: 10, y: 10, width: 60, height: 20))
+    }
+
     func testNoteDataRoundTripsThroughPNGChunks() throws {
         let png = try XCTUnwrap(TestSupport.solidImagePNGData())
         var document = InkNoteDocument(text: "hi \u{FFFC}", markers: [.init(index: 3, number: 2)], anchors: [.init(index: 0, id: "a")])
         document.items = [.init(stroke: InkStroke(tool: .highlighter, color: "#ffcc00", width: 17, points: [InkPoint(x: 0, y: 0, pressure: -1)]),
-                                anchor: "a", x: -2, y: 4)]
+                                anchor: "a", x: -2, y: 4),
+                          .init(stroke: InkStroke(tool: .shape, color: "#3a8dff", width: 2.5,
+                                                  points: [InkPoint(x: 0, y: 0, pressure: -1), InkPoint(x: 40, y: 0, pressure: -1)]),
+                                anchor: nil, x: 3, y: 5)]
         let first = try XCTUnwrap(PNGMetadata.embed(intoPNG: png, inkNote: document))
         let again = try XCTUnwrap(PNGMetadata.embed(intoPNG: first, inkNote: document))
         XCTAssertEqual(PNGMetadata.extractInkNote(fromPNG: again), document)
@@ -89,8 +117,9 @@ final class InkNoteKeymapTests: XCTestCase {
     }
 
     func testDrawingLettersMatchTheScreenshotEditorAndStayTextWhileTyping() {
-        let keys: [(Int, InkNoteKeymap.Command)] = [(kVK_ANSI_W, .tool(.pen)), (kVK_ANSI_H, .tool(.highlighter)),
-            (kVK_ANSI_X, .tool(.eraser)), (kVK_ANSI_Q, .nextColor), (kVK_ANSI_F, .marker), (kVK_ANSI_T, .type)]
+        let keys: [(Int, InkNoteKeymap.Command)] = [(kVK_ANSI_W, .tool(.pen)), (kVK_ANSI_D, .tool(.line)),
+            (kVK_ANSI_A, .tool(.arrow)), (kVK_ANSI_R, .tool(.rectangle)), (kVK_ANSI_E, .tool(.ellipse)),
+            (kVK_ANSI_H, .tool(.highlighter)), (kVK_ANSI_X, .tool(.eraser)), (kVK_ANSI_Q, .nextColor), (kVK_ANSI_F, .marker)]
         for (key, expected) in keys {
             XCTAssertEqual(command(key, "other layout", .capsLock, drawing: true), expected)
             XCTAssertNil(command(key, "w"), "While typing, letters are text")
@@ -98,8 +127,8 @@ final class InkNoteKeymapTests: XCTestCase {
                 XCTAssertNil(command(key, "", flag, drawing: true))
             }
         }
-        for key in [kVK_ANSI_P, kVK_ANSI_E, kVK_ANSI_1, kVK_ANSI_5] {
-            XCTAssertNil(command(key, "", drawing: true), "The old P / E / 1–5 keys are gone")
+        for key in [kVK_ANSI_P, kVK_ANSI_1, kVK_ANSI_5, kVK_ANSI_T] {
+            XCTAssertNil(command(key, "", drawing: true), "The old P / 1–5 / plain T keys are gone")
         }
     }
 
@@ -108,7 +137,7 @@ final class InkNoteKeymapTests: XCTestCase {
             (kVK_ANSI_S, "s", .command, .save), (kVK_Return, "\r", .command, .copyAndSave),
             (kVK_ANSI_KeypadEnter, "\u{3}", .command, .copyAndSave), (kVK_ANSI_W, "w", .command, .close),
             (kVK_Escape, "\u{1b}", [], .escape), (kVK_ANSI_Z, "z", .command, .undo),
-            (kVK_ANSI_Z, "Z", [.command, .shift], .redo), (kVK_ANSI_D, "d", .command, .toggleDraw),
+            (kVK_ANSI_Z, "Z", [.command, .shift], .redo), (kVK_ANSI_D, "d", .command, .draw), (kVK_ANSI_T, "t", .command, .type),
             (kVK_ANSI_F, "f", .command, .marker), (kVK_ANSI_A, "a", .command, .selectAll),
             (kVK_ANSI_C, "c", .command, .copy), (kVK_ANSI_X, "x", .command, .cut), (kVK_ANSI_V, "v", .command, .paste)
         ]
@@ -268,8 +297,14 @@ final class InkNoteEditorTests: XCTestCase {
     func testKeysSwitchModeToolsAndColorsAndOtherTypingLeavesDrawing() throws {
         let (editor, root) = try editor("Note")
         defer { editor.window?.close(); TestSupport.removeIfExists(root) }
-        editor.perform(.toggleDraw)
-        XCTAssertEqual(editor.mode, .draw)
+        editor.perform(.draw)
+        editor.perform(.draw)
+        XCTAssertEqual(editor.mode, .draw, "Command+D always draws; it does not toggle")
+        editor.perform(.type)
+        editor.perform(.type)
+        XCTAssertEqual(editor.mode, .type, "Command+T always types")
+        editor.perform(.tool(.rectangle))
+        XCTAssertEqual(editor.mode, .draw, "Picking a tool starts drawing")
         editor.perform(.tool(.eraser))
         XCTAssertEqual(editor.tool, .eraser)
         let first = editor.colorHex
@@ -283,7 +318,7 @@ final class InkNoteEditorTests: XCTestCase {
             keyCode: UInt16(kVK_ANSI_K)))
         XCTAssertFalse(editor.handleKey(letter), "The letter still reaches the text")
         XCTAssertEqual(editor.mode, .type)
-        editor.perform(.toggleDraw)
+        editor.perform(.draw)
         editor.perform(.escape)
         XCTAssertEqual(editor.mode, .type, "Escape leaves drawing before it closes anything")
     }
@@ -348,11 +383,69 @@ final class InkNoteEditorTests: XCTestCase {
         }
         let hinted = Set(editor.shortcutHints.map { ObjectIdentifier($0.view) })
         let toolbarButtons = buttons(in: host)
-        XCTAssertEqual(toolbarButtons.filter { !($0 is InkSwatchButton) }.count, 12)
+        XCTAssertEqual(toolbarButtons.filter { !($0 is InkSwatchButton) }.count, 16)
         for button in toolbarButtons {
             let tip = try XCTUnwrap(button.toolTip)
             XCTAssertTrue(tip.contains("(") && tip.contains(")"), "Tooltip names a shortcut: \(tip)")
             if !(button is InkSwatchButton) { XCTAssertTrue(hinted.contains(ObjectIdentifier(button)), tip) }
+        }
+    }
+
+    func testToolbarFitsTheNarrowestWindow() throws {
+        let (editor, root) = try editor("Hi")
+        defer { editor.window?.close(); TestSupport.removeIfExists(root) }
+        let window = try XCTUnwrap(editor.window)
+        let bar = try XCTUnwrap(window.contentView?.subviews.first as? NSStackView)
+        XCTAssertLessThanOrEqual(bar.fittingSize.width, window.minSize.width)
+    }
+
+    func testDraggingAShapeToolDrawsOneShapeAndAClickDrawsNothing() throws {
+        let (editor, root) = try editor("Check the arrow under this line.\n")
+        defer { editor.window?.close(); TestSupport.removeIfExists(root) }
+        func mouse(_ type: NSEvent.EventType, _ point: CGPoint, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: editor.textView.convert(point, to: nil), modifierFlags: flags,
+                                             timestamp: 0, windowNumber: editor.window?.windowNumber ?? 0, context: nil,
+                                             eventNumber: 0, clickCount: 1, pressure: 1))
+        }
+        let word = rect(of: "arrow", in: editor)
+        let start = CGPoint(x: word.minX, y: word.maxY + 30), end = CGPoint(x: word.maxX, y: word.maxY + 4)
+        editor.perform(.tool(.rectangle))
+        XCTAssertTrue(editor.inkMouseDown(try mouse(.leftMouseDown, start)))
+        XCTAssertTrue(editor.inkMouseUp(try mouse(.leftMouseUp, start)))
+        XCTAssertTrue(editor.items.isEmpty, "A click with a shape tool draws nothing")
+
+        editor.perform(.tool(.arrow))
+        XCTAssertTrue(editor.inkMouseDown(try mouse(.leftMouseDown, start)))
+        XCTAssertTrue(editor.inkMouseDragged(try mouse(.leftMouseDragged, CGPoint(x: start.x + 5, y: start.y - 5))))
+        XCTAssertTrue(editor.inkMouseDragged(try mouse(.leftMouseDragged, end)))
+        XCTAssertTrue(editor.inkMouseUp(try mouse(.leftMouseUp, end)))
+        let item = try XCTUnwrap(editor.items.first?.item)
+        XCTAssertEqual(editor.items.count, 1)
+        XCTAssertEqual(item.stroke.tool, .shape)
+        XCTAssertEqual(item.stroke.width, InkNoteWindowController.shapeWidth)
+        XCTAssertEqual(item.stroke.points.count, 6, "One arrow from the last drag position, not a trail")
+        XCTAssertNotNil(item.anchor, "Shapes pin to the text like drawn ink")
+        editor.undo()
+        XCTAssertTrue(editor.items.isEmpty, "A shape is one undo step")
+    }
+
+    func testInkInTheMarginsAroundTheTextIsDrawn() throws {
+        let (editor, root) = try editor("Hi")
+        defer { editor.window?.close(); TestSupport.removeIfExists(root) }
+        let column = editor.textView.textContainerOrigin
+        let marks = [CGPoint(x: column.x + 40, y: column.y / 2), CGPoint(x: column.x / 2, y: column.y + 40)]
+        for mark in marks {
+            editor.commit(InkStroke(tool: .shape, color: "#ffffff", width: 6,
+                                    points: [InkPoint(x: mark.x - 10, y: mark.y, pressure: -1), InkPoint(x: mark.x + 10, y: mark.y, pressure: -1)]),
+                          at: Date().addingTimeInterval(Double(marks.firstIndex(of: mark)!) * 5))
+        }
+        let view = editor.textView
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / rep.size.width
+        for mark in marks {
+            let color = try XCTUnwrap(rep.colorAt(x: Int(mark.x * scale), y: Int(mark.y * scale))?.usingColorSpace(.sRGB))
+            XCTAssertGreaterThan(color.redComponent, 0.8, "Ink at \(mark) is outside the text column and must still show")
         }
     }
 

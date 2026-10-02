@@ -3,8 +3,9 @@ import Foundation
 
 /// One hand-drawn stroke. Points are relative to the stroke's own origin. A
 /// negative pressure means the device reported none, so width follows speed.
+/// A shape is straight segments of even width between its points.
 struct InkStroke: Equatable {
-    enum Tool: String, Codable { case pen, highlighter }
+    enum Tool: String, Codable { case pen, highlighter, shape }
 
     var tool: Tool
     var color: String
@@ -33,9 +34,58 @@ struct InkStroke: Equatable {
         points = points.map { InkPoint(x: round($0.x), y: round($0.y), pressure: round($0.pressure)) }
     }
 
+    /// Measures to the segments, not just the points: a rectangle's sides
+    /// are long and have points only at the corners.
     func hits(_ point: CGPoint, padding: CGFloat = 6) -> Bool {
         let radius = width / 2 + padding
-        return points.contains { ($0.x - point.x) * ($0.x - point.x) + ($0.y - point.y) * ($0.y - point.y) < radius * radius }
+        guard points.count > 1 else {
+            return points.first.map { hypot($0.x - point.x, $0.y - point.y) < radius } ?? false
+        }
+        return zip(points, points.dropFirst()).contains { a, b in
+            let dx = b.x - a.x, dy = b.y - a.y
+            let lengthSquared = dx * dx + dy * dy
+            let t = lengthSquared > 0 ? min(1, max(0, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared)) : 0
+            return hypot(a.x + t * dx - point.x, a.y + t * dy - point.y) < radius
+        }
+    }
+}
+
+/// The screenshot editor's shapes, drawn into a note as straight segments.
+enum InkShape: CaseIterable {
+    case line, arrow, rectangle, ellipse
+
+    /// The points from a drag. `constrained` (Shift) makes a square or a
+    /// circle, as in the screenshot editor.
+    func points(from start: CGPoint, to end: CGPoint, constrained: Bool) -> [CGPoint] {
+        switch self {
+        case .line:
+            return [start, end]
+        case .arrow:
+            // Ends on the tip, so the arrow pins to the text like a drawn one.
+            let (wing1, wing2) = EditorImageRenderer.arrowHeadPoints(from: start, to: end)
+            return [start, end, wing1, end, wing2, end]
+        case .rectangle:
+            let rect = Self.rect(from: start, to: end, constrained: constrained)
+            return [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+                    CGPoint(x: rect.maxX, y: rect.maxY), CGPoint(x: rect.minX, y: rect.maxY),
+                    CGPoint(x: rect.minX, y: rect.minY)]
+        case .ellipse:
+            let rect = Self.rect(from: start, to: end, constrained: constrained)
+            return (0...72).map { step in
+                let angle = CGFloat(step) / 72 * 2 * .pi
+                return CGPoint(x: rect.midX + cos(angle) * rect.width / 2, y: rect.midY + sin(angle) * rect.height / 2)
+            }
+        }
+    }
+
+    private static func rect(from start: CGPoint, to end: CGPoint, constrained: Bool) -> CGRect {
+        var dx = end.x - start.x, dy = end.y - start.y
+        if constrained {
+            let side = max(abs(dx), abs(dy))
+            dx = dx >= 0 ? side : -side
+            dy = dy >= 0 ? side : -side
+        }
+        return CGRect(x: start.x, y: start.y, width: dx, height: dy).standardized
     }
 }
 
@@ -186,7 +236,20 @@ enum InkAnchorLogic {
 /// width follows pressure (or speed), highlighters a plain centerline.
 enum InkGeometry {
     static func path(for stroke: InkStroke) -> CGPath {
-        stroke.tool == .highlighter ? centerline(stroke.points) : outline(stroke.points, width: stroke.width)
+        switch stroke.tool {
+        case .pen: return outline(stroke.points, width: stroke.width)
+        case .highlighter: return centerline(stroke.points)
+        case .shape: return polyline(stroke.points)
+        }
+    }
+
+    /// Straight segments with no smoothing, so corners stay sharp.
+    static func polyline(_ points: [InkPoint]) -> CGPath {
+        let path = CGMutablePath()
+        guard let first = points.first else { return path }
+        path.move(to: CGPoint(x: first.x, y: first.y))
+        for point in points.dropFirst() { path.addLine(to: CGPoint(x: point.x, y: point.y)) }
+        return path
     }
 
     static func streamlined(_ raw: [InkPoint]) -> [InkPoint] {

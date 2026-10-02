@@ -9,25 +9,30 @@ enum InkNoteKeymap {
     enum Command: Equatable {
         case selectAll, copy, cut, paste, undo, redo
         case save, copyAndSave, close
-        case toggleDraw, type, escape
+        case draw, type, escape
         case marker, nextColor, clearInk
         case tool(InkNoteWindowController.Tool)
     }
 
     /// Letters that act while drawing; the same letters as the screenshot
-    /// editor where the meaning is the same (W pen, Q color, F marker, T text).
+    /// editor where the meaning is the same (W pen, D line, A arrow,
+    /// R rectangle, E ellipse, Q color, F marker).
     static let drawingKeys: [UInt16: Command] = [
         UInt16(kVK_ANSI_W): .tool(.pen),
+        UInt16(kVK_ANSI_D): .tool(.line),
+        UInt16(kVK_ANSI_A): .tool(.arrow),
+        UInt16(kVK_ANSI_R): .tool(.rectangle),
+        UInt16(kVK_ANSI_E): .tool(.ellipse),
         UInt16(kVK_ANSI_H): .tool(.highlighter),
         UInt16(kVK_ANSI_X): .tool(.eraser),
         UInt16(kVK_ANSI_Q): .nextColor,
-        UInt16(kVK_ANSI_F): .marker,
-        UInt16(kVK_ANSI_T): .type
+        UInt16(kVK_ANSI_F): .marker
     ]
 
+    /// Command+T types and Command+D draws, from either mode.
     private static let commandKeys: [String: Command] = [
         "a": .selectAll, "c": .copy, "x": .cut, "v": .paste, "z": .undo,
-        "s": .save, "w": .close, "d": .toggleDraw, "f": .marker
+        "s": .save, "w": .close, "t": .type, "d": .draw, "f": .marker
     ]
 
     static func command(keyCode: UInt16, characters: String, flags rawFlags: NSEvent.ModifierFlags,
