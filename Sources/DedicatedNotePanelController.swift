@@ -12,11 +12,12 @@ final class DedicatedNotePanelController: NotePanelController {
         fillsAvailableHeight: true
     )
 
-    init(initialText: String) {
+    init(initialText: String, allowsEditor: Bool = true) {
         super.init(initialText: initialText,
                    escapeKeyDeletesFile: false,
                    showsCopyAndDelete: false,
                    showsNewlineShortcut: true,
+                   allowsEditor: allowsEditor,
                    maxLength: InkNoteDocument.maximumNoteLength,
                    layout: Self.layout)
     }

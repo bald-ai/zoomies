@@ -17,14 +17,15 @@ final class ScratchpadServiceTests: XCTestCase {
         var service: ScratchpadService!
         var desktop: URL { root.appendingPathComponent("desktop") }
 
-        init(settingsStore: SettingsStore? = nil) throws {
+        init(settingsStore: SettingsStore? = nil, drawingEditorEnabled: Bool? = true) throws {
             _ = NSApplication.shared
             root = try TestSupport.makeTemporaryDirectory()
             let clipboard = ClipboardService(cacheDirectory: root.appendingPathComponent("cache"), pasteboardWriter: { [unowned self] objects in
                 guard acceptsClipboard else { return false }
                 copied.append(objects[0] as! URL); return true
             })
-            service = ScratchpadService(clipboardService: clipboard, settingsStore: settingsStore, desktopDirectory: desktop,
+            service = ScratchpadService(clipboardService: clipboard, settingsStore: settingsStore,
+                                        drawingEditorEnabled: drawingEditorEnabled, desktopDirectory: desktop,
                                         showNote: { [unowned self] in shownNotes.append($0) },
                                         showRename: { [unowned self] in shownRenames.append($0) },
                                         showEditor: { [unowned self] in shownEditors.append($0) },
@@ -182,5 +183,37 @@ final class ScratchpadServiceTests: XCTestCase {
         XCTAssertEqual(f.copied, [f.desktop.appendingPathComponent(defaultName + ".png")])
         XCTAssertEqual(f.files(), [defaultName + ".png"], "The retry saves over the same file")
         XCTAssertNil(f.service.presentedPanel)
+    }
+
+    func testWithTheExperimentalToggleOffTabNeverReachesTheDrawingEditor() throws {
+        let f = try Fixture(drawingEditorEnabled: nil)
+        XCTAssertFalse(f.service.drawingEditorEnabled, "Off unless turned on in Settings")
+        f.service.open(date: date)
+        let note = try XCTUnwrap(f.shownNotes.last)
+        let labels = note.window?.contentView.map(Self.labelText) ?? ""
+        XCTAssertTrue(labels.contains("Shift+Tab: Rename"))
+        XCTAssertFalse(labels.contains("Tab: Editor"), "No hint for a screen that can't be reached")
+
+        f.service.handleNoteAction(.goToEditor(text: "Check the header"))
+        XCTAssertEqual(f.service.presentedPanel, .note)
+        XCTAssertTrue(f.shownEditors.isEmpty)
+        f.service.handleNoteAction(.backToRename(text: "Check the header"))
+        XCTAssertEqual(f.service.presentedPanel, .rename, "Rename and note still swap")
+    }
+
+    func testTheToggleIsReadOnceSoChangingItMidFlowChangesNothing() throws {
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        let store = SettingsStore(fileURL: root.appendingPathComponent("settings.json"))
+        store.update { $0.experimentalNoteEditor = true }
+        let f = try Fixture(settingsStore: store, drawingEditorEnabled: nil)
+        store.update { $0.experimentalNoteEditor = false }
+        f.service.open(date: date)
+        f.service.handleNoteAction(.goToEditor(text: "x"))
+        XCTAssertEqual(f.service.presentedPanel, .editor)
+    }
+
+    private static func labelText(in view: NSView) -> String {
+        ((view as? NSTextField)?.stringValue ?? "") + view.subviews.map(labelText).joined(separator: "\n")
     }
 }

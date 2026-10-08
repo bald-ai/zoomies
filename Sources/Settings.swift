@@ -23,6 +23,10 @@ struct Settings: Codable {
 
     /// Ordered active palette, from one to six catalog color IDs.
     var editorColorIDs: [String] = EditorPalette.defaultIDs
+
+    /// Experimental: Tab on the note window opens the drawing editor. Read
+    /// once at launch, so changing it takes a restart.
+    var experimentalNoteEditor: Bool = false
 }
 
 extension Settings {
@@ -103,6 +107,7 @@ extension Settings {
         case screenshotCounter
         case recordingFrameRate
         case editorColorIDs
+        case experimentalNoteEditor
     }
 
     init(from decoder: Decoder) throws {
@@ -116,6 +121,7 @@ extension Settings {
         self.shortcutsCustomized = try decode(Bool.self, key: .shortcutsCustomized, fallback: false)
         self.screenshotCounter = try decode(Int.self, key: .screenshotCounter, fallback: Settings.default.screenshotCounter)
         self.editorColorIDs = try decode([String].self, key: .editorColorIDs, fallback: EditorPalette.defaultIDs)
+        self.experimentalNoteEditor = try decode(Bool.self, key: .experimentalNoteEditor, fallback: false)
         let rawFrameRate = try decode(Int.self, key: .recordingFrameRate, fallback: Settings.default.recordingFrameRate)
         self.recordingFrameRate = [30, 60, 120].contains(rawFrameRate)
             ? rawFrameRate

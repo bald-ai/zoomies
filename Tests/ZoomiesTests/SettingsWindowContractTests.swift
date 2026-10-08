@@ -8,10 +8,25 @@ final class SettingsWindowContractTests: XCTestCase {
         let root: URL
         let store: SettingsStore
         let controller: SettingsWindowController
+        var blocker: String?
+        var confirmAnswer = true
+        var asked: [String] = []
+        var askedOn: [NSWindow?] = []
+        var relaunches = 0
         init() throws {
             root = try TestSupport.makeTemporaryDirectory()
             store = SettingsStore(fileURL: root.appendingPathComponent("settings.json"))
-            controller = SettingsWindowController(settingsStore: store, hotKeyService: HotKeyService())
+            var restart = SettingsWindowController.Restart()
+            var box: Fixture?
+            restart.blocker = { box?.blocker }
+            restart.ask = { alert, window, done in
+                box?.asked.append(alert.messageText)
+                box?.askedOn.append(window)
+                done(box?.confirmAnswer == true ? .alertFirstButtonReturn : .alertSecondButtonReturn)
+            }
+            restart.relaunch = { box?.relaunches += 1 }
+            controller = SettingsWindowController(settingsStore: store, hotKeyService: HotKeyService(), restart: restart)
+            box = self
         }
         deinit {
             // This is an unpresented component fixture. Closing Settings in the
@@ -98,4 +113,36 @@ final class SettingsWindowContractTests: XCTestCase {
         XCTAssertFalse(window.isVisible)
     }
 
+    func testExperimentalToggleSavesOnlyWhenItRestarts() throws {
+        let f = try Fixture()
+        let toggle = try XCTUnwrap(controls(NSButton.self, in: f.controller.window?.contentView).first {
+            $0.accessibilityIdentifier() == "settings.experimentalNoteEditor"
+        })
+        XCTAssertEqual(toggle.state, .off)
+
+        f.blocker = "Save or close the open note first, then try again."
+        toggle.state = .on
+        try invoke(toggle)
+        XCTAssertEqual(f.asked, ["Zoomies can't restart right now"], "Open work blocks the restart")
+        XCTAssertEqual(toggle.state, .off)
+        XCTAssertEqual(f.relaunches, 0)
+        XCTAssertFalse(f.store.settings.experimentalNoteEditor)
+
+        f.blocker = nil
+        f.confirmAnswer = false
+        toggle.state = .on
+        try invoke(toggle)
+        XCTAssertEqual(f.asked.last, "Turn on the drawing editor?")
+        XCTAssertTrue(f.askedOn.allSatisfy { $0 === f.controller.window }, "Shown on Settings, so it follows it to full screen")
+        XCTAssertEqual(toggle.state, .off, "Cancel leaves it as it was")
+        XCTAssertFalse(f.reload().experimentalNoteEditor)
+        XCTAssertEqual(f.relaunches, 0)
+
+        f.confirmAnswer = true
+        toggle.state = .on
+        try invoke(toggle)
+        XCTAssertEqual(toggle.state, .on)
+        XCTAssertTrue(f.reload().experimentalNoteEditor)
+        XCTAssertEqual(f.relaunches, 1)
+    }
 }

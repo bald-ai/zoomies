@@ -30,6 +30,7 @@ class NotePanelController: NSWindowController {
     private var escapeKeyDeletesFile: Bool = true
     private var showsCopyAndDelete: Bool = true
     private var showsNewlineShortcut: Bool = false
+    private var allowsEditor: Bool = true
     private var maxLength = 1000
     private var layout = ScreenshotNotePanelController.layout
 
@@ -42,6 +43,7 @@ class NotePanelController: NSWindowController {
          escapeKeyDeletesFile: Bool = true,
          showsCopyAndDelete: Bool = true,
          showsNewlineShortcut: Bool = false,
+         allowsEditor: Bool = true,
          maxLength: Int = 1000,
          layout: NotePanelLayout = ScreenshotNotePanelController.layout) {
         let contentRect = NSRect(origin: .zero, size: layout.size)
@@ -56,6 +58,7 @@ class NotePanelController: NSWindowController {
         self.escapeKeyDeletesFile = escapeKeyDeletesFile
         self.showsCopyAndDelete = showsCopyAndDelete
         self.showsNewlineShortcut = showsNewlineShortcut
+        self.allowsEditor = allowsEditor
         configureUI(initialText: initialText)
     }
 
@@ -75,7 +78,7 @@ class NotePanelController: NSWindowController {
             .commandShiftEnter: .copyAndSave(text: value),
             .commandBackspace: showsCopyAndDelete ? .copyAndDelete(text: value) : nil,
             .escape: escapeKeyDeletesFile ? .delete : .close,
-            .tab: .goToEditor(text: value),
+            .tab: allowsEditor ? .goToEditor(text: value) : nil,
             .shiftTab: .backToRename(text: value)
         ]
         if let action = actions[command] ?? nil { onAction?(action) }
@@ -137,7 +140,8 @@ class NotePanelController: NSWindowController {
         if showsNewlineShortcut { shortcutParts.append("Shift+↩: new line") }
         shortcutParts.append("⌘↩: Copy+Save")
         if showsCopyAndDelete { shortcutParts.append("⌘⌫: Copy+Delete") }
-        shortcutParts += ["Esc: \(escapeLabel)", "Shift+Tab: Rename", "Tab: Editor"]
+        shortcutParts += ["Esc: \(escapeLabel)", "Shift+Tab: Rename"]
+        if allowsEditor { shortcutParts.append("Tab: Editor") }
         shortcutLabel.stringValue = shortcutParts.joined(separator: "    ")
 
         NSLayoutConstraint.activate([

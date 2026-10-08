@@ -223,4 +223,12 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(result.settings.shortcuts, Shortcuts.default)
     }
 
+    func testExperimentalNoteEditorDefaultsOffAndPersists() throws {
+        let old = try JSONDecoder().decode(Settings.self, from: Data(#"{"maxWidth": 0}"#.utf8))
+        XCTAssertFalse(old.experimentalNoteEditor, "Settings files from before the toggle load as off")
+        var on = Settings.default
+        on.experimentalNoteEditor = true
+        let restored = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(on))
+        XCTAssertTrue(restored.experimentalNoteEditor)
+    }
 }

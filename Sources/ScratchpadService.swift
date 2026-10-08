@@ -1,7 +1,8 @@
 import AppKit
 
 /// Runs the note flow with the screenshot flow's tab-swapping screens:
-/// rename ⇄ note ⇄ editor. It starts on the note window; Shift+Tab goes to
+/// rename ⇄ note ⇄ editor (the editor only with the experimental Settings
+/// toggle on). It starts on the note window; Shift+Tab goes to
 /// rename and Tab to the note editor. A note saves as a PNG (the drawing with
 /// the Note box burned in below it) carrying the editable note, so
 /// Option+Shift+2 reopens it.
@@ -18,6 +19,9 @@ final class ScratchpadService {
     private let showEditor: @MainActor (InkNoteWindowController) -> Void
     private let errorPresenter: (String, String) -> Void
     private let confirmDiscard: @MainActor () -> Bool
+    /// Whether Tab reaches the drawing editor. Fixed for the app's lifetime so
+    /// flipping the Settings toggle can't change an open flow.
+    let drawingEditorEnabled: Bool
 
     private(set) var renamePanel: RenamePanelController?
     private(set) var notePanel: DedicatedNotePanelController?
@@ -36,6 +40,7 @@ final class ScratchpadService {
     init(fileManager: FileManager = .default,
          clipboardService: ClipboardService,
          settingsStore: SettingsStore? = nil,
+         drawingEditorEnabled: Bool? = nil,
          desktopDirectory: URL? = nil,
          showNote: @escaping @MainActor (DedicatedNotePanelController) -> Void = { $0.show() },
          showRename: @escaping @MainActor (RenamePanelController) -> Void = { $0.show() },
@@ -50,6 +55,7 @@ final class ScratchpadService {
         self.showEditor = showEditor
         self.errorPresenter = errorPresenter
         self.confirmDiscard = confirmDiscard
+        self.drawingEditorEnabled = drawingEditorEnabled ?? settingsStore?.settings.experimentalNoteEditor ?? false
         directory = desktopDirectory
             ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Desktop", isDirectory: true)
     }
@@ -87,7 +93,7 @@ final class ScratchpadService {
     // MARK: - Screens
 
     private func presentNotePanel() {
-        let controller = DedicatedNotePanelController(initialText: document.note)
+        let controller = DedicatedNotePanelController(initialText: document.note, allowsEditor: drawingEditorEnabled)
         controller.onAction = { [weak self] action in self?.handleNoteAction(action) }
         closeScreens()
         notePanel = controller
@@ -126,6 +132,7 @@ final class ScratchpadService {
             document.note = text
             save(copy: true)
         case .goToEditor(let text):
+            guard drawingEditorEnabled else { return }
             document.note = text
             presentEditor()
         case .backToRename(let text):

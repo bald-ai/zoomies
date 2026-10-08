@@ -33,8 +33,22 @@ final class SettingsWindow: NSWindow {
     override func cancelOperation(_ sender: Any?) { performClose(nil) }
 }
 
-/// One scrolling page of grouped settings: shortcuts, capture, editor, colors.
+/// One scrolling page of grouped settings: shortcuts, capture, editor, colors,
+/// experimental.
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
+    /// What an experimental toggle needs from the app: why it can't restart
+    /// right now (nil when it can), a way to ask, and the restart itself.
+    struct Restart {
+        var blocker: @MainActor () -> String? = { nil }
+        /// Alerts are sheets on Settings so they follow it onto a full-screen
+        /// Space; a free-standing alert opens on the desktop instead.
+        var ask: @MainActor (NSAlert, NSWindow?, @escaping (NSApplication.ModalResponse) -> Void) -> Void = { alert, window, done in
+            guard let window else { return done(AlertPresenter.runModal(alert)) }
+            alert.beginSheetModal(for: window, completionHandler: done)
+        }
+        var relaunch: @MainActor () -> Void = AppDelegate.relaunch
+    }
+
     private let settingsFieldEditor: NSTextView = {
         let editor = NSTextView()
         editor.isFieldEditor = true
@@ -47,11 +61,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     private let settingsStore: SettingsStore
     private let hotKeyService: HotKeyService
+    private let restart: Restart
 
     // UI elements we need to read/write after initialization.
     private let maxSizePopUp: NSPopUpButton
     private let frameRatePopUp: NSPopUpButton
     private let confirmBeforeClosingCheckbox: NSButton
+    private let experimentalNoteEditorCheckbox: NSButton
 
     private let areaShortcutRecorder: ShortcutRecorderView
     private let fullShortcutRecorder: ShortcutRecorderView
@@ -66,13 +82,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// Supported recording frame rates shown in the dropdown.
     private let frameRateOptions: [Int] = [30, 60, 120]
 
-    init(settingsStore: SettingsStore, hotKeyService: HotKeyService) {
+    init(settingsStore: SettingsStore, hotKeyService: HotKeyService, restart: Restart = Restart()) {
         self.settingsStore = settingsStore
         self.hotKeyService = hotKeyService
+        self.restart = restart
 
         maxSizePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
         frameRatePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
         confirmBeforeClosingCheckbox = MutedSettingsCheckbox(checkboxWithTitle: "", target: nil, action: nil)
+        experimentalNoteEditorCheckbox = MutedSettingsCheckbox(checkboxWithTitle: "", target: nil, action: nil)
 
         areaShortcutRecorder = ShortcutRecorderView(frame: .zero)
         fullShortcutRecorder = ShortcutRecorderView(frame: .zero)
@@ -197,6 +215,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         header("Colors")
         add(EditorPaletteSettingsView(settingsStore: settingsStore))
 
+        experimentalNoteEditorCheckbox.target = self
+        experimentalNoteEditorCheckbox.action = #selector(experimentalNoteEditorToggled(_:))
+        experimentalNoteEditorCheckbox.setAccessibilityLabel("Drawing editor in notes")
+        experimentalNoteEditorCheckbox.setAccessibilityIdentifier("settings.experimentalNoteEditor")
+        header("Experimental")
+        add(SettingsGroupView(rows: [
+            SettingsGroupView.row("Drawing editor in notes", control: experimentalNoteEditorCheckbox)
+        ]))
+        add(SettingsGroupView.footnote("Tab on the note window opens a canvas to draw on. Changing this restarts Zoomies."), inset: 14)
 
         let document = FlippedSettingsView()
         document.translatesAutoresizingMaskIntoConstraints = false
@@ -289,6 +316,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         }
 
         confirmBeforeClosingCheckbox.state = settings.confirmBeforeClosing ? .on : .off
+        experimentalNoteEditorCheckbox.state = settings.experimentalNoteEditor ? .on : .off
 
         // Shortcuts
         applyShortcutsToRecorders(from: settings.shortcuts)
@@ -322,6 +350,34 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let isOn = sender.state == .on
         settingsStore.update { settings in
             settings.confirmBeforeClosing = isOn
+        }
+    }
+
+    /// Saved only once a restart is certain, so the setting on disk always
+    /// matches what the running app does. Anything open blocks the restart,
+    /// because quitting would throw that work away.
+    @objc private func experimentalNoteEditorToggled(_ sender: NSButton) {
+        let isOn = sender.state == .on
+        sender.state = isOn ? .off : .on
+        let alert = NSAlert()
+        if let blocker = restart.blocker() {
+            alert.alertStyle = .warning
+            alert.messageText = "Zoomies can't restart right now"
+            alert.informativeText = blocker
+            alert.addButton(withTitle: "OK")
+            restart.ask(alert, window) { _ in }
+            return
+        }
+        alert.alertStyle = .informational
+        alert.messageText = isOn ? "Turn on the drawing editor?" : "Turn off the drawing editor?"
+        alert.informativeText = "Zoomies will restart to apply this."
+        alert.addButton(withTitle: "Restart")
+        alert.addButton(withTitle: "Cancel")
+        restart.ask(alert, window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            sender.state = isOn ? .on : .off
+            settingsStore.update { $0.experimentalNoteEditor = isOn }
+            restart.relaunch()
         }
     }
 

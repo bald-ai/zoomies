@@ -222,6 +222,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         videoRenameController?.isBusyForUserCommands == true
     }
 
+    /// Why quitting now would lose work, or nil when a restart is safe.
+    private var restartBlocker: String? {
+        if recordingService.isBusyForUserCommands { return "Stop the recording first, then try again." }
+        if screenshotService.isBusyForUserCommands || isVideoRenameBusy {
+            return "Finish or close the open screenshot or video first, then try again."
+        }
+        if scratchpadService.presentedPanel != nil { return "Save or close the open note first, then try again." }
+        return nil
+    }
+
+    /// Quits and opens this app again once the old process is gone, so the
+    /// new one can claim the global shortcuts.
+    static func relaunch() {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "while kill -0 \(pid) 2>/dev/null; do sleep 0.1; done; /usr/bin/open \"$0\"",
+                          Bundle.main.bundlePath]
+        try? task.run()
+        NSApp.terminate(nil)
+    }
+
     private func handleFinderSelectionResult(_ result: Result<FinderSelectionService.Selection, Error>) {
         switch FinderReopenLogic.resolve(result) {
         case .open(let url):
@@ -251,7 +273,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let existing = settingsWindowController {
             return existing
         }
-        let created = SettingsWindowController(settingsStore: settingsStore, hotKeyService: hotKeyService)
+        let created = SettingsWindowController(settingsStore: settingsStore, hotKeyService: hotKeyService,
+                                               restart: .init(blocker: { [unowned self] in restartBlocker }))
         settingsWindowController = created
         return created
     }
