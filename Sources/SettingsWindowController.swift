@@ -2,12 +2,9 @@ import AppKit
 import Carbon
 
 /// Zoomies has no main menu, so Settings handles its own keys: Command+W or
-/// Escape closes, Command+1–4 picks a tab, and text fields get the standard
-/// editing keys. A shortcut recorder that is recording keeps every key for itself.
+/// Escape closes, and text fields get the standard editing keys. A shortcut
+/// recorder that is recording keeps every key for itself.
 final class SettingsWindow: NSWindow {
-    var tabCount = 0
-    var onSelectTab: ((Int) -> Void)?
-
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         // A recorder that is recording takes any combo, Command+W included.
         if (firstResponder as? ShortcutRecorderView)?.isRecordingShortcut == true {
@@ -17,10 +14,6 @@ final class SettingsWindow: NSWindow {
         let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
         if flags == [.command], chars == "w" {
             performClose(nil)
-            return true
-        }
-        if flags == [.command], let digit = Int(chars), digit >= 1, digit <= tabCount {
-            onSelectTab?(digit - 1)
             return true
         }
         if StandardEditingKeys.perform(event, in: self) { return true }
@@ -40,13 +33,8 @@ final class SettingsWindow: NSWindow {
     override func cancelOperation(_ sender: Any?) { performClose(nil) }
 }
 
-/// Settings window with controls for max size, note prefix, and
-/// global shortcut configuration.
-final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
-    private let settingsTabs = NSTabView()
-    private let tabTitles = ["Screenshots", "Videos", "Notes", "Colors"]
-    private let navigation = NSSegmentedControl()
-
+/// One scrolling page of grouped settings: shortcuts, capture, editor, colors.
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let settingsFieldEditor: NSTextView = {
         let editor = NSTextView()
         editor.isFieldEditor = true
@@ -64,10 +52,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     private let maxSizePopUp: NSPopUpButton
     private let frameRatePopUp: NSPopUpButton
     private let confirmBeforeClosingCheckbox: NSButton
-    private let notePrefixCheckbox: NSButton
-    private let notePrefixField: NSTextField
-    private let notePrefixCountLabel: NSTextField
-    private let filenameTemplateEditor: FilenameTemplateEditorView
 
     private let areaShortcutRecorder: ShortcutRecorderView
     private let fullShortcutRecorder: ShortcutRecorderView
@@ -88,29 +72,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
 
         maxSizePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
         frameRatePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
-        confirmBeforeClosingCheckbox = MutedSettingsCheckbox(
-            checkboxWithTitle: "Confirm before deleting or closing",
-            target: nil,
-            action: nil
-        )
-        notePrefixCheckbox = MutedSettingsCheckbox(checkboxWithTitle: "Note prefix for screenshots", target: nil, action: nil)
-        notePrefixField = NSTextField(string: "")
-        notePrefixCountLabel = NSTextField(labelWithString: "0/50")
-        filenameTemplateEditor = FilenameTemplateEditorView(settingsStore: settingsStore)
+        confirmBeforeClosingCheckbox = MutedSettingsCheckbox(checkboxWithTitle: "", target: nil, action: nil)
 
         areaShortcutRecorder = ShortcutRecorderView(frame: .zero)
         fullShortcutRecorder = ShortcutRecorderView(frame: .zero)
         reopenShortcutRecorder = ShortcutRecorderView(frame: .zero)
         scratchpadShortcutRecorder = ShortcutRecorderView(frame: .zero)
         recordingShortcutRecorder = ShortcutRecorderView(frame: .zero)
-        duplicateWarningLabel = NSTextField(labelWithString: "")
+        duplicateWarningLabel = NSTextField(wrappingLabelWithString: "")
 
-        let contentRect = NSRect(x: 0, y: 0, width: 660, height: 700)
+        let contentRect = NSRect(x: 0, y: 0, width: 600, height: 720)
         let style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
         let window = SettingsWindow(contentRect: contentRect, styleMask: style, backing: .buffered, defer: false)
-        window.center()
         window.title = "Zoomies Settings"
-        window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.backgroundColor = .clear
         window.isOpaque = false
@@ -122,10 +96,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         super.init(window: window)
 
         window.delegate = self
-        window.tabCount = tabTitles.count
-        window.onSelectTab = { [weak self] in self?.selectTab($0) }
         configureContent()
         populateFromSettings()
+        window.center()
     }
     
     /// Returns true while the user is actively recording a shortcut.
@@ -145,103 +118,38 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
     // MARK: - UI Configuration
 
     private func configureContent() {
-        guard let contentView = window?.contentView else { return }
+        guard let window, let contentView = window.contentView else { return }
         contentView.subviews.forEach { $0.removeFromSuperview() }
         // Match the editor’s translucent material.
         let surface = MenuSurfaceMaterial.makeFillingView(frame: contentView.bounds)
         contentView.addSubview(surface)
 
-        let tabs = settingsTabs
-        tabs.tabViewType = .noTabsNoBorder
-        navigation.segmentCount = tabTitles.count
-        for (index, title) in tabTitles.enumerated() {
-            navigation.setLabel(title, forSegment: index)
-            navigation.setToolTip("\(title) (Cmd+\(index + 1))", forSegment: index)
-        }
-        navigation.trackingMode = .selectOne
-        navigation.target = self
-        navigation.action = #selector(settingsTabChanged(_:))
-        navigation.selectedSegment = 0
-        navigation.selectedSegmentBezelColor = NSColor(srgbRed: 0.26, green: 0.34, blue: 0.38, alpha: 1)
-        navigation.translatesAutoresizingMaskIntoConstraints = false
-        surface.addSubview(navigation)
-        tabs.translatesAutoresizingMaskIntoConstraints = false
-        surface.addSubview(tabs)
+        let page = NSStackView()
+        page.orientation = .vertical
+        page.alignment = .leading
+        page.spacing = 6
+        page.edgeInsets = NSEdgeInsets(top: 8, left: 24, bottom: 24, right: 24)
+        page.translatesAutoresizingMaskIntoConstraints = false
 
-        func page(_ title: String) -> NSStackView {
-            let item = NSTabViewItem(identifier: title)
-            item.label = title
-            let container = NSView()
-            let stack = NSStackView()
-            stack.orientation = .vertical
-            stack.alignment = .leading
-            stack.spacing = 14
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(stack)
-            NSLayoutConstraint.activate([
-                stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 20),
-                stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
-                stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
-                stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -16)
-            ])
-            item.view = container
-            tabs.addTabViewItem(item)
-            return stack
-        }
-
-        func addRow(_ title: String, control: NSView, to stack: NSStackView) {
+        func header(_ title: String) {
             let label = NSTextField(labelWithString: title)
-            label.setContentHuggingPriority(.required, for: .horizontal)
-            let row = NSStackView(views: [label, NSView(), control])
-            row.orientation = .horizontal
-            row.alignment = .centerY
-            row.spacing = 12
-            stack.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            label.font = .systemFont(ofSize: 13, weight: .semibold)
+            if let previous = page.arrangedSubviews.last { page.setCustomSpacing(22, after: previous) }
+            page.addArrangedSubview(label)
+            label.leadingAnchor.constraint(equalTo: page.leadingAnchor, constant: 26).isActive = true
+            page.setCustomSpacing(8, after: label)
         }
-
-        func description(_ text: String, in stack: NSStackView) {
-            let label = NSTextField(wrappingLabelWithString: text)
-            label.textColor = .secondaryLabelColor
-            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-            stack.addArrangedSubview(label)
-            label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        func add(_ view: NSView, inset: CGFloat = 0) {
+            page.addArrangedSubview(view)
+            view.leadingAnchor.constraint(equalTo: page.leadingAnchor, constant: 24 + inset).isActive = true
+            view.trailingAnchor.constraint(equalTo: page.trailingAnchor, constant: -24 - inset).isActive = true
         }
-
-        let pages = tabTitles.map(page)
-        let (screenshots, videos, notes, colorsPage) = (pages[0], pages[1], pages[2], pages[3])
-        let paletteEditor = EditorPaletteSettingsView(settingsStore: settingsStore)
-        colorsPage.addArrangedSubview(paletteEditor)
-        paletteEditor.widthAnchor.constraint(equalTo: colorsPage.widthAnchor).isActive = true
-
-        configureMaxSizePopUp()
-        addRow("Maximum image width", control: maxSizePopUp, to: screenshots)
-
-        notePrefixCheckbox.target = self
-        notePrefixCheckbox.action = #selector(notePrefixToggled(_:))
-        screenshots.addArrangedSubview(notePrefixCheckbox)
-        description("Adds this text before notes attached to screenshots.", in: screenshots)
-        notePrefixField.focusRingType = .none
-        notePrefixField.delegate = self
-        notePrefixField.target = self
-        notePrefixField.action = #selector(notePrefixFieldEdited(_:))
-        notePrefixCountLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        notePrefixCountLabel.textColor = .secondaryLabelColor
-        notePrefixCountLabel.setContentHuggingPriority(.required, for: .horizontal)
-        let prefixControls = NSStackView(views: [notePrefixField, notePrefixCountLabel])
-        prefixControls.spacing = 8
-        prefixControls.widthAnchor.constraint(equalToConstant: 420).isActive = true
-        addRow("Prefix text", control: prefixControls, to: screenshots)
-        screenshots.addArrangedSubview(makeSeparator())
-        screenshots.addArrangedSubview(filenameTemplateEditor)
-        filenameTemplateEditor.widthAnchor.constraint(equalTo: screenshots.widthAnchor).isActive = true
-        screenshots.addArrangedSubview(makeSeparator())
 
         let recorders = [areaShortcutRecorder, fullShortcutRecorder, reopenShortcutRecorder,
                          scratchpadShortcutRecorder, recordingShortcutRecorder]
         for recorder in recorders {
             recorder.translatesAutoresizingMaskIntoConstraints = false
-            recorder.widthAnchor.constraint(equalToConstant: 280).isActive = true
+            recorder.widthAnchor.constraint(equalToConstant: 200).isActive = true
             recorder.setContentHuggingPriority(.required, for: .horizontal)
             recorder.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
@@ -251,56 +159,77 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         reopenShortcutRecorder.onChange = { [weak self] in self?.handleShortcutChange(kind: .reopenFinderSelection, newValue: $0) }
         scratchpadShortcutRecorder.onChange = { [weak self] in self?.handleShortcutChange(kind: .scratchpad, newValue: $0) }
         recordingShortcutRecorder.onChange = { [weak self] in self?.handleShortcutChange(kind: .recording, newValue: $0) }
-        addRow("Capture area", control: areaShortcutRecorder, to: screenshots)
-        addRow("Capture full screen", control: fullShortcutRecorder, to: screenshots)
-        addRow("Reopen Finder image", control: reopenShortcutRecorder, to: screenshots)
 
-        configureFrameRatePopUp()
-        addRow("Recording frame rate", control: frameRatePopUp, to: videos)
-        addRow("Start / stop recording", control: recordingShortcutRecorder, to: videos)
-        description("Videos use a generated Recording filename. You can rename each video after recording.", in: videos)
-
-        addRow("Create note", control: scratchpadShortcutRecorder, to: notes)
-        description("New notes open on the note window; Tab opens the note editor, where the text fills a page you draw over (Cmd+T types, Cmd+D draws). Notes save as PNGs on the Desktop. Select a note PNG in Finder and press the Reopen Finder image shortcut to edit it again.", in: notes)
-
-        // This preference currently applies to both image and video workflows.
-        confirmBeforeClosingCheckbox.title = "Confirm before deleting or closing screenshots and videos"
-        confirmBeforeClosingCheckbox.target = self
-        confirmBeforeClosingCheckbox.action = #selector(confirmBeforeClosingToggled(_:))
-        confirmBeforeClosingCheckbox.toolTip = "Ask before deleting or closing in screenshot and video workflows."
-        confirmBeforeClosingCheckbox.setAccessibilityIdentifier("settings.confirmBeforeClosing")
-        confirmBeforeClosingCheckbox.translatesAutoresizingMaskIntoConstraints = false
-        surface.addSubview(confirmBeforeClosingCheckbox)
+        header("Shortcuts")
+        add(SettingsGroupView(rows: [
+            SettingsGroupView.row("Capture area", control: areaShortcutRecorder),
+            SettingsGroupView.row("Capture full screen", control: fullShortcutRecorder),
+            SettingsGroupView.row("Start or stop recording", control: recordingShortcutRecorder),
+            SettingsGroupView.row("New note", control: scratchpadShortcutRecorder),
+            SettingsGroupView.row("Reopen image selected in Finder", control: reopenShortcutRecorder)
+        ]))
+        duplicateWarningLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         duplicateWarningLabel.textColor = .systemRed
         duplicateWarningLabel.isHidden = true
-        duplicateWarningLabel.translatesAutoresizingMaskIntoConstraints = false
-        surface.addSubview(duplicateWarningLabel)
+        add(duplicateWarningLabel, inset: 14)
+        add(SettingsGroupView.footnote("To edit a saved screenshot or note again, select it in Finder and press the Reopen shortcut."), inset: 14)
+
+        configureMaxSizePopUp()
+        configureFrameRatePopUp()
+        header("Capture")
+        add(SettingsGroupView(rows: [
+            SettingsGroupView.row("Maximum screenshot width", control: maxSizePopUp),
+            SettingsGroupView.row("Recording frame rate", control: frameRatePopUp)
+        ]))
+        add(SettingsGroupView.footnote("Screenshots save to the Desktop as Screenshot_2024-01-30_14.23.45_1.png."), inset: 14)
+
+        // This preference applies to both image and video workflows.
+        confirmBeforeClosingCheckbox.target = self
+        confirmBeforeClosingCheckbox.action = #selector(confirmBeforeClosingToggled(_:))
+        confirmBeforeClosingCheckbox.setAccessibilityLabel("Confirm before deleting or closing")
+        confirmBeforeClosingCheckbox.setAccessibilityIdentifier("settings.confirmBeforeClosing")
+        header("Editor")
+        add(SettingsGroupView(rows: [
+            SettingsGroupView.row("Confirm before deleting or closing", control: confirmBeforeClosingCheckbox)
+        ]))
+        add(SettingsGroupView.footnote("Applies to screenshots and videos."), inset: 14)
+
+        header("Colors")
+        add(EditorPaletteSettingsView(settingsStore: settingsStore))
+
+
+        let document = FlippedSettingsView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(page)
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.documentView = document
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        surface.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            navigation.topAnchor.constraint(equalTo: surface.safeAreaLayoutGuide.topAnchor, constant: 12),
-            navigation.centerXAnchor.constraint(equalTo: surface.centerXAnchor),
-            tabs.topAnchor.constraint(equalTo: navigation.bottomAnchor, constant: 12),
-            tabs.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 16),
-            tabs.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -16),
-            tabs.bottomAnchor.constraint(equalTo: confirmBeforeClosingCheckbox.topAnchor, constant: -16),
-            confirmBeforeClosingCheckbox.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 24),
-            confirmBeforeClosingCheckbox.trailingAnchor.constraint(lessThanOrEqualTo: surface.trailingAnchor, constant: -24),
-            confirmBeforeClosingCheckbox.bottomAnchor.constraint(equalTo: duplicateWarningLabel.topAnchor, constant: -8),
-            duplicateWarningLabel.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 24),
-            duplicateWarningLabel.trailingAnchor.constraint(lessThanOrEqualTo: surface.trailingAnchor, constant: -24),
-            duplicateWarningLabel.bottomAnchor.constraint(equalTo: surface.safeAreaLayoutGuide.bottomAnchor, constant: -16)
+            scrollView.topAnchor.constraint(equalTo: surface.safeAreaLayoutGuide.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: surface.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: surface.bottomAnchor),
+            document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            page.topAnchor.constraint(equalTo: document.topAnchor),
+            page.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            page.bottomAnchor.constraint(equalTo: document.bottomAnchor)
         ])
-    }
 
-    @objc private func settingsTabChanged(_ sender: NSSegmentedControl) {
-        selectTab(sender.selectedSegment)
-    }
-
-    func selectTab(_ index: Int) {
-        guard settingsTabs.tabViewItems.indices.contains(index) else { return }
-        window?.makeFirstResponder(nil)
-        navigation.selectedSegment = index
-        settingsTabs.selectTabViewItem(at: index)
+        // Fit the window to the page, scrolling only on short screens.
+        surface.layoutSubtreeIfNeeded()
+        let titlebar = window.frame.height - window.contentLayoutRect.height
+        let available = (NSScreen.main?.visibleFrame.height ?? 900) - 40
+        let height = min(page.fittingSize.height + titlebar, available)
+        window.setContentSize(NSSize(width: 600, height: height))
     }
 
     private func configureMaxSizePopUp() {
@@ -359,16 +288,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
             frameRatePopUp.selectItem(at: indexForRate)
         }
 
-        // Note prefix
         confirmBeforeClosingCheckbox.state = settings.confirmBeforeClosing ? .on : .off
-        notePrefixCheckbox.state = settings.notePrefixEnabled ? .on : .off
-        notePrefixField.stringValue = settings.notePrefix
-        notePrefixField.isEnabled = settings.notePrefixEnabled
-        notePrefixCountLabel.isEnabled = settings.notePrefixEnabled
-        updateNotePrefixCountLabel(for: settings.notePrefix)
-
-        // Filename template
-        filenameTemplateEditor.reloadFromSettings()
 
         // Shortcuts
         applyShortcutsToRecorders(from: settings.shortcuts)
@@ -402,28 +322,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         let isOn = sender.state == .on
         settingsStore.update { settings in
             settings.confirmBeforeClosing = isOn
-        }
-    }
-
-    @objc private func notePrefixToggled(_ sender: NSButton) {
-        let isOn = sender.state == .on
-        notePrefixField.isEnabled = isOn
-        notePrefixCountLabel.isEnabled = isOn
-        settingsStore.update { settings in
-            settings.notePrefixEnabled = isOn
-        }
-    }
-
-    @objc private func notePrefixFieldEdited(_ sender: NSTextField) {
-        var text = sender.stringValue
-        if text.count > 50 {
-            text = String(text.prefix(50))
-            sender.stringValue = text
-        }
-        updateNotePrefixCountLabel(for: text)
-
-        settingsStore.update { settings in
-            settings.notePrefix = text
         }
     }
 
@@ -488,19 +386,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         return set.count < values.count
     }
 
-    // MARK: - NSTextFieldDelegate
-
-    private func updateNotePrefixCountLabel(for text: String) {
-        let count = text.count
-        notePrefixCountLabel.stringValue = "\(count)/50"
-    }
-
-    func controlTextDidChange(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField, field === notePrefixField else { return }
-
-        notePrefixFieldEdited(field)
-    }
-
     // MARK: - NSWindowDelegate
 
     func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
@@ -512,12 +397,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTe
         // so it behaves like a menubar app again.
         NSApp.setActivationPolicy(.accessory)
     }
+}
 
-    private func makeSeparator() -> NSBox {
-        let separator = NSBox()
-        separator.boxType = .separator
-        return separator
-    }
+private final class FlippedSettingsView: NSView {
+    override var isFlipped: Bool { true }
 }
 
 private extension ShortcutRecorderView.RecordedShortcut {

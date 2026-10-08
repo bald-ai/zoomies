@@ -1,31 +1,16 @@
 import AppKit
 
-struct WorkflowPreparedNote: Equatable {
-    let identity: String
-    let rendered: String
-}
-
 enum WorkflowNoteRenderer {
     static let maxNoteLength = 1_500
     // Dark note to match the app's dark-only UI.
     static let noteBackgroundColor = NSColor(calibratedWhite: 0.12, alpha: 1.0)
     static let noteTextColor = NSColor(calibratedWhite: 0.93, alpha: 1.0)
 
-    static func prepareNoteText(_ rawText: String, settings: Settings) -> WorkflowPreparedNote? {
+    /// Trimmed, length-capped note text, or `nil` when there is no note.
+    static func prepareNoteText(_ rawText: String) -> String? {
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-
-        let identity = String(trimmed.prefix(maxNoteLength))
-        var rendered = identity
-
-        if settings.notePrefixEnabled {
-            let prefix = settings.notePrefix.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !prefix.isEmpty {
-                rendered = prefix + " " + identity
-            }
-        }
-
-        return WorkflowPreparedNote(identity: identity, rendered: rendered)
+        return String(trimmed.prefix(maxNoteLength))
     }
 
     static func burn(note text: String, into image: NSImage, keepingLineBreaks: Bool = false) -> NSImage? {

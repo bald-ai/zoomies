@@ -23,8 +23,7 @@ final class SettingsStoreTests: XCTestCase {
         let legacyFileURL = root.appendingPathComponent(".screenshot_app_settings.json")
         var legacySettings = Settings.default
         legacySettings.screenshotCounter = 42
-        legacySettings.notePrefixEnabled = true
-        legacySettings.notePrefix = "TODO"
+        legacySettings.confirmBeforeClosing = false
         let data = try JSONEncoder().encode(legacySettings)
         try data.write(to: legacyFileURL, options: .atomic)
 
@@ -32,7 +31,7 @@ final class SettingsStoreTests: XCTestCase {
         store.load()
 
         XCTAssertEqual(store.settings.screenshotCounter, 42)
-        XCTAssertEqual(store.settings.notePrefix, "TODO")
+        XCTAssertFalse(store.settings.confirmBeforeClosing)
         XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: legacyFileURL.path))
     }
@@ -45,7 +44,6 @@ final class SettingsStoreTests: XCTestCase {
         var raw = Settings.default
         raw.maxWidth = -5
         raw.screenshotCounter = 0
-        raw.notePrefix = String(repeating: "x", count: 200)
         let data = try JSONEncoder().encode(raw)
         try data.write(to: fileURL, options: .atomic)
 
@@ -55,12 +53,10 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertTrue(store.didRepairInvalidSettingsOnLastLoad)
         XCTAssertEqual(store.settings.maxWidth, 0)
         XCTAssertEqual(store.settings.screenshotCounter, 1)
-        XCTAssertEqual(store.settings.notePrefix.count, 50)
 
         let persisted = try JSONDecoder().decode(Settings.self, from: Data(contentsOf: fileURL))
         XCTAssertEqual(persisted.maxWidth, 0)
         XCTAssertEqual(persisted.screenshotCounter, 1)
-        XCTAssertEqual(persisted.notePrefix.count, 50)
 
         store.load()
         XCTAssertFalse(store.didRepairInvalidSettingsOnLastLoad)
@@ -110,8 +106,7 @@ final class SettingsStoreTests: XCTestCase {
         let fileURL = root.appendingPathComponent("settings.json")
         var raw = Settings.default
         raw.screenshotCounter = 42
-        raw.notePrefixEnabled = true
-        raw.notePrefix = "keep me"
+        raw.confirmBeforeClosing = false
         raw.shortcutsCustomized = true
         raw.shortcuts.screenshotArea = Shortcut(keyCode: UInt32.max, modifierFlags: 768)
         raw.shortcuts.openScratchpad = Shortcut(keyCode: 0xFFFF, modifierFlags: 256)
@@ -122,8 +117,7 @@ final class SettingsStoreTests: XCTestCase {
 
         XCTAssertTrue(store.didRepairInvalidSettingsOnLastLoad)
         XCTAssertEqual(store.settings.screenshotCounter, 42)
-        XCTAssertEqual(store.settings.notePrefix, "keep me")
-        XCTAssertTrue(store.settings.notePrefixEnabled)
+        XCTAssertFalse(store.settings.confirmBeforeClosing)
         XCTAssertTrue(store.settings.shortcutsCustomized)
         XCTAssertEqual(store.settings.shortcuts.screenshotArea, Shortcuts.default.screenshotArea)
         XCTAssertEqual(store.settings.shortcuts.openScratchpad, Shortcuts.default.openScratchpad)
@@ -170,8 +164,7 @@ final class SettingsStoreTests: XCTestCase {
         var raw = Settings.default
         raw.maxWidth = -5
         raw.screenshotCounter = 42
-        raw.notePrefixEnabled = true
-        raw.notePrefix = "keep me"
+        raw.confirmBeforeClosing = false
         try JSONEncoder().encode(raw).write(to: fileURL, options: .atomic)
         let originalData = try Data(contentsOf: fileURL)
 
@@ -191,7 +184,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertFalse(store.didRepairInvalidSettingsOnLastLoad)
         XCTAssertEqual(store.settings.maxWidth, 0)
         XCTAssertEqual(store.settings.screenshotCounter, 42)
-        XCTAssertEqual(store.settings.notePrefix, "keep me")
+        XCTAssertFalse(store.settings.confirmBeforeClosing)
         XCTAssertEqual(try Data(contentsOf: fileURL), originalData)
 
         store.load()

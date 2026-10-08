@@ -3,107 +3,29 @@ import Carbon
 @testable import Zoomies
 
 final class SettingsTests: XCTestCase {
-    func testNormalizedClampsMaxWidthAndCounterAndPrefix() {
+    func testNormalizedClampsMaxWidthAndCounter() {
         var settings = Settings.default
         settings.maxWidth = -40
         settings.screenshotCounter = 0
-        settings.notePrefix = String(repeating: "A", count: 80)
 
         let normalized = settings.normalized()
         XCTAssertEqual(normalized.maxWidth, 0)
         XCTAssertEqual(normalized.screenshotCounter, 1)
-        XCTAssertEqual(normalized.notePrefix.count, 50)
     }
 
-    func testEnsureTimeOrCounterEnabledUsesExistingCounter() {
-        var template = FilenameTemplate(blocks: [
-            .init(kind: .staticText, isEnabled: true, text: "Shot"),
-            .init(kind: .counter, isEnabled: false)
-        ])
-
-        template.ensureTimeOrCounterEnabled()
-        let counter = template.blocks.first(where: { $0.kind == .counter })
-        XCTAssertEqual(counter?.isEnabled, true)
+    func testScreenshotFilenameIsFixed() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let date = calendar.date(from: DateComponents(year: 2024, month: 1, day: 30, hour: 14, minute: 23, second: 45))!
+        XCTAssertEqual(ScreenshotFilename.make(date: date, counter: 7), "Screenshot_2024-01-30_14.23.45_7")
     }
 
-    func testEnsureTimeOrCounterEnabledAppendsCounterIfMissing() {
-        var template = FilenameTemplate(blocks: [
-            .init(kind: .staticText, isEnabled: true, text: "Shot"),
-            .init(kind: .date, isEnabled: true, format: "yyyy-MM-dd")
-        ])
-
-        template.ensureTimeOrCounterEnabled()
-        XCTAssertTrue(template.blocks.contains(where: { $0.kind == .counter && $0.isEnabled }))
-    }
-
-    func testMoveBlockBoundsAndNoOpCases() {
-        var template = FilenameTemplate.defaultTemplate
-        let firstID = template.blocks[0].id
-        let unknown = UUID()
-
-        template.moveBlock(id: unknown, to: 2)
-        XCTAssertEqual(template.blocks[0].id, firstID)
-
-        template.moveBlock(id: firstID, to: 999)
-        XCTAssertEqual(template.blocks.last?.id, firstID)
-    }
-
-    func testSetBlockEnabledPreservesInvariant() {
-        var template = FilenameTemplate(blocks: [
-            .init(kind: .time, isEnabled: false, format: "HH.mm.ss"),
-            .init(kind: .counter, isEnabled: true),
-            .init(kind: .staticText, isEnabled: true, text: "Shot")
-        ])
-        let counterID = template.blocks.first(where: { $0.kind == .counter })!.id
-
-        template.setBlockEnabled(id: counterID, isEnabled: false)
-
-        XCTAssertTrue(template.blocks.contains(where: { ($0.kind == .time || $0.kind == .counter) && $0.isEnabled }))
-    }
-
-    func testMakeFilenameAndComponents() {
-        let date = Date(timeIntervalSince1970: 1_700_000_000)
-        let template = FilenameTemplate(blocks: [
-            .init(kind: .staticText, isEnabled: true, text: "Capture"),
-            .init(kind: .date, isEnabled: true, format: "yyyy-MM-dd"),
-            .init(kind: .counter, isEnabled: true),
-            .init(kind: .time, isEnabled: false, format: "HH.mm.ss")
-        ])
-
-        let components = template.makeFilenameComponents(date: date, counter: 7)
-        XCTAssertEqual(components.count, 3)
-        XCTAssertEqual(components[0], "Capture")
-        XCTAssertEqual(components[2], "7")
-
-        let filename = template.makeFilename(date: date, counter: 7)
-        XCTAssertTrue(filename.hasPrefix("Capture_"))
-        XCTAssertTrue(filename.hasSuffix("_7"))
-    }
-
-    func testMakeFilenameFallsBackWhenNoEnabledComponents() {
-        let template = FilenameTemplate(blocks: [
-            .init(kind: .staticText, isEnabled: false, text: "Ignored")
-        ])
-        XCTAssertEqual(template.makeFilename(date: .distantPast, counter: 1), "Screenshot")
-    }
-
-    func testMakeFilenameComponentsRemainStableAcrossRepeatedCallsWithDifferentFormats() {
-        let template = FilenameTemplate(blocks: [
-            .init(kind: .date, isEnabled: true, format: "yyyy"),
-            .init(kind: .time, isEnabled: true, format: "HH"),
-            .init(kind: .date, isEnabled: true, format: "MM")
-        ])
-        let date = Date(timeIntervalSince1970: 1_700_000_000)
-        let first = template.makeFilenameComponents(date: date, counter: 1)
-        let second = template.makeFilenameComponents(date: date.addingTimeInterval(3600), counter: 1)
-
-        XCTAssertEqual(first.count, 3)
-        XCTAssertEqual(second.count, 3)
-        XCTAssertEqual(first[0], "2023")
-        XCTAssertEqual(first[2], "11")
-        XCTAssertEqual(second[0], "2023")
-        XCTAssertEqual(second[2], "11")
-        XCTAssertNotEqual(first[1], second[1])
+    func testLegacyFilenameTemplateKeyIsIgnoredAndDropped() throws {
+        let legacy = #"{ "filenameTemplate": { "blocks": [] }, "maxWidth": 800 }"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(Settings.self, from: legacy)
+        XCTAssertEqual(decoded.maxWidth, 800)
+        let encoded = try XCTUnwrap(String(data: JSONEncoder().encode(decoded), encoding: .utf8))
+        XCTAssertFalse(encoded.contains("filenameTemplate"))
     }
 
     func testShortcutsBackwardCompatibleDecodingDefaultsMissingKey() throws {
@@ -235,8 +157,6 @@ final class SettingsTests: XCTestCase {
         let legacy = """
         {
           "maxWidth": 0,
-          "notePrefixEnabled": false,
-          "notePrefix": "",
           "filenameTemplate": { "blocks": [] },
           "shortcuts": {
             "screenshotArea": { "keyCode": 21, "modifierFlags": 768 },
@@ -302,4 +222,5 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(result.repairedInvalidFields)
         XCTAssertEqual(result.settings.shortcuts, Shortcuts.default)
     }
+
 }

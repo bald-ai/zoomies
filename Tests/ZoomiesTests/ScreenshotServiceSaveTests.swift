@@ -38,10 +38,6 @@ final class ScreenshotServiceSaveTests: XCTestCase {
         settingsStore.update { settings in
             settings.screenshotCounter = 7
             settings.maxWidth = 0
-            settings.filenameTemplate = FilenameTemplate(blocks: [
-                .init(kind: .staticText, isEnabled: true, text: "TestShot"),
-                .init(kind: .counter, isEnabled: true)
-            ])
         }
 
         let backup = BackupService(fileManager: .default, backupsDirectory: root.appendingPathComponent("backups"))
@@ -56,57 +52,12 @@ final class ScreenshotServiceSaveTests: XCTestCase {
         let output = try service.saveImageToDesktop(TestSupport.solidImage(width: 200, height: 100))
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: output.path))
-        XCTAssertEqual(output.lastPathComponent, "TestShot_7.png")
+        XCTAssertTrue(output.lastPathComponent.hasPrefix("Screenshot_"))
+        XCTAssertTrue(output.lastPathComponent.hasSuffix("_7.png"))
         XCTAssertEqual(settingsStore.settings.screenshotCounter, 8)
         // The captured file must contain real PNG bytes, not JPEG-in-a-.png.
         let savedData = try Data(contentsOf: output)
         XCTAssertTrue(PNGMetadata.isPNG(savedData), "Saved capture should be a real PNG")
-    }
-
-    func testSaveImageToDesktopSanitizesTemplatePathSeparators() throws {
-        let root = try TestSupport.makeTemporaryDirectory()
-        defer { TestSupport.removeIfExists(root) }
-
-        let desktop = root.appendingPathComponent("Desktop", isDirectory: true)
-        let settingsStore = SettingsStore(
-            fileManager: .default,
-            fileURL: root.appendingPathComponent("settings.json")
-        )
-        settingsStore.load()
-        settingsStore.update { settings in
-            settings.screenshotCounter = 1
-            settings.filenameTemplate = FilenameTemplate(blocks: [
-                .init(kind: .staticText, isEnabled: true, text: "UI/UX"),
-                .init(kind: .counter, isEnabled: true)
-            ])
-        }
-
-        let service = ScreenshotService(
-            settingsStore: settingsStore,
-            backupService: BackupService(
-                fileManager: .default,
-                backupsDirectory: root.appendingPathComponent("backups")
-            ),
-            clipboardService: ClipboardService(
-                fileManager: .default,
-                cacheDirectory: root.appendingPathComponent("clipboard")
-            ),
-            fileManager: .default,
-            desktopDirectory: desktop,
-            soundPlayer: NoopSoundPlayer()
-        )
-
-        let output = try service.saveImageToDesktop(
-            TestSupport.solidImage(width: 100, height: 50)
-        )
-
-        XCTAssertEqual(output.deletingLastPathComponent(), desktop)
-        XCTAssertEqual(output.lastPathComponent, "UIUX_1.png")
-        XCTAssertFalse(
-            FileManager.default.fileExists(
-                atPath: desktop.appendingPathComponent("UI", isDirectory: true).path
-            )
-        )
     }
 
     func testSaveImageToDesktopUsesSuffixWhenBaseNameExists() throws {
@@ -115,17 +66,15 @@ final class ScreenshotServiceSaveTests: XCTestCase {
 
         let desktop = root.appendingPathComponent("Desktop", isDirectory: true)
         try FileManager.default.createDirectory(at: desktop, withIntermediateDirectories: true)
-        let existing = desktop.appendingPathComponent("Shot_1.png")
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let baseName = ScreenshotFilename.make(date: date, counter: 1)
+        let existing = desktop.appendingPathComponent("\(baseName).png")
         try Data("existing".utf8).write(to: existing, options: .atomic)
 
         let settingsStore = SettingsStore(fileManager: .default, fileURL: root.appendingPathComponent("settings.json"))
         settingsStore.load()
         settingsStore.update { settings in
             settings.screenshotCounter = 1
-            settings.filenameTemplate = FilenameTemplate(blocks: [
-                .init(kind: .staticText, isEnabled: true, text: "Shot"),
-                .init(kind: .counter, isEnabled: true)
-            ])
         }
 
         let backup = BackupService(fileManager: .default, backupsDirectory: root.appendingPathComponent("backups"))
@@ -135,10 +84,11 @@ final class ScreenshotServiceSaveTests: XCTestCase {
                                         clipboardService: clipboard,
                                         fileManager: .default,
                                         desktopDirectory: desktop,
-                                        soundPlayer: NoopSoundPlayer())
+                                        soundPlayer: NoopSoundPlayer(),
+                                        now: { date })
 
         let output = try service.saveImageToDesktop(TestSupport.solidImage(width: 120, height: 60))
-        XCTAssertEqual(output.lastPathComponent, "Shot_1_2.png")
+        XCTAssertEqual(output.lastPathComponent, "\(baseName)_2.png")
     }
 
     func testSaveImageToDesktopResizesWhenMaxWidthSet() throws {
@@ -151,10 +101,6 @@ final class ScreenshotServiceSaveTests: XCTestCase {
         settingsStore.update { settings in
             settings.screenshotCounter = 2
             settings.maxWidth = 50
-            settings.filenameTemplate = FilenameTemplate(blocks: [
-                .init(kind: .staticText, isEnabled: true, text: "Resize"),
-                .init(kind: .counter, isEnabled: true)
-            ])
         }
 
         let backup = BackupService(fileManager: .default, backupsDirectory: root.appendingPathComponent("backups"))
@@ -184,10 +130,6 @@ final class ScreenshotServiceSaveTests: XCTestCase {
         settingsStore.load()
         settingsStore.update { settings in
             settings.screenshotCounter = Int.max
-            settings.filenameTemplate = FilenameTemplate(blocks: [
-                .init(kind: .staticText, isEnabled: true, text: "Max"),
-                .init(kind: .counter, isEnabled: true)
-            ])
         }
 
         let service = ScreenshotService(

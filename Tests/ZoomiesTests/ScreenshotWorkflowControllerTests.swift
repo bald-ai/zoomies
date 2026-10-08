@@ -1131,9 +1131,6 @@ final class ScreenshotWorkflowControllerTests: XCTestCase {
         let settingsStore = SettingsStore(fileManager: .default,
                                           fileURL: root.appendingPathComponent("settings.json"))
         settingsStore.load()
-        settingsStore.update { settings in
-            settings.notePrefixEnabled = false
-        }
 
         let backupService = customBackupService ?? BackupService(fileManager: .default,
                                           backupsDirectory: root.appendingPathComponent("backups", isDirectory: true))

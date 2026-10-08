@@ -469,11 +469,11 @@ final class ScreenshotWorkflowController {
     private func prepareOutput(image: NSImage, editorState: EditorCanvasState?, note: String?,
                                requireNoteRendering: Bool) -> PreparedOutput? {
         var output = PreparedOutput(image: image, editorState: editorState)
-        guard let note, let prepared = WorkflowNoteRenderer.prepareNoteText(note, settings: settingsStore.settings) else {
+        guard let note, let prepared = WorkflowNoteRenderer.prepareNoteText(note) else {
             burnedNoteText = ""
             return output
         }
-        guard let noted = WorkflowNoteRenderer.burn(note: prepared.rendered, into: image) else {
+        guard let noted = WorkflowNoteRenderer.burn(note: prepared, into: image) else {
             if requireNoteRendering {
                 presentError(title: "Failed to apply note", message: "Could not render the note text.")
                 return nil
@@ -484,8 +484,8 @@ final class ScreenshotWorkflowController {
         output.image = noted
         // Saved output is always PNG, including when the source was a JPEG.
         output.baselinePNG = ImageEncoding.pngData(from: image)
-        output.prompt = prepared.identity
-        burnedNoteText = prepared.identity
+        output.prompt = prepared
+        burnedNoteText = prepared
         return output
     }
 
@@ -725,9 +725,9 @@ final class ScreenshotWorkflowController {
 
     @discardableResult
     private func applyNoteIfNeeded(_ rawText: String) -> Bool {
-        guard let preparedNote = WorkflowNoteRenderer.prepareNoteText(rawText, settings: settingsStore.settings) else { return true }
+        guard let preparedNote = WorkflowNoteRenderer.prepareNoteText(rawText) else { return true }
 
-        if preparedNote.identity == burnedNoteText {
+        if preparedNote == burnedNoteText {
             return true
         }
 
@@ -736,7 +736,7 @@ final class ScreenshotWorkflowController {
         // Prefer the recovered clean original so re-saving a reopened Zoomies PNG
         // never bakes a note on top of an already-burned image.
         guard let image = loadNoteBaseImage() else { return false }
-        guard let updated = WorkflowNoteRenderer.burn(note: preparedNote.rendered, into: image) else {
+        guard let updated = WorkflowNoteRenderer.burn(note: preparedNote, into: image) else {
             presentError(title: "Failed to apply note", message: "Could not render the note text.")
             return false
         }
@@ -747,12 +747,12 @@ final class ScreenshotWorkflowController {
         let baseline = cleanOriginalPNG ?? ImageEncoding.pngData(from: image)
         guard encodeAndWriteImage(updated,
                                   baselinePNG: baseline,
-                                  prompt: preparedNote.identity,
+                                  prompt: preparedNote,
                                   editorState: initialEditorState,
                                   errorTitle: "Failed to apply note") else {
             return false
         }
-        burnedNoteText = preparedNote.identity
+        burnedNoteText = preparedNote
         return true
     }
 

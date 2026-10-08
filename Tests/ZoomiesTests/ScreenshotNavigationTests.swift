@@ -20,7 +20,7 @@ final class ScreenshotNavigationTests: XCTestCase {
             originalBytes = try TestSupport.noiseImagePNGData(width: 40, height: 30)
             try originalBytes.write(to: original)
             let settings = SettingsStore(fileURL: root.appendingPathComponent("settings.json"))
-            settings.update { $0.notePrefixEnabled = false; $0.confirmBeforeClosing = false }
+            settings.update { $0.confirmBeforeClosing = false }
             workflow = ScreenshotWorkflowController(fileURL: original,
                 settingsStore: settings,
                 clipboardService: ClipboardService(cacheDirectory: root.appendingPathComponent("cache"), pasteboardWriter: { _ in true }),

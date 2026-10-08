@@ -127,6 +127,8 @@ final class EditorWindowController: NSWindowController {
     private var defaultUserZoomFactor: CGFloat = 1.0
     // Effective zoom the editor opened at; refitting never zooms past it.
     private var openingEffectiveZoom: CGFloat = 1.0
+    // Canvas size at that zoom; refitting only shrinks the image below it.
+    private var openingViewportSize: NSSize = .zero
     // True until the user zooms by hand; while true, note changes refit the image.
     private var followsAutomaticFit = true
     // Height the window gained for the note bar, so removing the note gives
@@ -479,11 +481,10 @@ final class EditorWindowController: NSWindowController {
     private func refitImageIfFollowingFit() {
         guard followsAutomaticFit, userZoomFactor > 0 else { return }
         window?.contentView?.layoutSubtreeIfNeeded()
-        let viewport = scrollView.contentSize
-        let zoom = EditorWindowLayoutLogic.fittedZoom(
-            contentSize: canvasView.panningContentBounds.size,
-            viewportSize: NSSize(width: viewport.width - totalPadding, height: viewport.height - totalPadding),
-            preferredZoom: openingEffectiveZoom
+        let zoom = EditorWindowLayoutLogic.refittedZoom(
+            viewportSize: scrollView.contentSize,
+            openingViewportSize: openingViewportSize,
+            openingZoom: openingEffectiveZoom
         )
         baseScale = zoom / userZoomFactor
         applyZoom()
@@ -607,21 +608,10 @@ final class EditorWindowController: NSWindowController {
         onMarkerNote?(sender.tag, text)
     }
 
-    /// Note text as it will be burned in: prefix plus character cap, without
-    /// modifying the image here. `nil` when there is no note to show.
+    /// Note text as it will be burned in, without modifying the image here.
+    /// `nil` when there is no note to show.
     private var notePreviewDisplayText: String? {
-        let raw = (notePreviewRaw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return nil }
-
-        var text = String(raw.prefix(WorkflowNoteRenderer.maxNoteLength))
-        let settings = settingsStore.settings
-        if settings.notePrefixEnabled {
-            let prefix = settings.notePrefix.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !prefix.isEmpty {
-                text = prefix + " " + text
-            }
-        }
-        return text
+        WorkflowNoteRenderer.prepareNoteText(notePreviewRaw ?? "")
     }
 
     private func makeNotePreviewView() -> EditorNotePreviewBar? {
@@ -959,6 +949,8 @@ final class EditorWindowController: NSWindowController {
         userZoomFactor = defaultUserZoomFactor
         openingEffectiveZoom = baseScale * defaultUserZoomFactor
         applyZoom()
+        window.contentView?.layoutSubtreeIfNeeded()
+        openingViewportSize = scrollView.contentSize
 
     }
 

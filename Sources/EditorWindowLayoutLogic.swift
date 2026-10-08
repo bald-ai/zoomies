@@ -66,14 +66,16 @@ enum EditorWindowLayoutLogic {
         max(noteBarMinimumMaxHeight, floor(maxContentHeight * noteBarMaxHeightRatio))
     }
 
-    /// Largest zoom, capped at `preferredZoom`, that shows `contentSize`
-    /// entirely inside `viewportSize`.
-    static func fittedZoom(contentSize: NSSize, viewportSize: NSSize, preferredZoom: CGFloat) -> CGFloat {
-        guard contentSize.width > 0, contentSize.height > 0,
-              viewportSize.width > 0, viewportSize.height > 0 else { return preferredZoom }
-        let fit = min(viewportSize.width / contentSize.width, viewportSize.height / contentSize.height)
-        guard fit.isFinite, fit > 0 else { return preferredZoom }
-        return min(preferredZoom, fit)
+    /// Zoom after the canvas changes from `openingViewportSize` to
+    /// `viewportSize`: the image keeps its opening zoom while the canvas is at
+    /// least as large as at opening, and shrinks with the canvas otherwise, so
+    /// it never loses the margin it opened with (small captures open
+    /// auto-zoomed with less than the usual padding).
+    static func refittedZoom(viewportSize: NSSize, openingViewportSize: NSSize, openingZoom: CGFloat) -> CGFloat {
+        guard openingViewportSize.width > 0, openingViewportSize.height > 0 else { return openingZoom }
+        let shrink = min(1, viewportSize.width / openingViewportSize.width,
+                         viewportSize.height / openingViewportSize.height)
+        return openingZoom * max(shrink, 0)
     }
 
     static func makeLayout(_ input: EditorWindowLayoutInput) -> EditorWindowLayoutResult {

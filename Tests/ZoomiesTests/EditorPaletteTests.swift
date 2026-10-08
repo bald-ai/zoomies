@@ -94,30 +94,37 @@ final class EditorPaletteTests: XCTestCase {
         return own + view.subviews.flatMap { buttons(in: $0) }
     }
 
-    func testPaletteSettingsRemoveAddAndReorderAndRender() throws {
+    func testPaletteSettingsRemoveAddAndReorderInOneCompactRow() throws {
         _ = NSApplication.shared
         let directory = try TestSupport.makeTemporaryDirectory()
         defer { TestSupport.removeIfExists(directory) }
         let store = SettingsStore(fileURL: directory.appendingPathComponent("settings.json"))
         let view = EditorPaletteSettingsView(settingsStore: store)
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: 620, height: 600))
-        host.wantsLayer = true
-        host.layer?.backgroundColor = NSColor(calibratedWhite: 0.13, alpha: 1).cgColor
-        host.appearance = NSAppearance(named: .darkAqua)
-        host.addSubview(view)
-        view.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            view.topAnchor.constraint(equalTo: host.topAnchor, constant: 20),
-            view.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 20),
-            view.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -20)
-        ])
-        try XCTUnwrap(buttons(in: view).first { $0.toolTip == "Remove Red" }).performClick(nil)
+        func perform(_ menu: NSMenu, _ title: String) throws {
+            let item = try XCTUnwrap(menu.items.first { $0.title == title })
+            XCTAssertTrue(item.isEnabled, title)
+            menu.performActionForItem(at: menu.index(of: item))
+        }
+
+        try perform(view.menu(forColorAt: 0), "Remove Red")
         XCTAssertEqual(store.settings.editorColorIDs.count, 5)
-        try XCTUnwrap(buttons(in: view).first { $0.toolTip == "Add Purple" }).performClick(nil)
+        XCTAssertEqual(view.menu(forColorAt: 0).items.map(\.title), ["Remove Blue"])
+
+        let add = view.addMenu()
+        XCTAssertEqual(add.items.count, EditorPalette.available.count)
+        XCTAssertEqual(add.items.first { $0.title == "Blue" }?.state, .on)
+        try perform(add, "Purple")
         XCTAssertEqual(store.settings.editorColorIDs.last, "purple")
-        try XCTUnwrap(buttons(in: view).first { $0.toolTip == "Move Purple earlier" }).performClick(nil)
-        XCTAssertEqual(store.settings.editorColorIDs[4], "purple")
-        host.layoutSubtreeIfNeeded()
-        XCTAssertLessThanOrEqual(view.frame.height, host.bounds.height - 20)
+        XCTAssertEqual(view.strip.colors.last?.id, "purple")
+        // Full palette: inactive colors can't be added, active ones can be removed.
+        XCTAssertFalse(try XCTUnwrap(view.addMenu().items.first { $0.title == "Orange" }).isEnabled)
+        XCTAssertTrue(try XCTUnwrap(view.addMenu().items.first { $0.title == "Purple" }).isEnabled)
+
+        view.strip.onMove?(5, 0)
+        XCTAssertEqual(store.settings.editorColorIDs.first, "purple")
+
+        // Six colors still fit on one row.
+        XCTAssertLessThanOrEqual(view.strip.intrinsicContentSize.width, 240)
+        XCTAssertLessThanOrEqual(view.fittingSize.height, 120)
     }
 }

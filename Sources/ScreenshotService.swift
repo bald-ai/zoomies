@@ -39,6 +39,7 @@ final class ScreenshotService: NSObject {
     private let backupService: BackupService
     private let clipboardService: ClipboardService
     private let soundPlayer: ScreenshotSoundPlaying
+    private let now: () -> Date
     private let areaCapture: () async throws -> CGImage?
     private let workflowPresenter: (ScreenshotWorkflowController) -> Void
     private let errorPresenter: (String, String) -> Void
@@ -59,6 +60,7 @@ final class ScreenshotService: NSObject {
          fileManager: FileManager = .default,
          desktopDirectory: URL? = nil,
          soundPlayer: ScreenshotSoundPlaying = ScreenshotSoundPlayer(),
+         now: @escaping () -> Date = Date.init,
          areaCapture: @escaping () async throws -> CGImage? = { try await NativeAreaCapture.capture() },
          captureScreen: @escaping (CaptureMode) throws -> ScreenSnapshot? = ScreenshotService.currentCaptureScreen,
          regionCapture: ((CGRect, ScreenSnapshot) async throws -> CGImage)? = nil,
@@ -68,6 +70,7 @@ final class ScreenshotService: NSObject {
         self.backupService = backupService
         self.clipboardService = clipboardService
         self.soundPlayer = soundPlayer
+        self.now = now
         self.areaCapture = areaCapture
         self.captureScreen = captureScreen
         self.regionCapture = regionCapture
@@ -392,10 +395,8 @@ final class ScreenshotService: NSObject {
             finalImage = image
         }
 
-        let date = Date()
         let currentCounter = settings.screenshotCounter
-        let rawBaseName = settings.filenameTemplate.makeFilename(date: date, counter: currentCounter)
-        let baseName = WorkflowFilenameLogic.sanitizeBaseName(rawBaseName)
+        let baseName = ScreenshotFilename.make(date: now(), counter: currentCounter)
 
         try fileManager.createDirectory(at: desktopDirectory, withIntermediateDirectories: true)
         let targetURL = uniqueScreenshotURL(in: desktopDirectory, baseName: baseName)

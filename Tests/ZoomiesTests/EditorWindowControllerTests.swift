@@ -53,6 +53,27 @@ final class EditorWindowControllerTests: XCTestCase {
         XCTAssertEqual(window.frame.height, windowHeight, accuracy: 1)
     }
 
+    func testAddingNoteKeepsAutoZoomedSmallImageSize() throws {
+        _ = NSApplication.shared
+        let root = try TestSupport.makeTemporaryDirectory()
+        defer { TestSupport.removeIfExists(root) }
+        for size in [NSSize(width: 300, height: 100), NSSize(width: 100, height: 80)] {
+            let controller = EditorWindowController(image: TestSupport.solidImage(width: size.width, height: size.height),
+                settingsStore: SettingsStore(fileURL: root.appendingPathComponent("settings.json")))
+            defer { controller.dismissWithoutCompletion() }
+            let canvas = try XCTUnwrap(findCanvas(in: controller.window?.contentView))
+            let scroll = try XCTUnwrap(canvas.enclosingScrollView)
+            let openingMagnification = scroll.magnification
+
+            controller.updateNotePreview("1: test")
+            XCTAssertEqual(scroll.magnification, openingMagnification, accuracy: 0.0001, "\(size)")
+            controller.updateNotePreview("1: test\n2: another")
+            XCTAssertEqual(scroll.magnification, openingMagnification, accuracy: 0.0001, "\(size)")
+            controller.updateNotePreview("")
+            XCTAssertEqual(scroll.magnification, openingMagnification, accuracy: 0.0001, "\(size)")
+        }
+    }
+
     func testMassiveNoteOnFullSizeImageCapsBarAndRefitsImage() throws {
         _ = NSApplication.shared
         let root = try TestSupport.makeTemporaryDirectory()

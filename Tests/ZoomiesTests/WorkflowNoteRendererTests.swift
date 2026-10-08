@@ -14,18 +14,14 @@ final class WorkflowNoteRendererTests: XCTestCase {
         XCTAssertNil(WorkflowNoteRenderer.burn(note: "note", into: image))
     }
 
-    func testPrepareNoteTextAppliesPrefixAndTrimRules() {
-        var settings = Settings.default
-        settings.notePrefixEnabled = true
-        settings.notePrefix = "TODO"
-
-        let note = WorkflowNoteRenderer.prepareNoteText("  hello world  ", settings: settings)
-
-        XCTAssertEqual(note, WorkflowPreparedNote(identity: "hello world", rendered: "TODO hello world"))
+    func testPrepareNoteTextTrimsAndCaps() {
+        XCTAssertEqual(WorkflowNoteRenderer.prepareNoteText("  hello world  "), "hello world")
+        let long = String(repeating: "a", count: WorkflowNoteRenderer.maxNoteLength + 10)
+        XCTAssertEqual(WorkflowNoteRenderer.prepareNoteText(long)?.count, WorkflowNoteRenderer.maxNoteLength)
     }
 
     func testPrepareNoteTextReturnsNilForBlankInput() {
-        XCTAssertNil(WorkflowNoteRenderer.prepareNoteText("   ", settings: .default))
+        XCTAssertNil(WorkflowNoteRenderer.prepareNoteText("   "))
     }
 
     func testBurnAddsBottomNoteAreaAndMinimumWidth() throws {

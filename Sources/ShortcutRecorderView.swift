@@ -121,18 +121,15 @@ final class ShortcutRecorderView: NSControl {
 
     override func draw(_ dirtyRect: NSRect) {
         let bounds = self.bounds.insetBy(dx: 1, dy: 1)
-        let path = NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4)
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
 
+        // Soft fill like the Settings pop-ups; the app's muted teal while recording.
         let backgroundColor: NSColor = isRecording
-            ? NSColor.selectedControlColor
-            : NSColor.controlBackgroundColor
+            ? NSColor(srgbRed: 0.26, green: 0.34, blue: 0.38, alpha: 1)
+            : NSColor(white: 1, alpha: 0.08)
 
         backgroundColor.setFill()
         path.fill()
-
-        NSColor.gridColor.setStroke()
-        path.lineWidth = 1
-        path.stroke()
 
         let text: String
         if isRecording {

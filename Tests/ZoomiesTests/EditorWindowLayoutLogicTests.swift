@@ -78,17 +78,18 @@ final class EditorWindowLayoutLogicTests: XCTestCase {
         XCTAssertEqual(EditorWindowLayoutLogic.noteBarMaxHeight(maxContentHeight: 200), 80)
     }
 
-    func testFittedZoomShrinksToViewportButNeverPassesPreferredZoom() {
-        let content = NSSize(width: 1000, height: 500)
-        XCTAssertEqual(EditorWindowLayoutLogic.fittedZoom(contentSize: content,
-                                                          viewportSize: NSSize(width: 800, height: 200),
-                                                          preferredZoom: 1), 0.4, accuracy: 0.0001)
-        XCTAssertEqual(EditorWindowLayoutLogic.fittedZoom(contentSize: content,
-                                                          viewportSize: NSSize(width: 4000, height: 4000),
-                                                          preferredZoom: 1.5), 1.5, accuracy: 0.0001)
-        XCTAssertEqual(EditorWindowLayoutLogic.fittedZoom(contentSize: content,
-                                                          viewportSize: .zero,
-                                                          preferredZoom: 1.2), 1.2, accuracy: 0.0001)
+    func testRefittedZoomKeepsOpeningZoomUntilCanvasShrinks() {
+        let opening = NSSize(width: 556, height: 160)
+        XCTAssertEqual(EditorWindowLayoutLogic.refittedZoom(viewportSize: opening, openingViewportSize: opening,
+                                                            openingZoom: 1.44), 1.44, accuracy: 0.0001)
+        XCTAssertEqual(EditorWindowLayoutLogic.refittedZoom(viewportSize: NSSize(width: 700, height: 300),
+                                                            openingViewportSize: opening,
+                                                            openingZoom: 1.44), 1.44, accuracy: 0.0001)
+        XCTAssertEqual(EditorWindowLayoutLogic.refittedZoom(viewportSize: NSSize(width: 556, height: 120),
+                                                            openingViewportSize: opening,
+                                                            openingZoom: 1.44), 1.08, accuracy: 0.0001)
+        XCTAssertEqual(EditorWindowLayoutLogic.refittedZoom(viewportSize: opening, openingViewportSize: .zero,
+                                                            openingZoom: 1.2), 1.2, accuracy: 0.0001)
     }
 
     func testMakeLayoutKeepsFitScaleAtOneWhenImageFits() {

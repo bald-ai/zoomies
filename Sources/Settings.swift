@@ -9,15 +9,6 @@ struct Settings: Codable {
     /// Whether cancelling an editing session asks before deleting or closing.
     var confirmBeforeClosing: Bool
 
-    /// Whether to prepend a fixed prefix to burned-in notes.
-    var notePrefixEnabled: Bool
-
-    /// Optional prefix text for burned-in notes (max 50 chars).
-    var notePrefix: String
-
-    /// Filename templating configuration.
-    var filenameTemplate: FilenameTemplate
-
     /// Global shortcut configuration.
     var shortcuts: Shortcuts
 
@@ -39,9 +30,6 @@ extension Settings {
     static let `default` = Settings(
         maxWidth: 0,
         confirmBeforeClosing: true,
-        notePrefixEnabled: false,
-        notePrefix: "",
-        filenameTemplate: .defaultTemplate,
         shortcuts: .default,
         shortcutsCustomized: false,
         screenshotCounter: 1,
@@ -54,8 +42,7 @@ extension Settings {
     }
 
     /// Normalizes settings and reports whether any semantically invalid fields
-    /// were reset. Retired-shortcut migration and filename-template invariants
-    /// are not treated as repairs.
+    /// were reset. Retired-shortcut migration is not treated as a repair.
     func normalizedReportingRepairs() -> (settings: Settings, repairedInvalidFields: Bool) {
         var copy = self
         var repairedInvalidFields = false
@@ -63,12 +50,6 @@ extension Settings {
         // Ensure maxWidth is never negative; 0 means "Original".
         if maxWidth < 0 {
             copy.maxWidth = 0
-            repairedInvalidFields = true
-        }
-
-        // Ensure note prefix length <= 50.
-        if copy.notePrefix.count > 50 {
-            copy.notePrefix = String(copy.notePrefix.prefix(50))
             repairedInvalidFields = true
         }
 
@@ -100,9 +81,6 @@ extension Settings {
             copy.shortcuts.replaceRetiredDefaultShortcutsIfNeeded()
         }
 
-        // Enforce filename template invariants.
-        copy.filenameTemplate.ensureTimeOrCounterEnabled()
-
         return (copy, repairedInvalidFields)
     }
 
@@ -120,9 +98,6 @@ extension Settings {
         case maxWidth
         // Preserve the existing on-disk preference while correcting its behavior.
         case confirmBeforeClosing = "enterConfirmsDelete"
-        case notePrefixEnabled
-        case notePrefix
-        case filenameTemplate
         case shortcuts
         case shortcutsCustomized
         case screenshotCounter
@@ -137,9 +112,6 @@ extension Settings {
         }
         self.maxWidth = try decode(Int.self, key: .maxWidth, fallback: Settings.default.maxWidth)
         self.confirmBeforeClosing = try decode(Bool.self, key: .confirmBeforeClosing, fallback: Settings.default.confirmBeforeClosing)
-        self.notePrefixEnabled = try decode(Bool.self, key: .notePrefixEnabled, fallback: Settings.default.notePrefixEnabled)
-        self.notePrefix = try decode(String.self, key: .notePrefix, fallback: Settings.default.notePrefix)
-        self.filenameTemplate = try decode(FilenameTemplate.self, key: .filenameTemplate, fallback: Settings.default.filenameTemplate)
         self.shortcuts = try decode(Shortcuts.self, key: .shortcuts, fallback: Settings.default.shortcuts)
         self.shortcutsCustomized = try decode(Bool.self, key: .shortcutsCustomized, fallback: false)
         self.screenshotCounter = try decode(Int.self, key: .screenshotCounter, fallback: Settings.default.screenshotCounter)
@@ -327,162 +299,19 @@ extension Shortcuts {
     }
 }
 
-// MARK: - Filename Template
+// MARK: - Screenshot Filename
 
-/// Template that controls how screenshot filenames are generated.
-struct FilenameTemplate: Codable {
-    struct Block: Codable, Identifiable, Equatable {
-        enum Kind: String, Codable {
-            case date
-            case time
-            case counter
-            case staticText
-        }
-
-        var id: UUID
-        var kind: Kind
-        var isEnabled: Bool
-
-        /// Optional text used for `.staticText` blocks.
-        var text: String?
-
-        /// Optional format string for date/time blocks.
-        /// Examples: "yyyy-MM-dd", "HH.mm.ss".
-        var format: String?
-
-        init(id: UUID = UUID(), kind: Kind, isEnabled: Bool = true, text: String? = nil, format: String? = nil) {
-            self.id = id
-            self.kind = kind
-            self.isEnabled = isEnabled
-            self.text = text
-            self.format = format
-        }
-    }
-
-    /// Ordered list of blocks making up the filename (without extension).
-    var blocks: [Block]
-}
-
-extension FilenameTemplate {
-    /// Default filename template roughly matching common screenshot conventions.
-    /// Example outcome: "Screenshot_2024-01-30_14.23.45_2.png".
-    static let defaultTemplate: FilenameTemplate = {
-        let screenshot = Block(kind: .staticText, isEnabled: true, text: "Screenshot")
-        let date = Block(kind: .date, isEnabled: true, text: nil, format: "yyyy-MM-dd")
-        let time = Block(kind: .time, isEnabled: true, text: nil, format: "HH.mm.ss")
-        let counter = Block(kind: .counter, isEnabled: true)
-        return FilenameTemplate(blocks: [screenshot, date, time, counter])
+/// Screenshots are always named "Screenshot_2024-01-30_14.23.45_2". The
+/// counter is the logical value; collision suffixes are `ScreenshotService`'s.
+enum ScreenshotFilename {
+    private static let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd_HH.mm.ss"
+        return formatter
     }()
 
-    /// Ensures that at least one of `.time` or `.counter` is enabled.
-    /// This is critical to avoid filename collisions.
-    mutating func ensureTimeOrCounterEnabled() {
-        let hasTimeOrCounterEnabled = blocks.contains { block in
-            guard block.isEnabled else { return false }
-            return block.kind == .time || block.kind == .counter
-        }
-
-        if hasTimeOrCounterEnabled {
-            return
-        }
-
-        // Prefer enabling an existing counter block if present.
-        if let counterIndex = blocks.firstIndex(where: { $0.kind == .counter }) {
-            blocks[counterIndex].isEnabled = true
-            return
-        }
-
-        // Otherwise enable an existing time block.
-        if let timeIndex = blocks.firstIndex(where: { $0.kind == .time }) {
-            blocks[timeIndex].isEnabled = true
-            return
-        }
-
-        // As a last resort, append a counter block.
-        let counter = Block(kind: .counter, isEnabled: true)
-        blocks.append(counter)
-    }
-
-    /// Reorders a block by id. No-op if the id or index is invalid.
-    mutating func moveBlock(id: UUID, to newIndex: Int) {
-        guard let currentIndex = blocks.firstIndex(where: { $0.id == id }) else { return }
-        let boundedIndex = max(0, min(newIndex, blocks.count - 1))
-        guard currentIndex != boundedIndex else { return }
-
-        let block = blocks.remove(at: currentIndex)
-        blocks.insert(block, at: boundedIndex)
-    }
-
-    /// Toggles a block's enabled state, but preserves the time/counter invariant.
-    mutating func setBlockEnabled(id: UUID, isEnabled: Bool) {
-        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
-        blocks[index].isEnabled = isEnabled
-        ensureTimeOrCounterEnabled()
-    }
-
-    /// Generates a concrete filename (without extension) for the given date + counter.
-    /// The counter here is the logical counter value (e.g. 1, 2, 3) – collision
-    /// handling ("_2", "_3", ...) is owned by `ScreenshotService`.
-    func makeFilenameComponents(date: Date, counter: Int) -> [String] {
-        blocks.filter(\.isEnabled).compactMap { $0.filenameComponent(date: date, counter: counter) }
-    }
-
-    /// Convenience for building the final filename string (without extension).
-    func makeFilename(date: Date = Date(), counter: Int = 1) -> String {
-        let components = makeFilenameComponents(date: date, counter: counter)
-        guard !components.isEmpty else { return "Screenshot" }
-        return components.joined(separator: "_")
-    }
-}
-
-private extension FilenameTemplate.Block {
-    func filenameComponent(date: Date, counter: Int) -> String? {
-        switch kind {
-        case .staticText:
-            guard let text, !text.isEmpty else { return nil }
-            return text
-        case .date:
-            return FilenameDateFormatterCache.string(from: date, format: dateFormat(fallback: "yyyy-MM-dd"))
-        case .time:
-            return FilenameDateFormatterCache.string(from: date, format: dateFormat(fallback: "HH.mm.ss"))
-        case .counter:
-            return String(counter)
-        }
-    }
-
-    private func dateFormat(fallback: String) -> String {
-        guard let format, !format.isEmpty else { return fallback }
-        return format
-    }
-}
-
-private enum FilenameDateFormatterCache {
-    private static let cache = ThreadSafeDateFormatterCache()
-
-    static func string(from date: Date, format: String) -> String {
-        cache.string(from: date, format: format)
-    }
-}
-
-private final class ThreadSafeDateFormatterCache {
-    private var formatters: [String: DateFormatter] = [:]
-    private let lock = NSLock()
-    private let locale = Locale(identifier: "en_US_POSIX")
-
-    func string(from date: Date, format: String) -> String {
-        lock.lock()
-        defer { lock.unlock() }
-
-        let formatter: DateFormatter
-        if let existing = formatters[format] {
-            formatter = existing
-        } else {
-            let created = DateFormatter()
-            created.locale = locale
-            created.dateFormat = format
-            formatters[format] = created
-            formatter = created
-        }
-        return formatter.string(from: date)
+    static func make(date: Date, counter: Int) -> String {
+        "Screenshot_\(formatter.string(from: date))_\(counter)"
     }
 }

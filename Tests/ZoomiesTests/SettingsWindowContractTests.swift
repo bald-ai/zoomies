@@ -61,33 +61,6 @@ final class SettingsWindowContractTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(f.controller.window).isVisible)
     }
 
-    func testNotePrefixToggleAndUnicodeLimitPersistWithoutTruncatingCharacters() throws {
-        let f = try Fixture()
-        let buttons = controls(NSButton.self, in: f.controller.window?.contentView)
-        let checkbox = try XCTUnwrap(buttons.first { $0.title == "Note prefix for screenshots" })
-        let field = try XCTUnwrap(controls(NSTextField.self, in: f.controller.window?.contentView).first {
-            $0.action == NSSelectorFromString("notePrefixFieldEdited:")
-        })
-        checkbox.state = .off
-        try invoke(checkbox)
-        XCTAssertFalse(field.isEnabled)
-        XCTAssertFalse(f.reload().notePrefixEnabled)
-        checkbox.state = .on
-        try invoke(checkbox)
-        XCTAssertTrue(field.isEnabled)
-        let text = String(repeating: "👩‍💻", count: 51)
-        field.stringValue = text
-        try invoke(field)
-        XCTAssertEqual(field.stringValue, String(repeating: "👩‍💻", count: 50))
-        XCTAssertEqual(f.reload().notePrefix, field.stringValue)
-        field.stringValue = "changed while typing"
-        f.controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
-        XCTAssertEqual(f.reload().notePrefix, "changed while typing")
-        let unrelated = NSTextField(string: "unrelated")
-        f.controller.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: unrelated))
-        XCTAssertEqual(f.reload().notePrefix, "changed while typing")
-    }
-
     func testDeleteConfirmationPreferenceAndShortcutsPersistIndependently() throws {
         let f = try Fixture()
         let button = try XCTUnwrap(controls(NSButton.self, in: f.controller.window?.contentView).first {
@@ -112,24 +85,17 @@ final class SettingsWindowContractTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(f.controller.window).isVisible)
     }
 
-    func testCommandNumbersPickTabsWithoutTheMouse() throws {
+    func testEverySettingIsOnOnePageAndCommandWCloses() throws {
         let f = try Fixture()
         let window = try XCTUnwrap(f.controller.window as? SettingsWindow)
-        let tabs = try XCTUnwrap(controls(NSTabView.self, in: window.contentView).first)
-        let navigation = try XCTUnwrap(controls(NSSegmentedControl.self, in: window.contentView).first { $0.segmentCount == 4 })
-        func key(_ chars: String, _ flags: NSEvent.ModifierFlags = .command) throws -> NSEvent {
-            try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
-                windowNumber: 0, context: nil, characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: 0))
-        }
-        XCTAssertTrue(window.performKeyEquivalent(with: try key("3")))
-        XCTAssertEqual(tabs.selectedTabViewItem?.label, "Notes")
-        XCTAssertEqual(navigation.selectedSegment, 2)
-        XCTAssertEqual(navigation.toolTip(forSegment: 2), "Notes (Cmd+3)")
-        XCTAssertFalse(window.performKeyEquivalent(with: try key("5")))
-        XCTAssertEqual(tabs.selectedTabViewItem?.label, "Notes")
-        XCTAssertTrue(window.performKeyEquivalent(with: try key("4", [.command, .capsLock])))
-        XCTAssertEqual(tabs.selectedTabViewItem?.label, "Colors")
-        XCTAssertEqual(navigation.selectedSegment, 3)
+        XCTAssertTrue(controls(NSTabView.self, in: window.contentView).isEmpty)
+        XCTAssertTrue(controls(NSSegmentedControl.self, in: window.contentView).isEmpty)
+        XCTAssertNotNil(controls(EditorPaletteSettingsView.self, in: window.contentView).first)
+        XCTAssertEqual(controls(ShortcutRecorderView.self, in: window.contentView).count, 5)
+        let commandW = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+            windowNumber: 0, context: nil, characters: "w", charactersIgnoringModifiers: "w", isARepeat: false, keyCode: 13))
+        XCTAssertTrue(window.performKeyEquivalent(with: commandW))
         XCTAssertFalse(window.isVisible)
     }
+
 }
